@@ -1,0 +1,76 @@
+CyberPatriot Automation Tool
+Copyright 2026 Maxwell McCormick
+
+This product includes software developed by Maxwell McCormick.
+
+================================================================================
+                              ATTRIBUTION NOTICE
+================================================================================
+
+This project was created and is maintained by Maxwell McCormick.
+Original repository: https://github.com/maxwellmccormick/CyberPatriotAutomation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+================================================================================
+                              TRADEMARK NOTICE
+================================================================================
+
+"CyberPatriot Automation Tool" is an unregistered trademark of Maxwell McCormick.
+
+Use of the name "CyberPatriot Automation Tool" or associated branding in
+derivative works, forks, or redistributions is NOT permitted without explicit
+written permission from Maxwell McCormick.
+
+You may fork, modify, and redistribute this software under the terms of the
+Apache License 2.0, but you MUST:
+
+  1. Rename any derivative work or fork
+  2. Remove or replace any branding associated with "CyberPatriot Automation Tool"
+  3. Clearly indicate that your version is a modified version
+  4. Retain this NOTICE file and all copyright attributions
+
+This trademark restriction is permitted under Section 6 of the Apache License 2.0,
+which explicitly states that the License does not grant permission to use the
+trade names, trademarks, service marks, or product names of the Licensor.
+
+================================================================================
+                           THIRD-PARTY COMPONENTS
+================================================================================
+
+This project uses the following third-party libraries:
+
+- Spectre.Console (MIT License)
+  Copyright (c) 2020 Patrik Svensson, Phil Scott, Nils Andresen
+  https://github.com/spectreconsole/spectre.console
+
+- xUnit (Apache License 2.0)
+  Copyright (c) .NET Foundation and Contributors
+  https://github.com/xunit/xunit
+
+- FluentAssertions (Apache License 2.0)
+  Copyright (c) Dennis Doomen
+  https://github.com/fluentassertions/fluentassertions
+
+================================================================================
+                              CONTACT INFORMATION
+================================================================================
+
+For questions regarding licensing, trademark usage, or permissions:
+  - Open an issue on GitHub
+  - Contact: Maxwell McCormick (repository owner)
+
+For attribution violation reports:
+  - Document the violation with evidence
+  - Open an issue titled "Attribution Violation Report"
+  - Include links to the infringing content

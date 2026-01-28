@@ -1,0 +1,141 @@
+;/*++
+;
+;*******************************************
+; amdsfhkmdf.inf
+; AMD SFH UMDF Driver
+; (C) Copyright 2025  AMD, Inc.
+;*******************************************
+;
+;Module Name:
+;    amdsfhumdf.INF
+;
+;Abstract:
+;    INF file for installing the Sensors 2.0 Custom Sensor Driver
+;
+;Installation Notes: 
+;    Using Devcon: Type "devcon install amdsfhumdf.inf Sensors\amdsfhumdf" to install
+;
+;--*/
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Sensor
+ClassGuid   = {5175D334-C371-4806-B3BA-71FD53C9258D}
+Provider    = %ProviderName%
+CatalogFile = amdsfhumdf.cat
+DriverVer = 09/23/2025,1.1.0.31
+PnpLockDown=1
+
+[DestinationDirs]
+;12 == Windows\System32\Drivers\UMDF
+;amdsfhumdfCopy = 12,UMDF
+;13 == Driver Store Directory
+amdsfhumdfCopy = 13
+
+[SourceDisksNames]
+1 = %MediaDescription%,,,""
+
+[SourceDisksFiles]
+amdsfhumdf.dll   = 1,,
+
+[Manufacturer]
+%ManufacturerName% = amdsfhumdf_Device, NTamd64.10.0...17763, NTamd64.10.0...22000
+
+;*******************************
+; Custom Sensor Install Section
+;*******************************
+
+[amdsfhumdf_Device.NTamd64.10.0...17763]
+; DisplayName       Section          DeviceId
+; -----------       -------          --------
+%amdsfhumdf_DevDesc% = amdsfhumdf_Inst_Win10, ACPI\AMDI0080,,1
+
+[amdsfhumdf_Device.NTamd64.10.0...22000]
+; DisplayName       Section          DeviceId
+; -----------       -------          --------
+%amdsfhumdf_DevDesc% = amdsfhumdf_Inst_Win11, ACPI\AMDI0080,,1
+
+[amdsfhumdf_Inst_Win10.NT]
+CopyFiles = amdsfhumdfCopy
+
+[amdsfhumdf_Inst_Win11.NT]
+CopyFiles = amdsfhumdfCopy
+Include=WUDFRD.inf
+Needs=WUDFRD.NT
+; also include any existing DDInstall directives
+
+[amdsfhumdfCopy]
+amdsfhumdf.dll
+
+[amdsfhumdf_Inst_Win11.NT.HW]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.HW
+; also include any existing DDInstall.HW directives
+
+;-------------- Service installation
+
+[amdsfhumdf_Inst_Win10.NT.Services]
+AddService = WUDFRd,0x000001fa,WUDFRD_ServiceInstall
+
+[amdsfhumdf_Inst_Win11.NT.Services]
+Include=WUDFRD.inf
+Needs=WUDFRD.NT.Services
+; also include any existing any DDInstall.Services directives
+
+[amdsfhumdf_Inst_Win10.NT.CoInstallers]
+AddReg = CoInstallers_AddReg
+
+[amdsfhumdf_Inst_Win11.NT.CoInstallers]
+AddReg = CoInstallers_AddReg
+
+[WUDFRD_ServiceInstall]
+DisplayName   = %WudfRdDisplayName%
+ServiceType   = %SERVICE_KERNEL_DRIVER%
+StartType     = %SERVICE_DEMAND_START%
+ErrorControl  = %SERVICE_ERROR_NORMAL%
+ServiceBinary = %12%\WUDFRd.sys
+
+;-------------- WDF specific section
+
+[amdsfhumdf_Inst_Win10.NT.Wdf]
+UmdfService                = amdsfhumdf, amdsfhumdf_Install
+UmdfServiceOrder           = amdsfhumdf
+UmdfDirectHardwareAccess   = AllowDirectHardwareAccess
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy     = CannotUseFsContexts
+; if device can do either direct i/o or buffered transfer mode,
+; umdf defaults to direct i/o if devices is not pooled.
+UmdfHostProcessSharing	   = ProcessSharingDisabled
+
+[amdsfhumdf_Inst_Win11.NT.Wdf]
+UmdfService                = amdsfhumdf, amdsfhumdf_Install
+UmdfServiceOrder           = amdsfhumdf
+UmdfDirectHardwareAccess   = AllowDirectHardwareAccess
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfFsContextUsePolicy     = CannotUseFsContexts
+; if device can do either direct i/o or buffered transfer mode,
+; umdf defaults to direct i/o if devices is not pooled.
+UmdfHostProcessSharing	   = ProcessSharingDisabled
+
+[amdsfhumdf_Install]
+UmdfLibraryVersion       = 2.15.0
+ServiceBinary            = %13%\amdsfhumdf.dll
+UmdfExtensions           = SensorsCx0102
+
+[CoInstallers_AddReg]
+HKR,,CoInstallers32,0x00010000,"WudfCoinstaller.dll"
+
+[Strings]
+;Localizable Strings
+MediaDescription         = "AMD UMDF Sensor"
+ProviderName             = "Advanced Micro Devices, Inc."
+ManufacturerName         = "Advanced Micro Devices, Inc."
+amdsfhumdf_DevDesc       = "AMD UMDF Sensor"
+WudfRdDisplayName        = "Windows Driver Foundation - User-mode Driver Framework Reflector"
+
+;Non-Localizable Strings
+SERVICE_KERNEL_DRIVER    = 1
+SERVICE_DEMAND_START     = 3
+SERVICE_ERROR_NORMAL     = 1

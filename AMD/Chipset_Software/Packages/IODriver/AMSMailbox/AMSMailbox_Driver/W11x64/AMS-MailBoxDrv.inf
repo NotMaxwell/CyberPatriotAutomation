@@ -1,0 +1,64 @@
+;/*++
+; ==================================================================
+;
+; AMS-MailBoxDrv.inf: Installation file for the AMS-MailBoxDrv.
+;
+; ========== Copyright ©2025 AMD. All rights reserved. ============
+;--*/
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%ManufacturerName%
+CatalogFile=AMS-MailBoxDrv.cat
+DriverVer = 08/28/2025,5.0.0.1075
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+AMS-MailBoxDrv_Device_CoInstaller_CopyFiles = 11
+
+; ================= Class section =====================
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+AMS-MailBoxDrv.sys  = 1,,
+
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64
+
+[Standard.NTamd64]
+%AMS-MailBoxDrv.DeviceDesc%=AMS-MailBoxDrv_Device, ACPI\AMDI0090 ; TODO: edit hw-id
+
+[AMS-MailBoxDrv_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+AMS-MailBoxDrv.sys
+
+;-------------- Service installation
+[AMS-MailBoxDrv_Device.NT.Services]
+AddService = AMS-MailBoxDrv,%SPSVCINST_ASSOCSERVICE%, AMS-MailBoxDrv_Service_Inst
+
+; -------------- AMS-MailBoxDrv driver install sections
+[AMS-MailBoxDrv_Service_Inst]
+DisplayName    = %AMS-MailBoxDrv.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\AMS-MailBoxDrv.sys
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+ManufacturerName="Advanced Micro Devices, Inc" ;TODO: Replace with your manufacturer name
+ClassName="Samples" ; TODO: edit ClassName
+DiskName = "AMS-MailBoxDrv Installation Disk"
+AMS-MailBoxDrv.DeviceDesc = "AMS-MailBoxDrv"
+AMS-MailBoxDrv.SVCDESC = "AMS MailBox Driver"

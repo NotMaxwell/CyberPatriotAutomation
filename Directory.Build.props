@@ -1,0 +1,28 @@
+﻿<Project>
+  <PropertyGroup>
+    <!-- Common properties for all projects -->
+    <LangVersion>13.0</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+
+    <!-- Author Information -->
+    <Authors>Maxwell McCormick</Authors>
+    <Company>Maxwell McCormick</Company>
+    <Copyright>Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.</Copyright>
+
+    <!-- Code Analysis & Formatting -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>10.0</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <!-- Run tests after build (only for Release builds) -->
+  <Target Name="RunTestsAfterBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' AND '$(IsTestProject)' != 'true'">
+    <Message Text="" Importance="High" />
+    <Message Text="======================================" Importance="High" />
+    <Message Text="  Running Unit Tests...               " Importance="High" />
+    <Message Text="======================================" Importance="High" />
+    <Exec Command="dotnet test &quot;$(MSBuildThisFileDirectory)tests\CyberPatriotAutomation.Tests.csproj&quot; --no-build --configuration $(Configuration) -v n"
+          ContinueOnError="true"
+          IgnoreExitCode="false" />
+  </Target>
+</Project>

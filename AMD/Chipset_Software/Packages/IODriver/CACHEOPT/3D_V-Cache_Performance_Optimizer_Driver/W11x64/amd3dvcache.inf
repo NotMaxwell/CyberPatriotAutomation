@@ -1,0 +1,113 @@
+;/*++
+;
+;(C) Copyright 2025 Advanced Micro Devices, Inc.
+;
+;Module Name:
+;    amd3dvcache.inf
+;
+;Abstract:
+;    INF file for installing the AMD 3D V-Cache Performance Optimizer
+;
+;--*/
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = System
+ClassGuid   = {4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = amd3dvcache.cat
+DriverVer = 09/26/2025,1.0.0.12
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+amd3dvcache.sys  = 1,,
+amd3dvcacheSvc.exe  = 1,,
+amd3dvcacheUser.exe  = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard, NTamd64.10.0...18362 ; Windows 10 version 1903
+
+[Standard.NTamd64.10.0...18362]
+%amd3dvcache.DeviceDesc% = Amd3dvcache_Device, ACPI\AMDI0101
+
+[Amd3dvcache_Device.NT]
+CopyFiles = File_Copy
+
+[File_Copy]
+amd3dvcacheUser.exe
+amd3dvcacheSvc.exe
+amd3dvcache.sys
+
+;-------------- Service installation
+[Amd3dvcache_Device.NT.Services]
+AddService = amd3dvcache, %SPSVCINST_ASSOCSERVICE%, Amd3dvcache_Service_Inst
+AddService = amd3dvcacheSvc, %SPSVCSINST_STARTSERVICE%, Amd3dvcacheSvc_Service_Inst
+
+; -------------- amd3dvcache driver install sections
+[Amd3dvcache_Service_Inst]
+DisplayName    = %amd3dvcache.DisplayName%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\amd3dvcache.sys
+
+; -------------- amd3dvcacheSvc driver install sections
+[Amd3dvcacheSvc_Service_Inst]
+DisplayName    = %amd3dvcacheSvc.DisplayName%
+Description    = %amd3dvcacheSvc.Description%
+ServiceType    = 0x10            ; SERVICE_WIN32_OWN_PROCESS
+StartType      = 2               ; SERVICE_AUTO_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\amd3dvcacheSvc.exe
+Dependencies   = amd3dvcache
+AddReg         = amd3dvcacheSvc_Service_Inst_AddReg
+
+[amd3dvcacheSvc_Service_Inst_AddReg]
+HKR,"Parameters\Preferences",DefaultType,%REG_DWORD%,0
+HKR,"Parameters\Preferences\EffectivePowerMode\GameMode",Mode,%REG_DWORD%,5
+HKR,"Parameters\Preferences\EffectivePowerMode\GameMode",Type,%REG_DWORD%,1
+HKR,"Parameters\Preferences\EffectivePowerMode\MixedReality",Mode,%REG_DWORD%,6
+HKR,"Parameters\Preferences\EffectivePowerMode\MixedReality",Type,%REG_DWORD%,1
+HKR,"Parameters\Preferences\App\League of Legends",EndsWith,%REG_SZ%,League of Legends.exe
+HKR,"Parameters\Preferences\App\League of Legends",Type,%REG_DWORD%,0
+
+;
+;--- amd3dvcache_Device Coinstaller installation ------
+;
+
+[amd3dvcache_Device.NT.Wdf]
+KmdfService =  amd3dvcache, amd3dvcache_wdfsect
+
+[amd3dvcache_wdfsect]
+KmdfLibraryVersion = 1.15
+
+[Strings]
+;
+; Non-Localizable Strings
+;
+REG_SZ         = 0x00000000
+REG_MULTI_SZ   = 0x00010000
+REG_EXPAND_SZ  = 0x00020000
+REG_BINARY     = 0x00000001
+REG_DWORD      = 0x00010001
+SPSVCINST_ASSOCSERVICE= 0x00000002
+SPSVCSINST_STARTSERVICE=0x00000800
+;
+; Localizable Strings
+;
+ManufacturerName="Advanced Micro Devices, Inc."
+DiskName = "AMD 3D V-Cache Performance Optimizer Installation Disk"
+amd3dvcache.DeviceDesc = "AMD 3D V-Cache Performance Optimizer"
+amd3dvcache.DisplayName = "AMD 3D V-Cache Performance Optimizer Kernel Driver"
+amd3dvcacheSvc.DisplayName = "AMD 3D V-Cache Performance Optimizer Service"
+amd3dvcacheSvc.Description = "Optimizes OS thread scheduling processor selection based on the window in focus for select AMD 3D V-Cache processors."

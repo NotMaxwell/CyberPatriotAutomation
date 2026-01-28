@@ -1,0 +1,395 @@
+{
+	"CIMBinaries": {
+		"Generic": {
+			"PreOperations": {
+				"Services": [],
+				"Process": [
+					"cncmd.exe",
+					"AMDLink.exe",
+					"RadeonSettings.exe",
+					"Radeonsoftware.exe",
+					"amdow.exe",
+					"AMDRSServ.exe",
+					"AUEPUF.exe",
+					"AUEPLauncher.exe",
+					"AUEPMaster.exe",
+					"BugForm.exe",
+					"AMDBugReportForm.exe",
+					"MOM.InstallProxy.exe",
+					"cnext.exe",
+					"amdprw.exe",
+					"ccc.exe",
+					"mom.exe",
+					"CLI.exe"
+				],
+				"Commands": [
+					{
+						"process": "%InstallDir%\\CNext\\CNext\\cncmd.exe",
+						"commandLine": "exit",
+						"timeout": "30"
+					}
+				]
+			},
+			"PostOperations": {
+				"Files": [
+					"%windir%\\syswow64\\AMDBugReportTool.exe"
+				],
+				"RegistryKeys": [
+					"HKEY_CURRENT_USER\\SOFTWARE\\AUEP",
+					"HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\amdfendr\\State\\AUEP",
+					"HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\amdfendr\\State\\DU"
+				],
+				"RegistryValues": [
+					"HKEY_LOCAL_MACHINE\\Software\\AMD\\Install\\AUEPStatus",
+					"HKEY_LOCAL_MACHINE\\Software\\AMD\\Install\\AUEP",
+					"HKEY_LOCAL_MACHINE\\Software\\AUEP\\RSX_AUEPStatus",
+					"HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\amdfendr\\State\\AUEP\\RSX_AUEPStatus"
+				],
+				"Shortcuts": [
+					"AMDBugReportTool\\AMD Bug Report Tool.lnk",
+					"AMD Bug Report Tool\\AMD Bug Report Tool.lnk",
+					"AMD Link For Windows\\AMD Link For Windows.lnk"
+				],
+				"ScheduledTasks": [
+					"AMDLinkUpdate",
+					"ModifyLinkUpdate",
+					"StartCNBM",
+					"StartCN",
+					"StartDVR",
+					"AMDInstallLauncher",
+					"EnableWindowsDriverSearch",
+					"AMDScoSupportTypeUpdate"
+				],
+				"Directories": [
+					"%InstallDir%\\CIM\\Bin64",
+					"%InstallDir%\\CIM\\Config",
+					"%InstallDir%\\CNext\\CNext",
+					"%InstallDir%\\CNext\\CNBranding",
+					"Program Files\\AMD\\CIM\\Log",
+					"Program Files\\AMD\\CIM\\Reports",
+					"Program Files\\AMD\\CIM",
+					"Program Files\\AMD",
+					"Program Files (x86)\\AMD\\CNext\\CCCSlim",
+					"Program Files (x86)\\AMD\\CNext",
+					"Program Files (x86)\\AMD",
+					"%InstallDir%\\CIM",
+					"%InstallDir%\\CNext",
+					"%InstallDir%",
+					"%localappdata%\\AMD",
+					"%appdata%\\AMD",
+					"%localappdata%\\..\\LocalLow\\AMD"
+				],
+				"DirectoriesForce": [
+					"%localappdata%\\AMD\\VkCache",
+					"%appdata%\\AMD\\VkCache",
+					"%localappdata%\\..\\LocalLow\\AMD\\VkCache",
+					"%localappdata%\\AMD\\GLCache",
+					"%appdata%\\AMD\\GLCache",
+					"%localappdata%\\..\\LocalLow\\AMD\\GLCache",
+					"%localappdata%\\AMD\\DxCache",
+					"%appdata%\\AMD\\DxCache",
+					"%localappdata%\\..\\LocalLow\\AMD\\DxCache",
+					"%localappdata%\\AMD\\DXcCache",
+					"%appdata%\\AMD\\DXcCache",
+					"%localappdata%\\..\\LocalLow\\AMD\\DXcCache",
+					"%localappdata%\\AMD\\DX9Cache",
+					"%appdata%\\AMD\\DX9Cache",
+					"%localappdata%\\..\\LocalLow\\AMD\\DX9Cache",
+					"%localappdata%\\AMD\\cl.cache",
+					"%appdata%\\AMD\\cl.cache",
+					"%localappdata%\\..\\LocalLow\\AMD\\cl.cache",
+					"%localappdata%\\AMD\\oglcache",
+					"%appdata%\\AMD\\oglcache",
+					"%localappdata%\\..\\LocalLow\\AMD\\oglcache",
+					"%InstallDir%\\amdkmpfd",
+					"%InstallDir%\\a",
+					"%InstallDir%\\amdkmpfd_in",
+					"Program Files\\AMD\\amdkmpfd",
+					"Program Files\\AMD\\amdkmpfd_in",
+					"%localappdata%\\AMD\\OglpCache"
+				],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			}
+		},
+		"CIMInstall": {
+			"PreOperations": {
+				"Services": [],
+				"Process": [],
+				"RegistryValues": [
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\AIX Installer\\Install\\InstallDir"
+				],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			},
+			"PostOperations": {
+				"Files": [
+					"%InstallDir%\\CIM\\Bin64\\7z.dll",
+					"%InstallDir%\\CIM\\Bin64\\7z.exe",
+					"%InstallDir%\\CIM\\Bin64\\ADDL_COMMON.dll",
+					"%InstallDir%\\CIM\\Bin64\\AMDBugReportTool.exe",
+					"%InstallDir%\\CIM\\Bin64\\AMDCleanupUtility.exe",
+					"%InstallDir%\\CIM\\Bin64\\amdicdxx.dat",
+					"%InstallDir%\\CIM\\Bin64\\AMDInstallUEP.exe",
+					"%InstallDir%\\CIM\\Bin64\\AMDSoftwareInstaller.exe",
+					"%InstallDir%\\CIM\\Bin64\\AMDSoftwareCloud.ico",
+					"%InstallDir%\\CIM\\Bin64\\AMDSoftwarePro.ico",
+					"%InstallDir%\\CIM\\Bin64\\AMDSoftwareConsumer.ico",
+					"%InstallDir%\\CIM\\Bin64\\AMDSplashScreen.exe",
+					"%InstallDir%\\CIM\\Bin64\\AMDSoftwareCompatibilityTool.exe",
+					"%InstallDir%\\CIM\\Bin64\\ATISetup.exe",
+					"%InstallDir%\\CIM\\Bin64\\aws-cpp-sdk-core.dll",
+					"%InstallDir%\\CIM\\Bin64\\aws-cpp-sdk-s3.dll",
+					"%InstallDir%\\CIM\\Bin64\\cccmanifest_64.json",
+					"%InstallDir%\\CIM\\Bin64\\CombinedInstaller.ico",
+					"%InstallDir%\\CIM\\Bin64\\InstallManagerApp.exe",
+					"%InstallDir%\\CIM\\Bin64\\localization\\cs\\INext_cs.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\da_DK\\INext_da_DK.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\de\\INext_de.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\el_GR\\INext_el_GR.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\es_ES\\INext_es_ES.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\fi_FI\\INext_fi_FI.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\fr_FR\\INext_fr_FR.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\hu_HU\\INext_hu_HU.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\it_IT\\INext_it_IT.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ja\\INext_ja.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ko_KR\\INext_ko_KR.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\nl_NL\\INext_nl_NL.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\no\\INext_no.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\pl\\INext_pl.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\pt_BR\\INext_pt_BR.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ru_RU\\INext_ru_RU.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\sv_SE\\INext_sv_SE.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\th\\INext_th.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\tr_TR\\INext_tr_TR.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\uk_UA\\INext_uk_UA.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\zh_CN\\INext_zh_CN.qm",
+					"%InstallDir%\\CIM\\Bin64\\localization\\zh_TW\\INext_zh_TW.qm",
+					"%InstallDir%\\CIM\\Bin64\\opengl32sw.dll",
+					"%InstallDir%\\CIM\\Bin64\\qsetup.txt",
+					"%InstallDir%\\CIM\\Bin64\\RadeonInstaller.exe",
+					"%InstallDir%\\CIM\\Bin64\\RadeonSoftwarePro.ico",
+					"%InstallDir%\\CIM\\Bin64\\amd_icon_pro.ico",
+					"%InstallDir%\\CIM\\Bin64\\resources.rcc",
+					"%InstallDir%\\CIM\\Bin64\\resources_pro.rcc",
+					"%InstallDir%\\CIM\\Bin64\\Setup.exe",
+					"%InstallDir%\\CIM\\Bin64\\xerces-c_2_6.dll",
+					"%InstallDir%\\CIM\\Config\\AMDAUEPInstaller.xml",
+					"%InstallDir%\\CIM\\Config\\AMDCOMPUTE.xml",
+					"%InstallDir%\\CIM\\Config\\AMDLinkDriverUpdate.xml",
+					"%InstallDir%\\CIM\\Config\\AMDRELAUNCHER.xml",
+					"%InstallDir%\\CIM\\Config\\AMDRELAUNCHER2.xml",
+					"%InstallDir%\\CIM\\Config\\AMDScoSupportTypeUpdate.xml",
+					"%InstallDir%\\CIM\\Config\\AMDUpdater.xml",
+					"%InstallDir%\\CIM\\Config\\AMDUWPLauncher.xml",
+					"%InstallDir%\\CIM\\Config\\BuildHighlights.xml",
+					"%InstallDir%\\CIM\\Config\\cccmanifest_64.json",
+					"%InstallDir%\\CIM\\Config\\CNVersions.json",
+					"%InstallDir%\\CIM\\Config\\CIMTracker.json",
+					"%InstallDir%\\CIM\\Config\\EnableWindowsDriverSearch.xml",
+					"%InstallDir%\\CIM\\Config\\InstallLegacy.json",
+					"%InstallDir%\\CIM\\Config\\InstallManifest.json",
+					"%InstallDir%\\CIM\\Config\\InstallUEP.xml",
+					"%InstallDir%\\CIM\\Config\\ModifyLinkUpdate.xml",
+					"%InstallDir%\\CIM\\Config\\MonetCHS.xml",
+					"%InstallDir%\\CIM\\Config\\MonetCHT.xml",
+					"%InstallDir%\\CIM\\Config\\MonetCSY.xml",
+					"%InstallDir%\\CIM\\Config\\MonetDAN.xml",
+					"%InstallDir%\\CIM\\Config\\MonetDEU.xml",
+					"%InstallDir%\\CIM\\Config\\MonetENU.xml",
+					"%InstallDir%\\CIM\\Config\\MonetESP.xml",
+					"%InstallDir%\\CIM\\Config\\MonetFIN.xml",
+					"%InstallDir%\\CIM\\Config\\MonetFRA.xml",
+					"%InstallDir%\\CIM\\Config\\MonetGRK.xml",
+					"%InstallDir%\\CIM\\Config\\MonetHNG.xml",
+					"%InstallDir%\\CIM\\Config\\MonetITA.xml",
+					"%InstallDir%\\CIM\\Config\\MonetJPN.xml",
+					"%InstallDir%\\CIM\\Config\\MonetKOR.xml",
+					"%InstallDir%\\CIM\\Config\\MonetNLD.xml",
+					"%InstallDir%\\CIM\\Config\\MonetNOR.xml",
+					"%InstallDir%\\CIM\\Config\\MonetPLK.xml",
+					"%InstallDir%\\CIM\\Config\\MonetPTB.xml",
+					"%InstallDir%\\CIM\\Config\\MonetRSA.xml",
+					"%InstallDir%\\CIM\\Config\\MonetSVE.xml",
+					"%InstallDir%\\CIM\\Config\\MonetTHA.xml",
+					"%InstallDir%\\CIM\\Config\\MonetTRK.xml",
+					"%InstallDir%\\CIM\\Config\\workaround.xml",
+					"%InstallDir%\\CNext\\CNext\\AUEP64.msi"
+				],
+				"RegistryKeys": [
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\ATI Technologies\\Co-installer",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WUCCCApp"
+				],
+				"RegistryValues": [],
+				"Shortcuts": [],
+				"ScheduledTasks": [],
+				"Directories": [
+					"%InstallDir%\\CIM\\Bin64\\localization",
+					"%InstallDir%\\CIM\\Bin64\\localization\\cs",
+					"%InstallDir%\\CIM\\Bin64\\localization\\da_DK",
+					"%InstallDir%\\CIM\\Bin64\\localization\\de",
+					"%InstallDir%\\CIM\\Bin64\\localization\\el_GR",
+					"%InstallDir%\\CIM\\Bin64\\localization\\es_ES",
+					"%InstallDir%\\CIM\\Bin64\\localization\\fi_FI",
+					"%InstallDir%\\CIM\\Bin64\\localization\\fr_FR",
+					"%InstallDir%\\CIM\\Bin64\\localization\\hu_HU",
+					"%InstallDir%\\CIM\\Bin64\\localization\\it_IT",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ja",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ko_KR",
+					"%InstallDir%\\CIM\\Bin64\\localization\\nl_NL",
+					"%InstallDir%\\CIM\\Bin64\\localization\\no",
+					"%InstallDir%\\CIM\\Bin64\\localization\\pl",
+					"%InstallDir%\\CIM\\Bin64\\localization\\pt_BR",
+					"%InstallDir%\\CIM\\Bin64\\localization\\ru_RU",
+					"%InstallDir%\\CIM\\Bin64\\localization\\sv_SE",
+					"%InstallDir%\\CIM\\Bin64\\localization\\th",
+					"%InstallDir%\\CIM\\Bin64\\localization\\tr_TR",
+					"%InstallDir%\\CIM\\Bin64\\localization\\uk_UA",
+					"%InstallDir%\\CIM\\Bin64\\localization\\zh_CN",
+					"%InstallDir%\\CIM\\Bin64\\localization\\zh_TW",
+					"%InstallDir%\\CIM\\Bin64",
+					"%InstallDir%\\CIM\\Config"
+				],
+				"DirectoriesForce": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			}
+		},
+		"CIMUninstall": {
+			"PreOperations": {
+				"Services": [],
+				"Process": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			},
+			"PostOperations": {
+				"Files": [
+					"%InstallDir%\\atdcm64a.sys",
+					"%InstallDir%\\Add_Rem.txt",
+					"%InstallDir%\\atikmdag_dce.log",
+					"%InstallDir%\\license.rtf",
+					"%windir%\\syswow64\\AMDBugReportTool.exe",
+					"Program Files\\AMD\\atikmdag_dce.log"
+				],
+				"RegistryKeys": [
+					"HKEY_CURRENT_USER\\SOFTWARE\\ATI Technologies\\LinkDriverUpgrade",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\ATI Technologies",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\AIX Installer",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\AMD\\CN",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\AMD\\EEU",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\AMD\\Install",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\ATI",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\ATI Technologies",
+					"HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\AMD Catalyst Install Manager",
+					"HKEY_CLASSES_ROOT\\CLSID\\{5E2121EE-0300-11D4-8D3B-444553540000}",
+					"HKEY_CLASSES_ROOT\\Directory\\Background\\shellex\\ContextMenuHandlers\\ACE"
+				],
+				"RegistryValues": [
+					"HKEY_CLASSES_ROOT\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Shell Extensions\\Approved\\{5E2121EE-0300-11D4-8D3B-444553540000}",
+					"HKEY_CURRENT_USER\\Software\\AMD\\AIM\\LaunchBugTool"
+				],
+				"Shortcuts": [],
+				"ScheduledTasks": [
+					"AMDInstallUEP"
+				],
+				"Directories": [],
+				"DirectoriesForce": [
+					"%InstallDir%\\CIM",
+					"Program Files\\AMD\\InstallUEP",
+					"Program Files\\AMD\\CIM",
+					"Program Files (x86)\\AMD\\CNext",
+					"%InstallDir%\\CNext",
+					"%InstallDir%\\Performance Profile Client",
+					"%InstallDir%\\WVR"
+				],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			}
+		},
+		"Cleanup": {
+			"PreOperations": {
+				"Services": [],
+				"Process": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			},
+			"PostOperations": {
+				"Files": [],
+				"RegistryKeys": [
+					"HKEY_LOCAL_MACHINE\\Software\\AIX Installer"
+				],
+				"RegistryValues": [],
+				"Shortcuts": [],
+				"ScheduledTasks": [],
+				"Directories": [],
+				"DirectoriesForce": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			}
+		},
+		"FactoryReset": {
+			"PreOperations": {
+				"Services": [],
+				"Process": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			},
+			"PostOperations": {
+				"Files": [],
+				"RegistryKeys": [],
+				"RegistryValues": [],
+				"Shortcuts": [],
+				"ScheduledTasks": [],
+				"Directories": [],
+				"DirectoriesForce": [],
+				"Commands": [
+					{
+						"process": "",
+						"commandLine": "",
+						"timeout": ""
+					}
+				]
+			}
+		}
+	}
+}

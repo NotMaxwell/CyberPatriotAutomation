@@ -1,0 +1,64 @@
+;*******************************************
+; AmdIOV.inf
+; Null INF for IOMMU devices
+; Copyright © 2008-2022 AMD, Inc. All rights reserved.
+;*******************************************
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System 
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%AMD%
+DriverVer=09/15/2022, 1.2.0.52
+CatalogFile=AmdIOV.cat
+PnPLockDown=1
+
+[ControlFlags]
+ExcludeFromSelect=*
+
+[Manufacturer]
+%AMD_MFG% = InstallSection, NTX86, NTamd64
+
+[DestinationDirs]
+DefaultDestDir = 12
+ 
+[SourceDisksNames]
+
+[SourceDisksFiles]  
+
+[InstallSection.NTX86]
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1002&DEV_5A23
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1419
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1577
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1423
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1437
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1451
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1481
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_164F
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_13E1
+
+[InstallSection.NTamd64]
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1002&DEV_5A23
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1419
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1577
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1423
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1437
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1451
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_1481
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_164F
+%IOMMU.DeviceDesc%=NULL_DRIVER,PCI\VEN_1022&DEV_13E1
+
+[NULL_DRIVER]
+
+[NULL_DRIVER.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%		; null service install
+
+[Strings]
+AMD = "AMD"
+AMD_MFG = "AMD"
+IOMMU.DeviceDesc = "AMD IOMMU Device"
+
+;*******************************************
+;Handy macro substitutions (non-localizable)
+;*******************************************
+SPSVCINST_ASSOCSERVICE = 0x00000002

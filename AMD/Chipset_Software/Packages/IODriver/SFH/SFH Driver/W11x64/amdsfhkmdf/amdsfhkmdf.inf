@@ -1,0 +1,104 @@
+;/*++
+;
+;*******************************************
+; amdsfhkmdf.inf
+; AMD SFH KMDF Driver
+; (C) Copyright 2017-2025  AMD, Inc.
+;*******************************************
+;
+;Module Name:
+;    amdsfhkmdf.INF
+;
+;Abstract:
+;    INF file for installing the Driver Frameworks amdsfhkmdf Driver
+;
+;Installation Notes: 
+;    Using Devcon: Type "devcon install amdsfhkmdf.inf PCI\VEN_1022&DEV_15E4" to install
+;
+;--*/
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%ProviderString%
+DriverVer = 09/09/2025,1.0.0.341
+CatalogFile=amdsfhkmdf.cat
+PnpLockDown=1
+
+[DestinationDirs]
+DefaultDestDir = 12
+amdsfhkmdf_Device_CoInstaller_CopyFiles = 11
+
+; ================= Class section =====================
+
+[SourceDisksNames]
+1 = %DiskId1%,,,""
+
+[SourceDisksFiles]
+amdsfhkmdf.sys  = 1,,
+;
+
+
+;*****************************************
+; amdsfhkmdf  Install Section
+;*****************************************
+
+[Manufacturer]
+%StdMfg%=Standard,NTamd64
+
+[Standard.NTamd64]
+%amdsfhkmdf.DeviceDesc%=amdsfhkmdf_Device, PCI\VEN_1022&DEV_15E4
+
+[amdsfhkmdf_Device.NT]
+CopyFiles=Drivers_Dir
+
+[Drivers_Dir]
+amdsfhkmdf.sys
+
+
+;-------------- Service installation
+[amdsfhkmdf_Device.NT.Services]
+AddService = amdsfhkmdf,%SPSVCINST_ASSOCSERVICE%, amdsfhkmdf_Service_Inst
+
+; -------------- amdsfhkmdf driver install sections
+[amdsfhkmdf_Service_Inst]
+DisplayName    = %amdsfhkmdf.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 1               ; SERVICE_SYSTEM_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\amdsfhkmdf.sys
+
+;
+;--- amdsfhkmdf_Device Coinstaller installation ------
+;
+
+
+[amdsfhkmdf_Device.NT.CoInstallers]
+AddReg=amdsfhkmdf_Device_CoInstaller_AddReg
+CopyFiles=amdsfhkmdf_Device_CoInstaller_CopyFiles
+
+[amdsfhkmdf_Device_CoInstaller_AddReg]
+;
+
+
+[amdsfhkmdf_Device_CoInstaller_CopyFiles]
+;
+
+
+
+[amdsfhkmdf_Device.NT.Wdf]
+KmdfService =  amdsfhkmdf, amdsfhkmdf_wdfsect
+[amdsfhkmdf_wdfsect]
+KmdfLibraryVersion = 1.15
+
+
+[Strings]
+SPSVCINST_ASSOCSERVICE= 0x00000002
+ProviderString        = "Advanced Micro Devices, Inc."
+StdMfg                = "Advanced Micro Devices, Inc."
+DiskId1               = "AMD SFI KMDF Installation Disk"
+amdsfhkmdf.DeviceDesc = "AMD Sensor Fusion Hub"
+amdsfhkmdf.SVCDESC    = "AMD Sensor Fusion Hub"
+ClassName             = "Sample Device"
+

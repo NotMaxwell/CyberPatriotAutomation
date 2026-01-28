@@ -1,0 +1,34 @@
+﻿:services
+	echo Disabling Services
+	sc stop TapiSrv
+	sc config TapiSrv start= disabled
+	sc stop TlntSvr
+	sc config TlntSvr start= disabled
+	sc stop ftpsvc
+	sc config ftpsvc start= disabled
+	sc stop SNMP
+	sc config SNMP start= disabled
+	sc stop SessionEnv
+	sc config SessionEnv start= disabled
+	sc stop TermService
+	sc config TermService start= disabled
+	sc stop UmRdpService
+	sc config UmRdpService start= disabled
+	sc stop SharedAccess
+	sc config SharedAccess start= disabled
+	sc stop remoteRegistry 
+	sc config remoteRegistry start= disabled
+	sc stop SSDPSRV
+	sc config SSDPSRV start= disabled
+	sc stop W3SVC
+	sc config W3SVC start= disabled
+	sc stop SNMPTRAP
+	sc config SNMPTRAP start= disabled
+	sc stop remoteAccess
+	sc config remoteAccess start= disabled
+	sc stop RpcSs
+	sc config RpcSs start= disabled
+	sc stop HomeGroupProvider
+	sc config HomeGroupProvider start= disabled
+	sc stop HomeGroupListener
+	sc config HomeGroupListener start= disabled

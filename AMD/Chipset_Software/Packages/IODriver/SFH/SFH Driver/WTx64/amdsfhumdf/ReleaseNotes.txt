@@ -1,0 +1,201 @@
+====================================================================
+Copyright (c) 2017-2024 ADVANCED MICRO DEVICES, INC. All Rights Reserved.
+====================================================================
+AMD Sensor Fusion Hub
+---------------------
+AMD Sensor Fusion Hub (will be referred as SFH device) is a PCI Express Endpoint and Sensor UMDF driver.
+++++++++++++++++++++++++++
+Important notes
+++++++++++++++++++++++++++
+1) The driver (version 216) is not compatible with firmware’s prior to 1.0.23 firmware. Please UPDATE firmware/BIOS before using AMD SFH drivers 216 and above driver.
+2) New dynamic discovery functionality has been added to the AMD SFH driver version 216 and above, so this functionality is not compatible/available with the older AMD SFH driver. If the different combination of driver’s version is used (example older KMDF driver and new UMDF driver and) or Rollbacking the KMDF or UMDF drivers may cause system BSOD. So please use the same version of the UMDF and KMDF drivers or there is need for the Rollback, please uninstall the both the drivers, and install the required drivers.
+
+Revision History
+----------------
+----------------
+1.0.0.341  08/07/2024
+    Change Log -> Added below list of features
+        * Fixed the WHQL issue isValid for ALS.
+
+1.0.0.339 10/April/2024
+    Change Log -> Added below list of features
+        * Fixed the 24h2 Whql.
+
+1.0.0.338 05/Jan/2024
+    Change Log -> Added below list of features
+        * Fixed the inf verifier for SV3.
+
+1.0.0.336 03/Mar/2023
+    Change Log -> Added below list of features
+        * Added OutBag state support
+        * Send ALS Stop command only after all ALS instances are closed
+        * Fixed issue of missing distance threshold command when distance threshold and display change commands are coming from OS at same time
+
+1.0.0.335 23/Dec/2022
+    Change Log -> Added below list of features
+        * Stop Proximity Sensor before S0i3 based on customer
+        * Update Human Presence detect continuously until display turns on during display off state
+
+1.0.0.334 15/Dec/2022
+    Change Log -> Added below list of features
+        * Added file calibration support for color sensor.
+        * Enabled sensor in S0i3 based on customer
+
+1.0.0.333 25/Nov/2022
+    Change Log -> Added below list of features
+        * Book mode disabled for specific sensor.
+        * Migrated the build for SDK 22621.
+        * Dont update presence state if remains same.
+
+1.0.0.332 12/Oct/2022
+    Change Log -> Added below list of features
+        * Added support for custom ACS sensor.
+        * Report invalid data when sensor blocked.
+
+1.0.0.331 21/Sept/2022
+    Change Log -> Added below list of features
+        * Added support for new key OP_Freq.
+        * Fixed VEML issue when subcmd is 0.
+        * Timestamp based check for data update.
+        * Distance thld update for native HPD sensor WOA, WAL.
+
+1.0.0.330 29/July/2022
+    Change Log -> Added below list of features
+        * Added support for customer Application send sensor config parameters
+        * Fixed Auto Rotation WA issue
+        * Updated VL53L5 Config Lib to 3.0
+		
+1.0.0.329 14/June/2022
+    Change Log -> Added below list of features
+        * Added support for 360 bytes recorder data in driver and application.
+        * Added support to dump raw data for color sensor.
+        * Added Inbag actual for accel.
+
+1.0.0.328 08/April/2022
+    Change Log -> Added below list of features
+        * Added support to log color sensor data to a file.
+        * Added support to retrieve GPIO status, Fw version from Application.
+        * Added support of User presence state to default custom sensor.
+        * Added support to configure distance, motion and Airplane mode from application.
+
+1.0.0.327 24/Feb/2022
+    Change Log -> Added below list of features
+        * Display On/Off notification to firmware.
+        * Airplane mode.
+
+1.0.0.326 24/JAN/2022
+    Change Log -> Added below list of features
+        * Fixed MMX WHQL issues
+        * Modified KMDF-UMDF data interface for proximity sensor and related custom sensors
+        * Fixed KMDF driver BSOD issue during calibration using ALS Application
+
+1.0.0.325 04/JAN/2022
+    Change Log -> Added below list of features
+        * Re-implemented FW command queuing mechanisam
+        * Included proximity sensor FW commands under command queuing mechanisam
+        * Fixed distance threshold and motion threshold values not updating properly if both are modified at same time issue
+        * Updated default motion threshold value to 100
+
+1.0.0.324 17/DEC/2021
+    Change Log -> Added below list of features
+        * Added color sensor support.
+        * Separated stability classifier detection from Inbag detection.
+        * Added VL53L5 sensor support.
+        * Disabled proximity sensor stop to keep sensor active during s0i3.
+        * Fixed proximity sensor threshold values not updating properly in KMDF driver issue.
+        * Update threshold values immediately instead of updating during first get call.
+        * Removed default proximity sensor support for Lenovo.
+
+1.0.0.323 12/NOV/2021
+    Change Log -> Added below list of features
+        * Removed support of HPD mode change based on Display ON/OFF.
+
+1.0.0.322 29/OCT/2021
+    Change Log -> Added below list of features
+        * Added support to enable Distance Threshold for MMX sensor.
+        * Added Camera Custom Sensor for facial subtype.
+        * Support for Display rotation lock at book mode on Dell Antman.
+        * Added FW version parameter to MFG offset structure.
+        * Approach custom sensor for Recorder.
+        * Ported MFG test with offset support App to Cpp.
+        * HPD Mode change based on Display ON/OFF.
+        * Enabled wait and lock for facial sensor subtype.
+        * Added support for Device state logging from SFH UI App.
+        * Set the internal state for the HPD sensor and enable the recorder before start.
+        * New App interface IOCTL updated to support MFG test.
+
+1.0.0.321 13/SEPT/2021
+    Change Log -> Added below list of features
+        * Removed hardcoding of SensorIndex in C2P command structure.
+        * Set the recorder start/stop before reading the data.
+        * Return the proper SensorState for default custom sensor.
+        * Added ALS Get calibration support in Driver for Application.
+        * HPD MFG App Offset read driver support.
+        * Added driver support for new MFG test features.
+        * Added code in SFH App to return Error code from HPD MFG test.
+        * Fixed Novelda recorder stop command issue.
+        * Fix for Recorder sample data to application.
+
+1.0.0.320 04/AUG/2021
+    Change Log -> Added below list of features
+        * Fix HLK Issue related to Proximity and HSP for UMDF and KMDF.
+        * Custom sensor for HPD Recorder enable and disable feature.
+        * Recorder support added to SFH Application.
+        * Support to send recorder data size to Application from UMDF driver.
+        * Added HUMAN_PRESENCE_DETECTION_TYPE enumeration properties for Proximity.
+
+1.0.0.319 08/JUL/2021
+    Change Log -> Added below list of features
+        * Set and Get of Motion Threshold, Distance threshold and HPD Mode.
+        * IOCTL for "Manufacturing test" commands received from application.
+        * HPD "manufactoring test" added to SFH Application (amdSfhApp).
+        * Manufacturing test supports start, stop and setmode commands from the application
+
+1.0.0.318 09/JUN/2021
+	Change Log -> Added below list of features
+		* Support for camera based custom sensor
+		* Support to change mode setting for Human presence detection
+		* Set HOD config data for VL53L5
+
+1.0.0.317 21/MAY/2021
+	Change Log -> OEM specific autorotation feature enablement.
+
+1.0.0.316 16/APR/2021
+	Change Log -> Added support for OEM specific ALR curve settings
+	Change Log -> Bug Fix:Disabling the device pooling
+	Change Log -> Update RMB FW version and Live Counter
+	Change Log -> Bug Fix: Not reporting Book Mode on portrait +/- 90 degree
+
+1.0.0.315 09/FEB/2021
+	Change Log -> Auto Screen Rotation Issue
+	Change Log -> Rollback the timeout value
+
+1.0.0.314 15/JAN/2021
+	Change Log -> Updated the copyrights date and revision history
+	Change Log -> Check Light Level using Target Lux instead of sensor output
+	Change Log -> Increase timeout value and disable the process sharing
+	Change Log -> Dump ALS Gain in WPP trace
+	Change Log -> Update ALS Lux range from 100 to 2000 Lux
+
+1.0.0.313 11/NOV/2020
+	Change Log -> Read HOD Output from C2P Reg 5
+	Change Log -> Add support for Stability Classifier
+	Change Log -> Added ALS sensor support to amdsfhUI App
+	Change Log -> Added ALS Calibration support to amdSfhApp
+
+1.0.0.310 28/SEP/2020
+	Change Log -> Updated ALS Calibration and AmdSfhUI App.
+
+1.0.0.308 29/JUN/2020
+	Change Log -> Fix Division by Zero in Fusion Sensor TimerExpire.
+
+1.0.0.305 05/MAY/2020
+	Change Log -> Clear P2C Reg Status bit before clearing P2C Reg0.
+
+1.0.0.303 20/MAR/2020
+	Change Log -> WA for forced shutdown in Tablet Mode.
+
+1.0.0.297 23/DEC/2019
+	Change Log -> Restore DCD on D0Entry.
+
+

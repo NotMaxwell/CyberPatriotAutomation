@@ -1,0 +1,51 @@
+;*******************************************
+; amdoemprov.inf
+; For AMD Provisioning for OEM
+; Copyright © 2024 Advanced Micro Devices, Inc. All rights reserved.
+;*******************************************
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=System 
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%AMD%
+DriverVer=01/08/2024, 1.0.0.6
+CatalogFile=amdoemprov.cat
+PnpLockDown=1
+
+[ControlFlags]
+ExcludeFromSelect=*
+
+[Manufacturer]
+%AMD_MFG% = InstallSection, NTamd64.10.0...17763, NTamd64.10.0...20000
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+
+
+[InstallSection.NTamd64.10.0...17763]
+%AMDOEMPROV.DeviceDesc%=AMDPPMPF_DEV,ACPI\AMDI0053
+
+[InstallSection.NTamd64.10.0...20000]
+
+[AMDPPMPF_DEV]
+
+[AMDPPMPF_DEV.Services]
+AddService = , %SPSVCINST_ASSOCSERVICE%		; null service install
+
+[Strings]
+AMD = "Advanced Micro Devices, Inc."
+AMD_MFG = "Advanced Micro Devices, Inc."
+AMDOEMPROV.DeviceDesc = "AMD Provisioning for OEM"
+
+
+;*******************************************
+;Handy macro substitutions (non-localizable)
+;*******************************************
+SPSVCINST_ASSOCSERVICE = 0x00000002
+DiskName = "AMD Provisioning for OEM Installation Disk"

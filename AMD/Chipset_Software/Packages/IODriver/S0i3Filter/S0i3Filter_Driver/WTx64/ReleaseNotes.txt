@@ -1,0 +1,95 @@
+﻿Copyright (c)2020-2025 AMD Corporation.  All rights reserved.
+
+
+Installation Notes:
+-----------------------------------------------------------------------------------------------------
+Install via Command Prompt as outlined in the Readme file.
+
+
+Current Release:
+-----------------------------------------------------------------------------------------------------
+Version : 1.1.0.7
+Date    : 04-25-2025
+
+Major Changes to this driver package follows:
+
+1. Driver load is made as optional.
+2. Driver will only work when AiM-T and S0i3 is enabled in the system.
+2. Added resilience to NDIS callbacks
+3. Updated synchronizations.
+3. Fixed few crashes observed during validation.
+
+
+Previous Release:
+-----------------------------------------------------------------------------------------------------
+Version : 1.1.0.3
+Date    : 10-30-2024
+
+Major Changes to this driver package follows:
+
+1. Added thread scheduling to setup wake pattern.
+2. Added Support for Windows 10 & above.
+
+Revision History
+------------------------------------------------------------------------------------------------------
+Version : 1.0.0.20
+Date	: 03-27-2024
+
+Major Changes to this driver package follows:
+
+1. The pnplockdown keyword is added. 
+2. Updated the copy rights information.
+3. This driver should be loaded only on Windows 11 & above.
+
+Version : 1.0.0.19
+Date	: 10-18-2023
+
+Major Changes to this driver package follows:
+
+1. The driver has a fix for the issue which said the driver was unable to wake up the system from s0i3, in Windows 11.
+   This driver should be loaded only on Windows 11.
+   
+Version : 1.0.0.17
+Date	: 05-09-2023
+
+Major Changes to this driver package follows:
+
+1. The driver contains a fix for BSOD, which happens during S4.
+
+Version : 1.0.0.16
+Date	: 09-30-2022
+
+Major Changes to this driver package follows:
+
+1. The driver contains a fix for BSOD, which happens during S4, when AMDUSB4CM is involved.
+
+Version : 1.0.0.10
+Date	: 02-22-2022
+
+Major Changes to this driver package follows:
+
+1. The driver has support for Windows 11.
+
+Version : 1.0.0.5
+Date	: 02-12-2021 
+
+Major Changes to this driver package follows:
+
+1. The driver is functionally complete.
+
+
+Limitations:
+-----------------------------------------------------------------------------------------------------
+
+
+Supported Chipsets:
+----------------------------------------------------------------------------------------------------
+1. Cezanne
+2. Rembrandt
+
+Supported Operating Systems:
+----------------------------------------------------------------------------------------------------
+1. Windows 11 64 bit.
+2. Windows 10 64 bit.
+
+----------------------------------------------------------------------------------------------------

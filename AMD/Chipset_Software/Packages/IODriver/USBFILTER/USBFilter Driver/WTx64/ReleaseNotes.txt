@@ -1,0 +1,168 @@
+----------------------------------------------------------
+RELEASE NOTES FOR AMD USB Filter Driver for SB700/SB800/Hudson-1/RS880/Hudson-1/23/Bolton
+----------------------------------------------------------
+
+INTRODUCTION
+
+This document provides information about the current and previous updates to the driver package.
+
+Version 2.1.11.0304 10/10/2017
+Add Device Guard support
+RS3 Certified
+
+Version 2.1.10.295 05/07/2015
+Add Windows 10 support
+
+Version 2.0.10.287 02/17/2014
+Fixed bug - Non functional on some third party xHC controller 
+Fixed bug - Display Corruption on Metro Camera w/ USB Webcam on DC Mode 
+
+Version 2.0.10.273 08/28/2012
+Fixed bug - Composite webcam selective suspend WHQL failure 
+
+Version 2.0.10.271 08/19/2012
+Fixed bug - USB2.0 performance read value can reach 170Mbps
+
+Version 2.0.10.266 07/03/2012
+Fixed bug - 2.0.10.262: NB & SB Registers are not set after disable/enable of Speaker
+Fixed bug - 2.0.10.262: SB Register not set after couple of hot plugs of Speaker
+Fixed bug - WPM2328N:PLL shutdown feature&PC6 bit setting notworking after disable/enable BM
+Fixed bug - Some USB TV tuners screen lag on USB3.0
+
+version 2.0.10.259 06/28/2012
+Fixed bug - 2.0.10.255:CFOH bits are not setting during USB bulk transfer on xHC controller
+
+version 2.0.10.255 06/11/2012
+Change BOOT_START to DEMAND_START
+Change BootFlags to 0x14
+Fixed bug - System not shuting down/ rebooting gracefully if USBF installed on USB OS Drive 
+
+version 2.0.10.226 05/29/2012
+Fixed bug - 2.0.10.223:USB filter non functional behind hub on external USB controller
+Win8-869757: Windows2Go feature is impacted by USB filter 
+
+version 2.0.10.223 05/22/2012
+Fixed bug - Filter driver non functional behind External USB Hub
+Reduce stack size in ffdo function
+
+version 2.0.10.216 05/06/2012
+Fixed bug - SB & NB registers fails to set with ISOC IN/OUT on EHCI ports
+Fixed bug - Filter driver non functional on external USB controller
+Reduce stack size in irp processing
+
+version 2.0.10.199 04/15/2012
+Add support to Windows8 xHCI host controller
+Create BFDO only for host controller and AMD xHCI root hub
+
+version 2.0.9.191 03/31/2012
+Fix a compatibility issue with some USB network adapter
+
+version 2.0.8.181 03/15/2012
+Enabled 3rd party USB controller support on SB800 platform
+
+version 2.0.7.176 12/14/2011
+Added a feature to enhance performance with USB mass storage device
+
+version 2.0.6.169 11/29/2011
+Fix a webcam stutter porblem in WinXP
+Added support to partial 3rd party USB controllers
+Added Windows 8 support
+
+version 2.0.5.166 11/17/2011
+Fix a yellow bang problem after resume from hiberation on specific platform
+Fix webcam stutter problem on specific CPU family
+
+version 2.0.4.158 09/13/2011
+Fix safe remove issue with encrypted USB drive
+
+version 2.0.3.155 08/18/2011
+Fix a compatibility issue
+
+version 2.0.2.153 08/08/2011
+Fix a compatibility issue with specific USB network adapter
+
+version 2.0.1.137 07/15/2011
+Added support for new North Bridge
+
+version 2.0.00.131 04/06/2011
+Fix a BSOD issue during WLK1.6 testing
+
+version 2.0.00.129 03/14/2011
+Fix the issue USB devices connected to USB3.0 port cannot be detected by USB trace.
+
+version 2.0.00.127 02/11/2011
+USB Filter driver with architectural changes to provide the fix for Avermedia issue seen only with XHCI controller with Vista and XP OS.The SOlution applies to the all the OSs including Win7. 
+
+Version 1.0.20.122 12/15/2010
+Enabled back support for Llano + Hudson-2/3 by ensuring that USB filter never sits above Mass storage drivers.
+Enabled the filter driver fix for EHCI and OHCI also in addition to XHCI on Hudson-2/3
+
+Version 1.0.19.120 12/07/2010
+Enabled back support for Llano + Hudson-3 by moving the getting controller type information after detecting the ISOC stream. Which will ensure that we never call these functions from USB filter when sitting above mass storage devices and Card readers, basically for any NON ISOC capable devices.  
+
+Version 1.0.18.119 11/29/2010
+removed support for Llano/RS880 + Hudson-3 in order to get rid of BSOD which was appearing with card reader on AMD Platform.
+
+Version 1.0.17.115 09/30/2010
+-Update USB filter to Disable PLL shutdown feature when ISO device is streaming and only when the streaming device is on XHCI controller.
+Enabled the above fix on Ontario + SB800 Also.
+
+
+Version 1.0.16.106
+-Provided the fix for BSOD when WLK1.5 CSSIO DTM System submission run on SB800 based Platforms.
+
+Version 1.0.15.99
+-Provided the fix for BSOD when the audio is played on to USB Nokia Bluetooth headphone.
+
+Version 1.0.14.96 
+-Fixed System hang while playing isoc stream with XP on Guam/croaker with USB filter 1.0.14.95 .
+
+Version 1.0.14.95
+-Provided the fix for OHCI arbiter hanging due to long latency conditions on Alink .
+
+Version 1.0.13.89
+- Fixed the issue with some softwares not detecting USB CD/DVD R/W drive when USB filter driver is installed. 
+- Extended the USB filter driver support for SB800
+
+Version 1.0.11.82
+- Modified the driver to disable/enable ALink PLL turn off feature and Set/Reset(RS880 Only) Scratch bit during an ISOC stream is Active/Inactive on any of the connected USB devie.
+
+Version 1.0.10.78
+- Added code to Set/Reset the scratch bit in the RS880 NB Config Space, on arrival and removal of ISOCH capable USB device.
+
+Version 1.0.9.67
+- Modified the USBFilter driver act as bus upper filter on top of USBHub.sys. 
+
+Version 1.0.8.36
+- Added Support for RS880
+
+Version 1.0.7.25
+- Fixed a bug that caused the USB printer to stop working.
+- Fixed a bug related the USB 2.0 audio devices.
+
+Version 1.0.6.0005
+- Initial Revision
+
+
+(c) Copyright 2011-2017 Advanced Micro Devices, Inc.  All rights reserved.  
+
+LIMITATION OF LIABILITY:  THE MATERIALS ARE PROVIDED AS IS WITHOUT ANY EXPRESS OR
+IMPLIED WARRANTY OF ANY KIND INCLUDING WARRANTIES OF MERCHANTABILITY, 
+NONINFRINGEMENT OF THIRD-PARTY INTELLECTUAL PROPERTY, OR FITNESS FOR ANY PARTICULAR
+PURPOSE. IN NO EVENT SHALL AMD OR ITS SUPPLIERS BE LIABLE FOR ANY DAMAGES 
+WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF PROFITS, BUSINESS
+INTERRUPTION, LOSS OF INFORMATION) ARISING OUT OF THE USE OF OR INABILITY TO USE
+THE MATERIALS, EVEN IF AMD HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+BECAUSE SOME JURISDICTIONS PROHIBIT THE EXCLUSION OR LIMITATION OF LIABILITY FOR
+CONSEQUENTIAL OR INCIDENTAL DAMAGES, THE ABOVE LIMITATION MAY NOT APPLY TO YOU.
+AMD does not assume any responsibility for any errors which may appear in the 
+Materials nor any responsibility to support or update the Materials.  AMD
+retains the right to make changes to its test specifications at any time, 
+without notice.  NO SUPPORT OBLIGATION: AMD is not obligated to furnish, support, 
+or make any further information, software, technical information, know-how, or 
+show-how available to you.
+U.S. GOVERNMENT RESTRICTED RIGHTS: The Materials and documentation are provided 
+with RESTRICTED RIGHTS.  Use, duplication or disclosure by the Government is 
+subject to restrictions as set forth in FAR52.227014 and DFAR252.227-7013, et
+seq., or its successor.  Use of the Materials by the Government constitutes
+acknowledgment of AMD’s proprietary rights in them.
