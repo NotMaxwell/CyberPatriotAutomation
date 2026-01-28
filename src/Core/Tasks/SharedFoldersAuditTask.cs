@@ -5,6 +5,7 @@
 // =============================================================================
 using System.Threading.Tasks;
 using CyberPatriotAutomation.Core.Models;
+using CyberPatriotAutomation.Core.Utilities;
 using Spectre.Console;
 
 namespace CyberPatriotAutomation.Core.Tasks;

@@ -11,4 +11,8 @@ public class SystemInfo
     public List<string> UserAccounts { get; set; } = new();
     public List<string> FirewallRules { get; set; } = new();
     public Dictionary<string, string> RegistrySettings { get; set; } = new();
+
+    // Added for audit task output
+    public string? RawOutput { get; set; }
+    public string? ErrorOutput { get; set; }
 }
