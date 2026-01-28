@@ -30,8 +30,17 @@ Simply double-click `RUN.bat` and follow the menu!
 
 **Command Line:**
 ```powershell
-# Clone the repository
 git clone https://github.com/maxwellmccormick/CyberPatriotAutomation.git
+cd CyberPatriotAutomation
+
+# Build and run
+dotnet build
+cd src
+dotnet run -- --all --dry-run
+```
+
+# Clone the repository
+git clone https://github.com/NotMaxwell/CyberPatriotAutomation.git
 cd CyberPatriotAutomation
 
 # Build and run
@@ -64,8 +73,21 @@ dotnet run -- --all --dry-run
 ### Option 1: Clone and Build
 
 ```powershell
-# Clone
 git clone https://github.com/yourusername/CyberPatriotAutomation.git
+cd CyberPatriotAutomation
+
+# Restore dependencies
+dotnet restore
+
+# Build
+dotnet build --configuration Release
+
+# Run tests
+dotnet test
+```
+
+# Clone
+git clone https://github.com/NotMaxwell/CyberPatriotAutomation.git
 cd CyberPatriotAutomation
 
 # Restore dependencies
@@ -80,7 +102,7 @@ dotnet test
 
 ### Option 2: Download Release
 
-Download the latest release from the [Releases](https://github.com/yourusername/CyberPatriotAutomation/releases) page.
+Download the latest release from the [Releases](https://github.com/NotMaxwell/CyberPatriotAutomation/releases) page.
 
 ## 📖 Usage
 
