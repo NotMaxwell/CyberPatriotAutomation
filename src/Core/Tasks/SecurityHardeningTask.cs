@@ -410,6 +410,15 @@ public class SecurityHardeningTask : BaseTask
 
         try
         {
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing security hardening changes (no changes will be made)[/]"
+                );
+                result.Message = "DRY RUN: Security hardening changes previewed.";
+                return result;
+            }
+
             AnsiConsole.WriteLine();
             AnsiConsole.Write(
                 new Rule("[bold yellow]Step 1: Apply Registry Settings[/]").RuleStyle("yellow")

@@ -208,8 +208,21 @@ public class ProhibitedMediaTask : BaseTask
         {
             if (_foundFiles.Count == 0)
             {
-                AnsiConsole.MarkupLine("[green]? No prohibited files found[/]");
+                AnsiConsole.MarkupLine("[green]✓ No prohibited files found[/]");
                 result.Message = "No prohibited files found";
+                return result;
+            }
+
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing prohibited media removal (no changes will be made)[/]"
+                );
+                AnsiConsole.MarkupLine(
+                    $"[cyan]Would remove {_foundFiles.Count} prohibited files[/]"
+                );
+                AnsiConsole.MarkupLine($"[cyan]Would back up files to: {_backupFolder}[/]");
+                result.Message = $"DRY RUN: Would remove {_foundFiles.Count} prohibited files.";
                 return result;
             }
 
@@ -245,73 +258,62 @@ public class ProhibitedMediaTask : BaseTask
             );
             AnsiConsole.WriteLine();
 
-            await AnsiConsole
-                .Progress()
-                .AutoClear(false)
-                .HideCompleted(false)
-                .Columns(
-                    new ProgressColumn[]
-                    {
-                        new TaskDescriptionColumn(),
-                        new ProgressBarColumn(),
-                        new PercentageColumn(),
-                        new SpinnerColumn(),
-                    }
-                )
-                .StartAsync(async ctx =>
+            var processedCount = 0;
+            var totalCount = _foundFiles.Count;
+
+            foreach (var file in _foundFiles)
+            {
+                try
                 {
-                    var task = ctx.AddTask(
-                        "[cyan]Processing files...[/]",
-                        maxValue: _foundFiles.Count
-                    );
-
-                    foreach (var file in _foundFiles)
+                    // Determine category and backup location
+                    var category = CategorizeFile(file);
+                    var backupDir = category switch
                     {
-                        try
-                        {
-                            // Determine category and backup location
-                            var category = CategorizeFile(file);
-                            var backupDir = category switch
-                            {
-                                "Media" => mediaDir,
-                                "HackingTool" => hackingDir,
-                                "Game" => gamesDir,
-                                _ => otherDir,
-                            };
+                        "Media" => mediaDir,
+                        "HackingTool" => hackingDir,
+                        "Game" => gamesDir,
+                        _ => otherDir,
+                    };
 
-                            // Generate unique backup filename
-                            var backupFileName =
-                                $"{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}{file.Extension}";
-                            var backupPath = Path.Combine(backupDir, backupFileName);
+                    // Generate unique backup filename
+                    var backupFileName =
+                        $"{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}{file.Extension}";
+                    var backupPath = Path.Combine(backupDir, backupFileName);
 
-                            // Copy file to backup
-                            File.Copy(file.FullName, backupPath, true);
+                    // Copy file to backup
+                    File.Copy(file.FullName, backupPath, true);
 
-                            // Log the removal
-                            logEntries.Add($"[{category}] {file.FullName}");
-                            logEntries.Add($"  ? Backed up to: {backupPath}");
-                            logEntries.Add($"  ? Size: {file.Length:N0} bytes");
-                            logEntries.Add($"  ? Created: {file.CreationTime}");
-                            logEntries.Add($"  ? Modified: {file.LastWriteTime}");
-                            logEntries.Add("");
+                    // Log the removal
+                    logEntries.Add($"[{category}] {file.FullName}");
+                    logEntries.Add($"  ✓ Backed up to: {backupPath}");
+                    logEntries.Add($"  ✓ Size: {file.Length:N0} bytes");
+                    logEntries.Add($"  ✓ Created: {file.CreationTime}");
+                    logEntries.Add($"  ✓ Modified: {file.LastWriteTime}");
+                    logEntries.Add("");
 
-                            // Delete the original file
-                            File.Delete(file.FullName);
+                    // Delete the original file
+                    File.Delete(file.FullName);
 
-                            fixes.Add($"Removed {category}: {file.Name}");
-                        }
-                        catch (Exception ex)
-                        {
-                            issues.Add($"Failed to remove {file.FullName}: {ex.Message}");
-                            logEntries.Add($"[ERROR] Failed to remove: {file.FullName}");
-                            logEntries.Add($"  ? Error: {ex.Message}");
-                            logEntries.Add("");
-                        }
+                    fixes.Add($"Removed {category}: {file.Name}");
+                }
+                catch (Exception ex)
+                {
+                    issues.Add($"Failed to remove {file.FullName}: {ex.Message}");
+                    logEntries.Add($"[ERROR] Failed to remove: {file.FullName}");
+                    logEntries.Add($"  ✗ Error: {ex.Message}");
+                    logEntries.Add("");
+                }
 
-                        task.Increment(1);
-                        await Task.Delay(10); // Small delay for UI responsiveness
-                    }
-                });
+                processedCount++;
+
+                // Show progress every 100 files or at the end
+                if (processedCount % 100 == 0 || processedCount == totalCount)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[cyan]Processed {processedCount}/{totalCount} files...[/]"
+                    );
+                }
+            }
 
             // Write log file
             logEntries.Add("");

@@ -34,18 +34,33 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
 
     public override async Task<TaskResult> ExecuteAsync()
     {
+        if (DryRun)
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]DRY RUN: Previewing scheduled tasks audit (no changes will be made)[/]"
+            );
+            return new TaskResult
+            {
+                TaskName = Name,
+                Success = true,
+                Message = "DRY RUN: Scheduled tasks audit previewed.",
+            };
+        }
+
         var (success, output, error) = await CommandExecutor.ExecuteAsync(
             "schtasks",
             "/query /fo LIST /v"
         );
+        var details = new List<string>();
         if (!success)
         {
+            details.Add($"Failed to query scheduled tasks: {error}");
             AnsiConsole.MarkupLine($"[red]✗ Failed to query scheduled tasks: {error}[/]");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = false,
-                Message = error ?? "Unknown error",
+                Message = string.Join("\n", details),
             };
         }
         // Example: Flag tasks with suspicious keywords
@@ -62,21 +77,31 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
             "cmd.exe",
         };
         var lines = output.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        var allTaskNames = lines
+            .Where(l => l.StartsWith("TaskName:", StringComparison.OrdinalIgnoreCase))
+            .Select(l => l.Substring("TaskName:".Length).Trim())
+            .ToList();
+        details.Add($"Total scheduled tasks found: {allTaskNames.Count}");
         var suspiciousTasks = lines
             .Where(l =>
                 suspiciousKeywords.Any(k => l.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0)
             )
             .ToList();
+        details.Add($"Suspicious keywords checked: {string.Join(", ", suspiciousKeywords)}");
         if (suspiciousTasks.Count == 0)
         {
+            details.Add("No suspicious scheduled tasks found.");
             AnsiConsole.MarkupLine("[green]✓ No suspicious scheduled tasks found[/]");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = true,
-                Message = "No suspicious scheduled tasks found.",
+                Message = string.Join("\n", details),
             };
         }
+        details.Add($"Suspicious task lines: {suspiciousTasks.Count}");
+        var disabledTasks = new List<string>();
+        var failedToDisable = new List<string>();
         // Attempt to disable suspicious tasks (dry-run not supported)
         foreach (var taskLine in suspiciousTasks)
         {
@@ -89,18 +114,29 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
                     $"/Change /TN \"{taskName}\" /Disable"
                 );
                 if (disableSuccess)
+                {
                     AnsiConsole.MarkupLine($"[yellow]Disabled suspicious task: {taskName}[/]");
+                    disabledTasks.Add(taskName);
+                }
                 else
+                {
                     AnsiConsole.MarkupLine(
                         $"[red]✗ Failed to disable task: {taskName} ({disableError})[/]"
                     );
+                    failedToDisable.Add($"{taskName} ({disableError})");
+                }
             }
         }
+        details.Add(
+            $"Disabled tasks: {(disabledTasks.Count > 0 ? string.Join(", ", disabledTasks) : "None")}"
+        );
+        if (failedToDisable.Count > 0)
+            details.Add($"Failed to disable: {string.Join(", ", failedToDisable)}");
         return new TaskResult
         {
             TaskName = Name,
-            Success = false,
-            Message = $"Suspicious tasks found: {suspiciousTasks.Count}",
+            Success = disabledTasks.Count > 0 && failedToDisable.Count == 0,
+            Message = string.Join("\n", details),
         };
     }
 

@@ -11,6 +11,11 @@ public abstract class BaseTask
     public string Description { get; protected set; } = string.Empty;
 
     /// <summary>
+    /// When true, only preview changes without applying them
+    /// </summary>
+    public bool DryRun { get; set; } = false;
+
+    /// <summary>
     /// Read current system state for this task area
     /// </summary>
     public abstract Task<SystemInfo> ReadSystemStateAsync();

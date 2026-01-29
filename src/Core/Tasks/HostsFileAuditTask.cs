@@ -68,17 +68,33 @@ public class HostsFileAuditTask : BaseTask
             .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#"))
             .Except(AllowedEntries, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (unauthorized.Count == 0)
+
+        var details = new List<string>();
+        details.Add(
+            $"Hosts file entries found: {string.Join(", ", lines.Select(l => l.Trim()).Where(l => !string.IsNullOrWhiteSpace(l)))}"
+        );
+        details.Add($"Allowed entries: {string.Join(", ", AllowedEntries)}");
+        if (unauthorized.Count > 0)
+            details.Add($"Unauthorized entries: {string.Join(", ", unauthorized)}");
+        else
+            details.Add("No unauthorized hosts entries found.");
+
+        if (DryRun)
         {
-            AnsiConsole.MarkupLine("[green]✓ No unauthorized hosts entries found[/]");
+            AnsiConsole.MarkupLine(
+                "[yellow]DRY RUN: Previewing hosts file audit (no changes will be made)[/]"
+            );
+            if (unauthorized.Count > 0)
+                details.Add($"Would remove: {string.Join(", ", unauthorized)}");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = true,
-                Message = "No unauthorized hosts entries found.",
+                Message = string.Join("\n", details),
             };
         }
-        // Remove unauthorized entries (dry-run not supported here)
+
+        // Remove unauthorized entries
         var newLines = lines
             .Where(l =>
                 string.IsNullOrWhiteSpace(l)
@@ -89,24 +105,29 @@ public class HostsFileAuditTask : BaseTask
         try
         {
             await File.WriteAllLinesAsync(HostsFilePath, newLines);
+            if (unauthorized.Count > 0)
+                details.Add($"Removed: {string.Join(", ", unauthorized)}");
+            else
+                details.Add("No entries needed removal.");
             AnsiConsole.MarkupLine(
                 $"[green]✓ Removed unauthorized hosts entries: {string.Join(", ", unauthorized)}[/]"
             );
             return new TaskResult
             {
                 TaskName = Name,
-                Success = true,
-                Message = $"Removed: {string.Join(", ", unauthorized)}",
+                Success = unauthorized.Count == 0,
+                Message = string.Join("\n", details),
             };
         }
         catch (Exception ex)
         {
             AnsiConsole.MarkupLine($"[red]✗ Failed to update hosts file: {ex.Message}[/]");
+            details.Add($"Failed to update hosts file: {ex.Message}");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = false,
-                Message = ex.Message,
+                Message = string.Join("\n", details),
             };
         }
     }

@@ -30,7 +30,6 @@ public class ServiceManagementTask : BaseTask
             // Telnet/FTP Services (Insecure Protocols)
             { "TlntSvr", "Telnet" },
             { "ftpsvc", "FTP Publishing Service" },
-            { "FTPSVC", "Microsoft FTP Service" },
             { "Msftpsvc", "Microsoft FTP Service (Legacy)" },
             // SNMP Services
             { "SNMP", "SNMP Service" },
@@ -172,6 +171,19 @@ public class ServiceManagementTask : BaseTask
         {
             // Build service management lists based on README + defaults
             var (toDisable, toEnable, doNotTouch) = BuildServiceLists();
+
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing service changes (no changes will be made)[/]"
+                );
+                AnsiConsole.MarkupLine($"[cyan]Services to disable: {toDisable.Count}[/]");
+                AnsiConsole.MarkupLine($"[cyan]Services to enable: {toEnable.Count}[/]");
+                AnsiConsole.MarkupLine($"[cyan]Services protected: {doNotTouch.Count}[/]");
+                result.Message =
+                    $"DRY RUN: Would apply changes to {toDisable.Count + toEnable.Count} services.";
+                return result;
+            }
 
             AnsiConsole.WriteLine();
             AnsiConsole.Write(

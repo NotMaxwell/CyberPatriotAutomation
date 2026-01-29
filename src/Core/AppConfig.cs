@@ -71,7 +71,7 @@ public static class AppConfig
                         }
                     }
                 }
-                catch 
+                catch
                 {
                     // Ignore errors for wildcard paths
                 }

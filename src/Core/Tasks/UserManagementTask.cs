@@ -85,6 +85,20 @@ public class UserManagementTask : BaseTask
             return result;
         }
 
+        if (DryRun)
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]DRY RUN: Previewing user management changes (no changes will be made)[/]"
+            );
+            AnsiConsole.MarkupLine(
+                $"[cyan]Authorized admins: {_readmeData.Administrators.Count}[/]"
+            );
+            AnsiConsole.MarkupLine($"[cyan]Authorized users: {_readmeData.Users.Count}[/]");
+            AnsiConsole.MarkupLine($"[cyan]Users to create: {_readmeData.UsersToCreate.Count}[/]");
+            result.Message = "DRY RUN: User management changes previewed.";
+            return result;
+        }
+
         var fixes = new List<string>();
         var issues = new List<string>();
 

@@ -118,6 +118,15 @@ public class FirewallConfigurationTask : BaseTask
 
         try
         {
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing firewall changes (no changes will be made)[/]"
+                );
+                result.Message = "DRY RUN: Firewall configuration changes previewed.";
+                return result;
+            }
+
             AnsiConsole.WriteLine();
             AnsiConsole.Write(
                 new Rule("[bold yellow]Step 1: Enable Firewall Profiles[/]").RuleStyle("yellow")

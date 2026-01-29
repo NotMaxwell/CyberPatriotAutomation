@@ -38,17 +38,30 @@ public class SharedFoldersAuditTask : BaseTask
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .ToList();
         var unauthorized = found.Except(allowed, StringComparer.OrdinalIgnoreCase).ToList();
-        if (unauthorized.Count == 0)
+
+        var details = new List<string>();
+        details.Add($"Shares found: {string.Join(", ", found)}");
+        details.Add($"Allowed shares: {string.Join(", ", allowed)}");
+        if (unauthorized.Count > 0)
+            details.Add($"Unauthorized shares: {string.Join(", ", unauthorized)}");
+        else
+            details.Add("No unauthorized shares found.");
+
+        if (DryRun)
         {
-            AnsiConsole.MarkupLine("[green]✓ No unauthorized shares found[/]");
+            AnsiConsole.MarkupLine(
+                "[yellow]DRY RUN: Previewing shared folders audit (no changes will be made)[/]"
+            );
+            if (unauthorized.Count > 0)
+                details.Add($"Would remove: {string.Join(", ", unauthorized)}");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = true,
-                Message = "No unauthorized shares found.",
+                Message = string.Join("\n", details),
             };
         }
-        // No dryRun support in base signature; always perform action
+
         foreach (var share in unauthorized)
         {
             var (delSuccess, delOut, delErr) = await CommandExecutor.ExecuteAsync(
@@ -60,14 +73,16 @@ public class SharedFoldersAuditTask : BaseTask
             else
                 AnsiConsole.MarkupLine($"[red]✗ Failed to remove share: {share} ({delErr})[/]");
         }
+        if (unauthorized.Count > 0)
+            details.Add($"Removed: {string.Join(", ", unauthorized)}");
+        else
+            details.Add("No shares needed removal.");
+
         return new TaskResult
         {
             TaskName = Name,
             Success = unauthorized.Count == 0,
-            Message =
-                unauthorized.Count == 0
-                    ? "All shares valid."
-                    : $"Removed: {string.Join(", ", unauthorized)}",
+            Message = string.Join("\n", details),
         };
     }
 

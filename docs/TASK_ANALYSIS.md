@@ -61,12 +61,16 @@ All tasks have comprehensive unit tests:
 
 | Test File | Tests | Status |
 |-----------|-------|--------|
-| `UnitTest1.cs` (ReadmeParserTests) | 13 | ✅ |
+| `ReadmeParserTests.cs` | 13 | ✅ |
 | `ModelsTests.cs` | 12 | ✅ |
 | `AppConfigTests.cs` | 8 | ✅ |
 | `TasksTests.cs` | 19 | ✅ |
+| `SharedFoldersAuditTaskTests.cs` | 2 | ✅ |
+| `HostsFileAuditTaskTests.cs` | 2 | ✅ |
+| `DnsSettingsAuditTaskTests.cs` | 2 | ✅ |
+| `SuspiciousScheduledTasksAuditTaskTests.cs` | 2 | ✅ |
 | `NewTasksTests.cs` | 22 | ✅ |
-| **Total** | **74** | ✅ |
+| **Total** | **82** | ✅ |
 
 ---
 
@@ -88,9 +92,9 @@ All tasks have comprehensive unit tests:
 These tasks were identified from the Windows Checklist and waffleWindowsScript but may need manual intervention or future implementation:
 
 ### Network/Shares
-- [ ] Check shared folders (fsmgmt.msc) - only ADMIN$, C$, IPC$ should exist
-- [ ] Check hosts file for suspicious entries
-- [ ] Verify DNS settings
+- [x] Check shared folders (fsmgmt.msc) - only ADMIN$, C$, IPC$ should exist
+- [x] Check hosts file for suspicious entries
+- [x] Verify DNS settings
 
 ### Browser Security
 - [ ] Firefox cookie settings
@@ -119,8 +123,8 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 - [ ] Remove web server components if not needed
 
 ### Scheduled Tasks
-- [ ] Review and disable suspicious scheduled tasks
-- [ ] Check Task Scheduler for unauthorized entries
+- [x] Review and disable suspicious scheduled tasks
+- [x] Check Task Scheduler for unauthorized entries
 
 ### Advanced
 - [ ] Process analysis with Process Explorer

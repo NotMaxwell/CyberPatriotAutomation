@@ -373,6 +373,25 @@ public class AuditPolicyTask : BaseTask
 
         try
         {
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing audit policy changes (no changes will be made)[/]"
+                );
+                AnsiConsole.MarkupLine(
+                    $"[cyan]Would configure {AuditCategories.Count} audit categories[/]"
+                );
+                var totalSubcategories = AuditCategories.Values.Sum(s => s.Length);
+                AnsiConsole.MarkupLine(
+                    $"[cyan]Would configure {totalSubcategories} advanced subcategories[/]"
+                );
+                AnsiConsole.MarkupLine(
+                    $"[cyan]Would configure {SecuritySettings.Count} security registry settings[/]"
+                );
+                result.Message = "DRY RUN: Audit policy changes previewed.";
+                return result;
+            }
+
             AnsiConsole.WriteLine();
             AnsiConsole.Write(
                 new Rule("[bold yellow]Step 1: Configure Audit Categories[/]").RuleStyle("yellow")
@@ -612,7 +631,7 @@ public class AuditPolicyTask : BaseTask
     {
         var settingsTable = new Table()
             .Border(TableBorder.Rounded)
-            .BorderColor(Color.Magenta)
+            .BorderColor(Color.Magenta1)
             .AddColumn("[bold]Setting[/]")
             .AddColumn("[bold]Description[/]")
             .AddColumn("[bold]Status[/]");

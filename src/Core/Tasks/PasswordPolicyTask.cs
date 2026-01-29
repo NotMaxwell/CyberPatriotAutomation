@@ -296,6 +296,22 @@ public class PasswordPolicyTask : BaseTask
         var fixes = new List<string>();
         var issues = new List<string>();
 
+        if (DryRun)
+        {
+            AnsiConsole.MarkupLine("[yellow]DRY RUN: Skipping password policy changes[/]");
+            if (current.MinPasswordLength < PasswordPolicyStandards.MinPasswordLength)
+                issues.Add(
+                    $"Would set minimum password length to {PasswordPolicyStandards.MinPasswordLength}"
+                );
+            if (current.PasswordHistoryCount < PasswordPolicyStandards.PasswordHistoryCount)
+                issues.Add(
+                    $"Would set password history to {PasswordPolicyStandards.PasswordHistoryCount}"
+                );
+            if (!current.ComplexityEnabled)
+                issues.Add("Would enable password complexity");
+            return (fixes, issues);
+        }
+
         // Set minimum password length
         if (current.MinPasswordLength < PasswordPolicyStandards.MinPasswordLength)
         {
@@ -395,6 +411,12 @@ public class PasswordPolicyTask : BaseTask
     {
         var fixes = new List<string>();
         var issues = new List<string>();
+
+        if (DryRun)
+        {
+            AnsiConsole.MarkupLine("[yellow]DRY RUN: Skipping lockout policy changes[/]");
+            return (fixes, issues);
+        }
 
         // Set lockout threshold
         if (

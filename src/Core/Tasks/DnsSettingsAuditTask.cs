@@ -38,36 +38,46 @@ public class DnsSettingsAuditTask : BaseTask
             "netsh",
             "interface ip show dns"
         );
+        var details = new List<string>();
         if (!success)
         {
+            details.Add($"Failed to read DNS settings: {error}");
             AnsiConsole.MarkupLine($"[red]✗ Failed to read DNS settings: {error}[/]");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = false,
-                Message = error ?? "Unknown error",
+                Message = string.Join("\n", details),
             };
         }
+        details.Add("DNS settings output:");
+        details.AddRange(
+            output
+                .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(l => $"  {l.Trim()}")
+        );
         // Example: Check for public DNS (e.g., 8.8.8.8, 1.1.1.1) and flag as non-compliant
         var insecureDns = new[] { "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1" };
         var found = insecureDns.Where(dns => output.Contains(dns)).ToList();
         if (found.Count == 0)
         {
+            details.Add("No insecure DNS servers found.");
             AnsiConsole.MarkupLine("[green]✓ No insecure DNS servers found[/]");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = true,
-                Message = "No insecure DNS servers found.",
+                Message = string.Join("\n", details),
             };
         }
+        details.Add($"Insecure DNS servers found: {string.Join(", ", found)}");
         // No dry-run support; just report
         AnsiConsole.MarkupLine($"[red]✗ Insecure DNS servers found: {string.Join(", ", found)}[/]");
         return new TaskResult
         {
             TaskName = Name,
             Success = false,
-            Message = $"Insecure DNS: {string.Join(", ", found)}",
+            Message = string.Join("\n", details),
         };
     }
 
