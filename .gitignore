@@ -1,3 +1,5 @@
+# Ignore publish-win-x64 directory except the EXE in root
+publish-win-x64/
 # .gitignore for C# .NET projects
 # Build results
 bin/
