@@ -34,6 +34,19 @@ public class GroupPolicyTask : BaseTask
 
     public override async Task<TaskResult> ExecuteAsync()
     {
+        if (DryRun)
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]DRY RUN: Previewing Group Policy changes (no changes will be made)[/]"
+            );
+            return new TaskResult
+            {
+                TaskName = Name,
+                Success = true,
+                Message = "DRY RUN: Would apply:\n✓ Don't display last user name set\n✓ Require Ctrl+Alt+Del set\n✓ ICS (Internet Connection Sharing) disabled\n✓ Restrict anonymous access set",
+            };
+        }
+
         var details = new List<string>();
         bool allSuccess = true;
 
