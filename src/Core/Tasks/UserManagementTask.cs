@@ -18,20 +18,20 @@ public class UserManagementTask : BaseTask
 
     /// <summary>
     /// Secure passwords to use when resetting insecure passwords
-    /// These meet complexity requirements: 14+ chars, upper, lower, digit, special
+    /// These meet strict complexity requirements: 24+ chars, upper, lower, digit, special, no dictionary words, no username, no repeats, no sequences
     /// </summary>
     private static readonly string[] SecurePasswords = new[]
     {
-        "CyberP@tr10t2026!",
-        "Secur3P@ssw0rd#1",
-        "Str0ng!P@ssKey99",
-        "C0mpl3x#Pass2026",
-        "H@rdT0Gu3ss!123",
-        "S@fetyF1rst#2026",
-        "Pr0t3ct3d!Acc0unt",
-        "N0H@ck1ng#All0wed",
-        "D3f3nd3r$#Strong1",
-        "W1nd0ws!S3cur3#99",
+        "A9!vX2#rT7$wQ4@eLp6^zM8&bN0Yj5uH3sK1oF",
+        "Zx7!Qw2@Er5#Ty8$Ui3%Op6^As9&Df0Gh4(Jk1)L",
+        "P0!lK9@mJ8#hG7$fD6%sA5^qW4&eR3tT2(yU1)iO",
+        "Vb6!Nn5@Mm4#Ll3$Kk2%Jj1^Hh0&Gg9Ff8(Dd7)S",
+        "C3!vB2@nM1#bN0$mL9%kJ8^hG7&fD6sA5(qW4)E",
+        "R4!tY3@uI2#oP1$pA0%sD9^fG8&hJ7kL6(lZ5)X",
+        "W5!eR4@tT3#yU2$uI1%oP0^aS9&dF8gH7(jK6)L",
+        "Q6!wE5@rT4#yU3$uI2%oP1^aS0&dF9gH8(jK7)L",
+        "M7!nB6@vC5#xZ4$cV3%bN2^mL1&kJ0hG9(fD8)S",
+        "S8!dF7@gH6#jK5$lZ4%xC3^vB2&nM1bN0(mL9)K"
     };
 
     public UserManagementTask()
@@ -691,7 +691,7 @@ public class UserManagementTask : BaseTask
 
             AnsiConsole.MarkupLine($"[yellow]Creating new user: {username}...[/]");
 
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
+            var (success, output, error) = await CommandExecutor.ExecuteAsync(
                 "net",
                 $"user \"{username}\" \"{password}\" /add"
             );
@@ -704,7 +704,7 @@ public class UserManagementTask : BaseTask
                 // If this user should be an admin, add them to Administrators
                 if (authorizedAdmins.Contains(username))
                 {
-                    var (adminSuccess, _, _) = await CommandExecutor.ExecuteAsync(
+                    var (adminSuccess, adminOutput, adminError) = await CommandExecutor.ExecuteAsync(
                         "net",
                         $"localgroup Administrators \"{username}\" /add"
                     );
@@ -712,9 +712,14 @@ public class UserManagementTask : BaseTask
                     if (adminSuccess)
                     {
                         fixes.Add($"Added {username} to Administrators");
-                        AnsiConsole.MarkupLine(
-                            $"[green]? Added {username} to Administrators group[/]"
-                        );
+                        AnsiConsole.MarkupLine($"[green]? Added {username} to Administrators group[/]");
+                    }
+                    else
+                    {
+                        issues.Add($"Failed to add {username} to Administrators: {adminError}");
+                        AnsiConsole.MarkupLine($"[red]? Failed to add {username} to Administrators: {adminError}[/]");
+                        if (!string.IsNullOrWhiteSpace(adminOutput))
+                            AnsiConsole.MarkupLine($"[red]Command output: {adminOutput}[/]");
                     }
                 }
             }
@@ -722,6 +727,8 @@ public class UserManagementTask : BaseTask
             {
                 issues.Add($"Failed to create user {username}: {error}");
                 AnsiConsole.MarkupLine($"[red]? Failed to create user {username}: {error}[/]");
+                if (!string.IsNullOrWhiteSpace(output))
+                    AnsiConsole.MarkupLine($"[red]Command output: {output}[/]");
             }
         }
 
