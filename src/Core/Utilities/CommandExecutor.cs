@@ -32,10 +32,32 @@ public class CommandExecutor
             if (process == null)
                 return (false, string.Empty, "Failed to start process");
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
+            // Read both output streams concurrently to avoid deadlocks when one stream
+            // fills its buffer while the other is being read.
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = process.StandardError.ReadToEndAsync();
 
-            await Task.Run(() => process.WaitForExit());
+            // Wait for process exit with a timeout to avoid hanging indefinitely on
+            // commands that may prompt for input or never return.
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try
+            {
+                var waitTask = process.WaitForExitAsync(cts.Token);
+                await Task.WhenAll(outputTask, errorTask, waitTask);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(true);
+                }
+                catch { }
+                return (false, await SafeGetTaskResultAsync(outputTask), "Process timed out");
+            }
+
+            var output = await SafeGetTaskResultAsync(outputTask);
+            var error = await SafeGetTaskResultAsync(errorTask);
 
             return (process.ExitCode == 0, output, string.IsNullOrEmpty(error) ? null : error);
         }
@@ -56,34 +78,58 @@ public class CommandExecutor
     {
         try
         {
+            // When using Verb = "runas" on Windows, UseShellExecute must be true and
+            // redirecting streams is not supported. For elevated execution we start
+            // the process without redirection and wait for it to exit. Output will
+            // not be captured in this mode.
             var processInfo = new ProcessStartInfo
             {
                 FileName = command,
                 Arguments = arguments ?? string.Empty,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
+                UseShellExecute = true,
                 CreateNoWindow = true,
-                Verb =
-                    "runas" // Windows elevation
-                ,
+                Verb = "runas",
             };
 
             using var process = Process.Start(processInfo);
             if (process == null)
                 return (false, string.Empty, "Failed to start elevated process");
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
+            // Wait for a reasonable amount of time for elevated operations
+            using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    if (!process.HasExited)
+                        process.Kill(true);
+                }
+                catch { }
+                return (false, string.Empty, "Elevated process timed out");
+            }
 
-            await Task.Run(() => process.WaitForExit());
-
-            return (process.ExitCode == 0, output, string.IsNullOrEmpty(error) ? null : error);
+            return (process.ExitCode == 0, string.Empty, null);
         }
         catch (Exception ex)
         {
             AnsiConsole.WriteException(ex);
             return (false, string.Empty, ex.Message);
+        }
+    }
+
+    private static async Task<string> SafeGetTaskResultAsync(Task<string> task)
+    {
+        try
+        {
+            return await task;
+        }
+        catch
+        {
+            return string.Empty;
         }
     }
 }
