@@ -14,7 +14,7 @@
     <Product>CyberPatriot Automation Tool</Product>
     <Description>Automated security hardening tool for CyberPatriot competitions</Description>
     <Copyright>Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.</Copyright>
-    <Version>0.0.4-beta</Version>
+    <Version>0.0.5</Version>
 
     <!-- Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

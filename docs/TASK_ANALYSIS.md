@@ -47,13 +47,13 @@
 - Memory protection
 
 ### 8. Prohibited Media Task ✅
-- Scans for media files
-- Detects hacking tools
-- Identifies games
-- Backs up to desktop before removal
-- Creates detailed log
 
----
+### 9. Group Policy Task ✅
+- Hides last user name on login screen
+- Requires Ctrl+Alt+Del for login
+- Disables Internet Connection Sharing (ICS)
+- Sets additional local security policies (e.g., restrict anonymous access)
+
 
 ## Unit Tests
 
@@ -102,15 +102,15 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 - [ ] Clear browser data
 
 ### Software Management
-- [ ] Remove prohibited software via Programs and Features
-- [ ] Install/update required software
-- [ ] Malware scan with Windows Defender or Malwarebytes
+- [x] Remove prohibited software via Programs and Features
+- [x] Install/update required software
+- [x] Malware scan with Windows Defender
 
 ### Group Policy (gpedit.msc)
-- [ ] Don't display last user name
-- [ ] Require Ctrl+Alt+Del
-- [ ] ICS (Internet Connection Sharing) disable via GPO
-- [ ] Additional local security policies
+- [x] Don't display last user name
+- [x] Require Ctrl+Alt+Del
+- [x] ICS (Internet Connection Sharing) disable via GPO
+- [x] Additional local security policies
 
 ### Forensic Questions
 - [ ] Hash calculation helper

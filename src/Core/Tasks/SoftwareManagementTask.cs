@@ -15,12 +15,15 @@ using Spectre.Console;
 namespace CyberPatriotAutomation.Core.Tasks;
 
 /// <summary>
-/// Removes prohibited software and installs required software as specified in the README
+/// Removes prohibited software, installs required software as specified in the README,
+/// and runs Windows Defender malware scans
 /// </summary>
 public class SoftwareManagementTask : BaseTask
 {
     public List<string> ProhibitedSoftware { get; set; } = new();
     public List<SoftwareRequirement> RequiredSoftware { get; set; } = new();
+    public bool RunMalwareScan { get; set; } = true;
+    public bool UseQuickScan { get; set; } = true; // Quick scan by default, set false for full scan
 
     // Helper for name-only matching
     private List<string> RequiredSoftwareNames => RequiredSoftware.Select(r => r.Name).ToList();
@@ -134,10 +137,22 @@ public class SoftwareManagementTask : BaseTask
                 $"[yellow]Required software not installed: {sw.Name} (manual install may be needed)[/]"
             );
         }
+
+        // Run Windows Defender malware scan
+        var malwareScanSuccess = true;
+        var threatsFound = 0;
+        if (RunMalwareScan)
+        {
+            var scanResult = await RunWindowsDefenderScanAsync();
+            malwareScanSuccess = scanResult.Success;
+            threatsFound = scanResult.ThreatsFound;
+            details.Add(scanResult.Message);
+        }
+
         return new TaskResult
         {
             TaskName = Name,
-            Success = toRemove.Count == 0 && toInstall.Count == 0,
+            Success = toRemove.Count == 0 && toInstall.Count == 0 && malwareScanSuccess && threatsFound == 0,
             Message = string.Join("\n", details),
         };
     }
@@ -160,5 +175,71 @@ public class SoftwareManagementTask : BaseTask
             !installed.Any(i => i.Contains(r.Name, StringComparison.OrdinalIgnoreCase))
         );
         return !stillPresent && !stillMissing;
+    }
+
+    /// <summary>
+    /// Runs a Windows Defender malware scan and returns the results
+    /// </summary>
+    private async Task<(bool Success, int ThreatsFound, string Message)> RunWindowsDefenderScanAsync()
+    {
+        var scanType = UseQuickScan ? "QuickScan" : "FullScan";
+        AnsiConsole.MarkupLine($"[blue]Running Windows Defender {scanType}...[/]");
+
+        // Update Windows Defender signatures first
+        var (updateSuccess, _, updateError) = await CommandExecutor.ExecuteAsync(
+            "powershell",
+            "-Command \"Update-MpSignature -ErrorAction SilentlyContinue\""
+        );
+        if (updateSuccess)
+            AnsiConsole.MarkupLine("[green]✓ Windows Defender signatures updated[/]");
+        else
+            AnsiConsole.MarkupLine($"[yellow]⚠ Could not update signatures: {updateError}[/]");
+
+        // Run the scan
+        var (scanSuccess, scanOutput, scanError) = await CommandExecutor.ExecuteAsync(
+            "powershell",
+            $"-Command \"Start-MpScan -ScanType {scanType}\""
+        );
+
+        if (!scanSuccess)
+        {
+            AnsiConsole.MarkupLine($"[red]✗ Windows Defender scan failed: {scanError}[/]");
+            return (false, 0, $"Windows Defender scan failed: {scanError}");
+        }
+
+        AnsiConsole.MarkupLine($"[green]✓ Windows Defender {scanType} completed[/]");
+
+        // Check for detected threats
+        var (threatSuccess, threatOutput, _) = await CommandExecutor.ExecuteAsync(
+            "powershell",
+            "-Command \"Get-MpThreatDetection | Select-Object -Property ThreatID, ActionSuccess | ConvertTo-Json\""
+        );
+
+        var threatsFound = 0;
+        if (threatSuccess && !string.IsNullOrWhiteSpace(threatOutput) && threatOutput.Trim() != "")
+        {
+            // Count threats - if output is not empty/null, there are threats
+            // Simple count by looking for ThreatID occurrences
+            threatsFound = threatOutput.Split("ThreatID").Length - 1;
+            if (threatsFound > 0)
+            {
+                AnsiConsole.MarkupLine($"[red]⚠ Windows Defender found {threatsFound} threat(s)[/]");
+
+                // Attempt to remove detected threats
+                var (removeSuccess, _, removeError) = await CommandExecutor.ExecuteAsync(
+                    "powershell",
+                    "-Command \"Remove-MpThreat -ErrorAction SilentlyContinue\""
+                );
+                if (removeSuccess)
+                    AnsiConsole.MarkupLine("[green]✓ Attempted to remove detected threats[/]");
+                else
+                    AnsiConsole.MarkupLine($"[yellow]⚠ Could not auto-remove threats: {removeError}[/]");
+            }
+        }
+
+        if (threatsFound == 0)
+            AnsiConsole.MarkupLine("[green]✓ No threats detected by Windows Defender[/]");
+
+        return (true, threatsFound, $"Windows Defender {scanType}: {(threatsFound > 0 ? $"{threatsFound} threat(s) found" : "No threats detected")}");
     }
 }
