@@ -1,0 +1,34 @@
+# =============================================================================
+# CyberPatriot Automation Tool (Rust port)
+# Author: Maxwell McCormick
+# Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+# =============================================================================
+[package]
+name = "cyberpatriot-automation"
+version = "1.0.0"
+edition = "2021"
+authors = ["Maxwell McCormick"]
+description = "Automates CyberPatriot competition security hardening tasks for Windows systems (Rust port)."
+license = "Apache-2.0"
+
+[[bin]]
+name = "cyberpatriot-automation"
+path = "src/main.rs"
+
+[lib]
+name = "cyberpatriot_automation"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "fs"] }
+async-trait = "0.1"
+regex = "1"
+html-escape = "0.2"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+uuid = { version = "1", features = ["v4"] }
+comfy-table = { version = "7", features = ["custom_styling"] }
+indicatif = "0.17"
+owo-colors = "4"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
