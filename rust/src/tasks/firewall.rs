@@ -76,11 +76,9 @@ impl FirewallConfigurationTask {
 
     async fn enable_firewall_profiles(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Enabling firewall for all profiles...[/]");
-        let (success, _o, error) = command::execute(
-            "powershell",
-            Some("-Command \"Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True\""),
-        )
-        .await;
+        let (success, _o, error) =
+            command::powershell("Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True")
+                .await;
         if success {
             fixes.push("Enabled firewall for Domain, Public, and Private profiles".to_string());
             ui::markup_line("[green]? Firewall enabled for all profiles[/]");
@@ -92,9 +90,8 @@ impl FirewallConfigurationTask {
 
     async fn configure_default_actions(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring default firewall actions...[/]");
-        let (success, _o, error) = command::execute(
-            "powershell",
-            Some("-Command \"Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Block -DefaultOutboundAction Allow -NotifyOnListen True -AllowUnicastResponseToMulticast True\""),
+        let (success, _o, error) = command::powershell(
+            "Set-NetFirewallProfile -Profile Domain,Public,Private -DefaultInboundAction Block -DefaultOutboundAction Allow -NotifyOnListen True -AllowUnicastResponseToMulticast True",
         )
         .await;
         if success {
@@ -104,50 +101,58 @@ impl FirewallConfigurationTask {
             issues.push(format!("Failed to configure default actions: {}", error.unwrap_or_default()));
         }
 
-        let (profile_success, _o, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Set-NetConnectionProfile -NetworkCategory Public -ErrorAction SilentlyContinue\""),
-        )
-        .await;
+        // Best-effort: there may be no active connection profile to change, so a
+        // failure here is reported but not treated as an issue.
+        let (profile_success, _o, _e) =
+            command::powershell("Set-NetConnectionProfile -NetworkCategory Public").await;
         if profile_success {
             fixes.push("Set network profile to Public".to_string());
             ui::markup_line("[green]? Network profile set to Public[/]");
+        } else {
+            ui::markup_line("[dim]No network connection profile to set to Public[/]");
         }
     }
 
-    async fn block_insecure_ports(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn block_insecure_ports(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         let mut table = ui::TableBuilder::new()
             .title("[bold]Blocking Insecure Ports[/]")
             .columns(&["[bold]Port[/]", "[bold]Protocol[/]", "[bold]Description[/]", "[bold]Status[/]"]);
 
         for (port, protocol, description) in PORTS_TO_BLOCK {
             let rule_name = format!("CyberPatriot_Block_{}_{}_{}", description.replace(' ', ""), protocol, port);
-            let (success, _o, _e) = command::execute(
-                "powershell",
-                Some(&format!(
-                    "-Command \"New-NetFirewallRule -DisplayName '{rule_name}' -Direction Inbound -LocalPort {port} -Protocol {protocol} -Action Block -ErrorAction SilentlyContinue\""
-                )),
-            )
+            let quoted = command::ps_quote(&rule_name);
+            let (success, _o, _e) = command::powershell(&format!(
+                "New-NetFirewallRule -DisplayName {quoted} -Direction Inbound -LocalPort {port} -Protocol {protocol} -Action Block"
+            ))
             .await;
 
             if success {
                 table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[green]Blocked[/]".to_string()]);
                 fixes.push(format!("Blocked port {port}/{protocol} ({description})"));
-            } else {
-                let _ = command::execute(
-                    "powershell",
-                    Some(&format!(
-                        "-Command \"Set-NetFirewallRule -DisplayName '{rule_name}' -Enabled True -ErrorAction SilentlyContinue\""
-                    )),
-                )
-                .await;
+                continue;
+            }
+
+            // Creation fails when the rule already exists, so fall back to
+            // enabling it. The fallback ran before too, but its result was
+            // discarded: a rule that could not be enabled was still reported as
+            // "Exists", implying the port was covered when it was not.
+            let (enabled, _o, enable_error) =
+                command::powershell(&format!("Set-NetFirewallRule -DisplayName {quoted} -Enabled True")).await;
+            if enabled {
                 table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[yellow]Exists[/]".to_string()]);
+                fixes.push(format!("Enabled existing block rule for {port}/{protocol} ({description})"));
+            } else {
+                table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[red]Failed[/]".to_string()]);
+                issues.push(format!(
+                    "Could not block port {port}/{protocol} ({description}): {}",
+                    enable_error.unwrap_or_default()
+                ));
             }
         }
         table.print();
     }
 
-    async fn disable_risky_rules(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn disable_risky_rules(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Disabling risky firewall rules...[/]");
 
         for rule in RULES_TO_DISABLE {
@@ -174,41 +179,69 @@ impl FirewallConfigurationTask {
             }
         }
 
-        let _ = command::execute(
+        // Both results used to be discarded while the fix was recorded
+        // unconditionally, so a failure to block Remote Registry still reported
+        // as applied. Record what actually happened.
+        let (in_success, _o, in_error) = command::execute(
             "netsh",
             Some("advfirewall firewall add rule name=\"Block_RemoteRegistry_In\" dir=in service=\"RemoteRegistry\" action=block enable=yes"),
         )
         .await;
-        let _ = command::execute(
+        let (out_success, _o, out_error) = command::execute(
             "netsh",
             Some("advfirewall firewall add rule name=\"Block_RemoteRegistry_Out\" dir=out service=\"RemoteRegistry\" action=block enable=yes"),
         )
         .await;
 
-        fixes.push("Blocked Remote Registry service in firewall".to_string());
+        if in_success && out_success {
+            fixes.push("Blocked Remote Registry service in firewall".to_string());
+            ui::markup_line("[green]? Blocked Remote Registry service[/]");
+        } else {
+            let e = in_error.or(out_error).unwrap_or_default();
+            issues.push(format!("Failed to block Remote Registry service in firewall: {e}"));
+            ui::markup_line("[red]? Failed to block Remote Registry service[/]");
+        }
     }
 
-    async fn configure_firewall_logging(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn configure_firewall_logging(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring firewall logging...[/]");
         let log_path = r"%SystemRoot%\System32\LogFiles\Firewall\pfirewall.log";
 
-        let (success, _o, _e) = command::execute(
-            "powershell",
-            Some(&format!(
-                "-Command \"Set-NetFirewallProfile -Profile Domain,Public,Private -LogFileName '{log_path}' -LogBlocked True -LogAllowed False -LogMaxSizeKilobytes 32767\""
-            )),
-        )
+        let (success, _o, _e) = command::powershell(&format!(
+            "Set-NetFirewallProfile -Profile Domain,Public,Private -LogFileName {} -LogBlocked True -LogAllowed False -LogMaxSizeKilobytes 32767",
+            command::ps_quote(log_path)
+        ))
         .await;
 
         if success {
             fixes.push("Configured firewall logging".to_string());
             ui::markup_line("[green]? Firewall logging configured[/]");
-        } else {
-            let _ = command::execute("netsh", Some(&format!("advfirewall set allprofiles logging filename {log_path}"))).await;
-            let _ = command::execute("netsh", Some("advfirewall set allprofiles logging droppedconnections enable")).await;
-            let _ = command::execute("netsh", Some("advfirewall set allprofiles logging maxfilesize 32767")).await;
+            return;
+        }
+
+        // The netsh fallback previously discarded all three results and recorded
+        // the fix unconditionally, reporting success even when every command
+        // failed.
+        let (name_ok, _o, name_err) = command::execute(
+            "netsh",
+            Some(&format!("advfirewall set allprofiles logging filename {log_path}")),
+        )
+        .await;
+        let (dropped_ok, _o, dropped_err) = command::execute(
+            "netsh",
+            Some("advfirewall set allprofiles logging droppedconnections enable"),
+        )
+        .await;
+        let (size_ok, _o, size_err) =
+            command::execute("netsh", Some("advfirewall set allprofiles logging maxfilesize 32767")).await;
+
+        if name_ok && dropped_ok && size_ok {
             fixes.push("Configured firewall logging (via netsh)".to_string());
             ui::markup_line("[green]? Firewall logging configured via netsh[/]");
+        } else {
+            let e = name_err.or(dropped_err).or(size_err).unwrap_or_default();
+            issues.push(format!("Failed to configure firewall logging: {e}"));
+            ui::markup_line("[red]? Failed to configure firewall logging[/]");
         }
     }
 }
@@ -228,10 +261,10 @@ impl Task for FirewallConfigurationTask {
         ui::markup_line("[cyan]Reading firewall configuration...[/]");
 
         for profile in ["Domain", "Private", "Public"] {
-            let (success, output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"(Get-NetFirewallProfile -Name '{profile}').Enabled\"")),
-            )
+            let (success, output, _e) = command::powershell_query(&format!(
+                "(Get-NetFirewallProfile -Name {}).Enabled",
+                command::ps_quote(profile)
+            ))
             .await;
             let enabled = success && output.trim().eq_ignore_ascii_case("True");
             ui::markup_line(&format!(
@@ -294,10 +327,10 @@ impl Task for FirewallConfigurationTask {
     async fn verify(&mut self) -> bool {
         let mut all_good = true;
         for profile in ["Domain", "Private", "Public"] {
-            let (success, output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"(Get-NetFirewallProfile -Name '{profile}').Enabled\"")),
-            )
+            let (success, output, _e) = command::powershell_query(&format!(
+                "(Get-NetFirewallProfile -Name {}).Enabled",
+                command::ps_quote(profile)
+            ))
             .await;
             let enabled = success && output.trim().eq_ignore_ascii_case("True");
             if enabled {

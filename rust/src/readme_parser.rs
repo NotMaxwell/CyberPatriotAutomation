@@ -178,11 +178,19 @@ fn parse_authorized_users(content: &str, data: &mut ReadmeData) {
 }
 
 fn parse_user_block(content: &str, data: &mut ReadmeData) {
+    // The C# original stripped every tag to "" and then split on newlines, which
+    // only works when the user list is inside a <pre> block. READMEs that
+    // separate entries with <br> or list/table markup instead would collapse
+    // into a single long line and yield no users at all. Convert the tags that
+    // represent a line break into newlines first so both layouts parse.
+    let line_break = re(r"(?is)<\s*(?:br\s*/?|/p|/li|/div|/tr|/h[1-6])\s*>");
+    let content = line_break.replace_all(content, "\n");
+
     let tag = re(r"<[^>]+>");
-    let cleaned = tag.replace_all(content, "");
+    let cleaned = tag.replace_all(&content, "");
     let cleaned = html_decode(&cleaned);
 
-    let you = re(r"(?i)\s*\(you\)\s*");
+    let annotation = re(r"\s*\([^)]*\)\s*");
 
     let mut in_admin = false;
     let mut in_user = false;
@@ -228,11 +236,10 @@ fn parse_user_block(content: &str, data: &mut ReadmeData) {
             && line.chars().count() < 100
         {
             let is_primary = lower.contains("(you)");
-            let mut username = line.to_string();
-            if is_primary {
-                username = you.replace_all(&username, "").trim().to_string();
-            }
-            let username = username.trim().to_string();
+            // READMEs annotate entries as "alice (you)" but also "bob (Admin)".
+            // The C# original only stripped "(you)"; strip any parenthetical so
+            // the remaining token is validated as the account name it is.
+            let username = annotation.replace_all(line, "").trim().to_string();
 
             if !username.is_empty() && is_valid_username(&username) {
                 let user = AuthorizedUser {
@@ -256,11 +263,20 @@ fn parse_user_block(content: &str, data: &mut ReadmeData) {
     }
 }
 
+/// Characters Windows forbids in a local account name. Their presence is a
+/// reliable sign the line is prose rather than a username.
+const INVALID_USERNAME_CHARS: &[char] =
+    &['"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '@', '.', '!'];
+
 fn is_valid_username(username: &str) -> bool {
-    if username.trim().is_empty() {
+    let username = username.trim();
+    if username.is_empty() {
         return false;
     }
-    if username.chars().count() > 50 {
+    // Windows caps local account names at 20 characters. The C# original
+    // allowed 50, which let whole sentences from the surrounding prose be
+    // recorded as users.
+    if username.chars().count() > 20 {
         return false;
     }
     if contains_ci(username, "password") {
@@ -269,10 +285,45 @@ fn is_valid_username(username: &str) -> bool {
     if contains_ci(username, "authorized") {
         return false;
     }
-    if username.contains(':') {
+    if username.contains(INVALID_USERNAME_CHARS) {
+        return false;
+    }
+    // Windows does permit a space ("John Smith"), but a run of three or more
+    // words is prose, not an account name. Erring permissive here is deliberate:
+    // a real user wrongly rejected here is absent from the authorized set and
+    // would be deleted, whereas a junk entry only ever protects an account.
+    let words: Vec<&str> = username.split_whitespace().collect();
+    if words.len() > 2 || words.iter().any(|w| is_common_word(w)) {
         return false;
     }
     username.chars().any(|c| c.is_alphabetic())
+}
+
+/// Does this captured fragment plausibly name a piece of software?
+///
+/// The extraction patterns (notably the broad `access to ... .` one) happily
+/// capture ordinary prose — "access to administrative tools." would otherwise
+/// be recorded as required software named "administrative tools". Real product
+/// names are proper nouns, so require the fragment to start with an uppercase
+/// letter and not be an everyday word. This mirrors the check already applied
+/// to actionable software items in [`parse_software_item`].
+fn is_plausible_software_name(name: &str) -> bool {
+    /// Generic nouns that appear in these phrasings but never name a product.
+    const NOISE: &[&str] = &[
+        "a", "an", "use", "company", "software", "program", "programs", "application",
+        "applications", "app", "apps", "tool", "tools", "version", "versions", "access",
+        "browser", "browsers", "system", "systems", "file", "files", "data", "internet",
+    ];
+    if !name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        return false;
+    }
+    if is_common_word(name) || NOISE.iter().any(|w| w.eq_ignore_ascii_case(name)) {
+        return false;
+    }
+    // Multi-word fragments are almost always prose rather than a product name;
+    // every word would need to be capitalised to read as one.
+    name.split_whitespace()
+        .all(|w| w.chars().next().map(|c| c.is_uppercase()).unwrap_or(false))
 }
 
 fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
@@ -302,18 +353,13 @@ fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
     for pat in patterns {
         let regex = re(pat);
         for caps in regex.captures_iter(content) {
+            // The phrase this match came from, used to decide "latest" below.
+            let matched_phrase = caps.get(0).map(|m| m.as_str()).unwrap_or("");
             let software_list = caps[1].trim();
             for name in splitter.split(software_list) {
                 let clean = name.trim().trim_matches(|c| c == ',' || c == '.' || c == ' ');
                 let len = clean.chars().count();
-                if clean.is_empty()
-                    || !(2..=50).contains(&len)
-                    || clean.eq_ignore_ascii_case("the")
-                    || clean.eq_ignore_ascii_case("a")
-                    || clean.eq_ignore_ascii_case("an")
-                    || clean.eq_ignore_ascii_case("for")
-                    || clean.eq_ignore_ascii_case("use")
-                    || clean.eq_ignore_ascii_case("company")
+                if clean.is_empty() || !(2..=50).contains(&len) || !is_plausible_software_name(clean)
                 {
                     continue;
                 }
@@ -321,7 +367,11 @@ fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
                 if found.insert(key.clone()) {
                     data.required_software.push(SoftwareRequirement {
                         name: clean.to_string(),
-                        should_be_latest: lower.contains("latest") && lower.contains(&key),
+                        // The C# original tested whether the *whole document*
+                        // contained "latest", so a single mention anywhere
+                        // flagged every package as "Latest Stable". Judge the
+                        // matched phrase instead.
+                        should_be_latest: contains_ci(matched_phrase, "latest"),
                         is_required: true,
                         ..Default::default()
                     });
@@ -362,15 +412,30 @@ fn parse_services(content: &str, data: &mut ReadmeData) {
     }
 
     // Pattern 1 used a negative lookbehind `(?<!do not )`; reproduce by checking
-    // that the text immediately preceding "disable" is not "do not ".
-    let do_not = re(r"(?i)do\s+not\s+$");
+    // the text immediately preceding "disable". The C# lookbehind only covered a
+    // literal "do not " directly before "disable", so the very common competition
+    // phrasing "do not stop or disable the X service" slipped through and queued a
+    // critical service for disabling. Allow an intervening "<verb> or " and the
+    // other negation forms READMEs use.
+    let negated = re(r"(?i)(?:do\s+not|do\s*n'?t|never|must\s+not|should\s+not)\s+(?:\w+\s+or\s+)?$");
     let disable1 = re(r"(?i)disable\s+(?:the\s+)?([A-Za-z0-9\s]+?)\s+service");
+
+    // Collect first so every "do not disable" is registered as critical before
+    // any prohibited entry is added - `add_prohibited_service` skips names that
+    // are already known to be critical.
+    let mut to_prohibit: Vec<&str> = Vec::new();
     for caps in disable1.captures_iter(content) {
         let whole = caps.get(0).unwrap();
-        if do_not.is_match(&content[..whole.start()]) {
-            continue;
+        let service = caps.get(1).unwrap().as_str().trim();
+        if negated.is_match(&content[..whole.start()]) {
+            // "Do not disable X" means X is critical, not merely not-prohibited.
+            add_critical_service(service, data);
+        } else {
+            to_prohibit.push(service);
         }
-        add_prohibited_service(caps[1].trim(), data);
+    }
+    for service in to_prohibit {
+        add_prohibited_service(service, data);
     }
 
     let disable2 = re(r"(?i)([A-Za-z0-9\s]+?)\s+service\s+should\s+(?:be\s+)?disabled");
@@ -388,6 +453,27 @@ fn parse_services(content: &str, data: &mut ReadmeData) {
         {
             data.critical_services.push("CCS Client".to_string());
         }
+    }
+
+    // Final safety net: a service named as critical must never also be queued
+    // for disabling, whichever pattern happened to match it first. Disabling a
+    // scored critical service is one of the costliest mistakes in competition.
+    let critical = data.critical_services.clone();
+    data.prohibited_services
+        .retain(|p| !critical.iter().any(|c| c.eq_ignore_ascii_case(p)));
+}
+
+/// Record a service the README says must stay running, de-duplicated.
+fn add_critical_service(service: &str, data: &mut ReadmeData) {
+    if service.is_empty() || service.chars().count() >= 50 {
+        return;
+    }
+    if !data
+        .critical_services
+        .iter()
+        .any(|s| s.eq_ignore_ascii_case(service))
+    {
+        data.critical_services.push(service.to_string());
     }
 }
 
@@ -412,7 +498,9 @@ fn parse_group_requirements(content: &str, data: &mut ReadmeData) {
     let group = re(
         r#"(?is)(?:make|create)\s+(?:a\s+)?(?:new\s+)?group\s+(?:called\s+)?["']?(\w+)["']?\s+and\s+add\s+(?:the\s+following\s+users?\s+to\s+(?:the\s+)?["']?\w+["']?\s+group:?\s*)?([^.]+)"#,
     );
-    if let Some(caps) = group.captures(content) {
+    // The C# original used a single `Regex.Match`, so a README asking for two
+    // groups only ever produced the first one. Iterate over every match.
+    for caps in group.captures_iter(content) {
         let group_name = caps[1].trim().to_string();
         let members_text = strip_html_tags(&caps[2]);
         let splitter = re(r"[,\s]+");
@@ -421,7 +509,11 @@ fn parse_group_requirements(content: &str, data: &mut ReadmeData) {
             .map(|m| m.trim().trim_matches(|c| c == ',' || c == '.').to_string())
             .filter(|m| !m.is_empty() && is_valid_username(m))
             .collect();
-        if !group_name.is_empty() && !members.is_empty() {
+        let already_present = data
+            .group_requirements
+            .iter()
+            .any(|g| g.group_name.eq_ignore_ascii_case(&group_name));
+        if !group_name.is_empty() && !members.is_empty() && !already_present {
             data.group_requirements.push(GroupRequirement {
                 group_name,
                 members,

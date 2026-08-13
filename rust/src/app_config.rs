@@ -71,7 +71,22 @@ pub fn default_readme_paths() -> Vec<String> {
 }
 
 /// Try to find the README file automatically.
-pub fn find_readme_file() -> Option<String> {
+///
+/// On real CyberPatriot images the README is not dropped on the desktop as a
+/// literal file — the competitor's desktop instead has a `.lnk` shortcut
+/// (commonly named "README") that points at the actual HTML file, which may
+/// live somewhere else entirely (e.g. `C:\CyberPatriot\`). That shortcut is
+/// always present on the desktop of the user running the tool, so shortcut
+/// resolution is tried first; the hard-coded literal paths below remain as a
+/// fallback for images that do place the file directly.
+pub async fn find_readme_file() -> Option<String> {
+    if let Some(found) = find_readme_shortcut(&desktop_dir()).await {
+        return Some(found);
+    }
+    if let Some(found) = find_readme_shortcut(&common_desktop_dir()).await {
+        return Some(found);
+    }
+
     for path in default_readme_paths() {
         if path.contains('*') {
             // Handle wildcard paths: search recursively for the file name.
@@ -93,6 +108,59 @@ pub fn find_readme_file() -> Option<String> {
         }
     }
     None
+}
+
+/// Look in `dir` for a `.lnk` shortcut whose name suggests it points at the
+/// README, and resolve it to the target file it links to.
+async fn find_readme_shortcut(dir: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_lnk = path
+            .extension()
+            .map(|e| e.eq_ignore_ascii_case("lnk"))
+            .unwrap_or(false);
+        if !is_lnk {
+            continue;
+        }
+        if !shortcut_name_looks_like_readme(&path) {
+            continue;
+        }
+        if let Some(target) = resolve_shortcut_target(&path).await {
+            if Path::new(&target).is_file() {
+                return Some(target);
+            }
+        }
+    }
+    None
+}
+
+/// Does this shortcut's file name suggest it points at the README?
+/// (e.g. "README.lnk", "Read Me.lnk", "CyberPatriot README.lnk")
+fn shortcut_name_looks_like_readme(path: &Path) -> bool {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase().replace(' ', "").contains("readme"))
+        .unwrap_or(false)
+}
+
+/// Resolve a Windows `.lnk` shortcut to its target path using the
+/// `WScript.Shell` COM object (the standard way to read shortcut targets
+/// without a native shell-link parser).
+async fn resolve_shortcut_target(lnk_path: &Path) -> Option<String> {
+    let script = format!(
+        "(New-Object -ComObject WScript.Shell).CreateShortcut({}).TargetPath",
+        crate::command::ps_quote(&lnk_path.to_string_lossy())
+    );
+    let (success, output, _error) = crate::command::powershell_query(&script).await;
+    if !success {
+        return None;
+    }
+    let target = output.trim();
+    if target.is_empty() {
+        None
+    } else {
+        Some(target.to_string())
+    }
 }
 
 fn find_file_recursive(dir: &Path, file_name: &str) -> Option<PathBuf> {

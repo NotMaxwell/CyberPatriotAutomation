@@ -222,9 +222,10 @@ impl AuditPolicyTask {
         table.print();
     }
 
-    async fn configure_advanced_audit_policies(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn configure_advanced_audit_policies(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring advanced audit subcategories...[/]");
         let mut configured_count = 0;
+        let mut failed: Vec<String> = Vec::new();
 
         for (_category, subcategories) in AUDIT_CATEGORIES {
             for subcategory in *subcategories {
@@ -240,12 +241,29 @@ impl AuditPolicyTask {
                 .await;
                 if success_enable && failure_enable {
                     configured_count += 1;
+                } else {
+                    failed.push((*subcategory).to_string());
                 }
             }
         }
 
-        fixes.push(format!("Configured {configured_count} audit subcategories"));
-        ui::markup_line(&format!("[green]? Configured {configured_count} audit subcategories[/]"));
+        // The fix used to be recorded unconditionally, so a run that configured
+        // nothing still reported "Configured 0 audit subcategories" as a success.
+        if configured_count > 0 {
+            fixes.push(format!("Configured {configured_count} audit subcategories"));
+            ui::markup_line(&format!("[green]? Configured {configured_count} audit subcategories[/]"));
+        }
+        if !failed.is_empty() {
+            issues.push(format!(
+                "Could not configure {} audit subcategories: {}",
+                failed.len(),
+                failed.join(", ")
+            ));
+            ui::markup_line(&format!(
+                "[yellow]? Could not configure {} audit subcategories[/]",
+                failed.len()
+            ));
+        }
 
         let additional = ["Logon", "Process Creation", "Special Logon", "Security State Change"];
         for subcategory in additional {
@@ -278,15 +296,15 @@ impl AuditPolicyTask {
         table.print();
     }
 
-    async fn configure_event_log_settings(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn configure_event_log_settings(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring event log settings...[/]");
 
         let log_settings = [("Security", 196608), ("Application", 32768), ("System", 32768)];
         for (log_name, max_size) in log_settings {
-            let (success, _o, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Limit-EventLog -LogName '{log_name}' -MaximumSize {max_size}KB -OverflowAction OverwriteAsNeeded\"")),
-            )
+            let (success, _o, _e) = command::powershell(&format!(
+                "Limit-EventLog -LogName {} -MaximumSize {max_size}KB -OverflowAction OverwriteAsNeeded",
+                command::ps_quote(log_name)
+            ))
             .await;
             if success {
                 fixes.push(format!("Configured {log_name} log: {}MB max size", max_size / 1024));
@@ -315,14 +333,23 @@ impl AuditPolicyTask {
         }
         ui::markup_line("[green]? Configured PowerShell logging[/]");
 
-        let _ = command::execute(
+        // Previously the result was discarded and the fix recorded regardless.
+        let (cmdline_success, _o, cmdline_error) = command::execute(
             "reg",
             Some(r#"add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f"#),
         )
         .await;
 
-        fixes.push("Enabled command line in process creation audit".to_string());
-        ui::markup_line("[green]? Enabled command line in process creation audit[/]");
+        if cmdline_success {
+            fixes.push("Enabled command line in process creation audit".to_string());
+            ui::markup_line("[green]? Enabled command line in process creation audit[/]");
+        } else {
+            issues.push(format!(
+                "Failed to enable command line in process creation audit: {}",
+                cmdline_error.unwrap_or_default()
+            ));
+            ui::markup_line("[red]? Failed to enable command line in process creation audit[/]");
+        }
     }
 }
 
@@ -400,12 +427,23 @@ impl Task for AuditPolicyTask {
             let (success, output, _e) =
                 command::execute("auditpol", Some(&format!("/get /category:\"{category}\""))).await;
             if success && !output.is_empty() {
-                if output.contains("Success and Failure")
-                    || (output.contains("Success") && output.contains("Failure"))
-                {
+                // `auditpol /get /category:"X"` prints one line per subcategory.
+                // Testing the whole blob for "Success" AND "Failure" passed as
+                // soon as one subcategory audited Success and a *different* one
+                // audited Failure - even with others set to "No Auditing".
+                // Require that no subcategory is left unaudited instead.
+                let unaudited: Vec<&str> = output
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| l.contains("No Auditing"))
+                    .collect();
+                if unaudited.is_empty() {
                     ui::markup_line(&format!("[green]? {category}: Success and Failure auditing enabled[/]"));
                 } else {
-                    ui::markup_line(&format!("[red]? {category}: Auditing not fully configured[/]"));
+                    ui::markup_line(&format!(
+                        "[red]? {category}: {} subcategory(ies) still set to No Auditing[/]",
+                        unaudited.len()
+                    ));
                     all_good = false;
                 }
             }

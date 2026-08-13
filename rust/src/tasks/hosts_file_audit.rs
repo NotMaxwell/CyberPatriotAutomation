@@ -37,14 +37,32 @@ fn read_lines() -> Result<Vec<String>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Collapse runs of whitespace so entries compare on content, not formatting.
+///
+/// `ALLOWED_ENTRIES` is written with a fixed run of spaces. Comparing raw
+/// strings meant a hosts file using a tab or a different number of spaces -
+/// which is entirely normal - failed to match, so the legitimate localhost
+/// mapping was classified as unauthorized and deleted.
+fn normalize_entry(line: &str) -> String {
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn is_allowed_entry(line: &str) -> bool {
+    let normalized = normalize_entry(line);
+    ALLOWED_ENTRIES
+        .iter()
+        .any(|a| normalize_entry(a).eq_ignore_ascii_case(&normalized))
+}
+
 fn unauthorized_entries(lines: &[String]) -> Vec<String> {
     lines
         .iter()
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter(|l| !ALLOWED_ENTRIES.iter().any(|a| a.eq_ignore_ascii_case(l)))
+        .filter(|l| !is_allowed_entry(l))
         .collect()
 }
+
 
 #[async_trait]
 impl Task for HostsFileAuditTask {
@@ -108,30 +126,43 @@ impl Task for HostsFileAuditTask {
             };
         }
 
+        // Nothing to do - don't rewrite a system file for no reason.
+        if unauthorized.is_empty() {
+            details.push("No entries needed removal.".to_string());
+            ui::markup_line("[green]✓ No unauthorized hosts entries found[/]");
+            return TaskResult {
+                task_name: self.name.clone(),
+                success: true,
+                message: details.join("\n"),
+                ..Default::default()
+            };
+        }
+
         let new_lines: Vec<String> = lines
             .iter()
-            .filter(|l| {
-                l.trim().is_empty()
-                    || l.trim().starts_with('#')
-                    || ALLOWED_ENTRIES.iter().any(|a| a.eq_ignore_ascii_case(l.trim()))
-            })
+            .filter(|l| l.trim().is_empty() || l.trim().starts_with('#') || is_allowed_entry(l.trim()))
             .cloned()
             .collect();
 
-        match std::fs::write(HOSTS_FILE_PATH, new_lines.join("\n")) {
+        // Windows tolerates LF here, but the hosts file is conventionally CRLF
+        // and ends with a newline; preserve both.
+        let mut contents = new_lines.join("\r\n");
+        contents.push_str("\r\n");
+
+        match std::fs::write(HOSTS_FILE_PATH, contents) {
             Ok(_) => {
-                if !unauthorized.is_empty() {
-                    details.push(format!("Removed: {}", unauthorized.join(", ")));
-                } else {
-                    details.push("No entries needed removal.".to_string());
-                }
+                details.push(format!("Removed: {}", unauthorized.join(", ")));
                 ui::markup_line(&format!(
                     "[green]✓ Removed unauthorized hosts entries: {}[/]",
                     ui::escape(&unauthorized.join(", "))
                 ));
                 TaskResult {
                     task_name: self.name.clone(),
-                    success: unauthorized.is_empty(),
+                    // Success reflects the remediation having been applied. The
+                    // previous `unauthorized.is_empty()` inverted this: cleaning
+                    // up entries reported the task as failed, and only a file
+                    // that needed no work at all counted as a success.
+                    success: true,
                     message: details.join("\n"),
                     ..Default::default()
                 }
@@ -143,6 +174,7 @@ impl Task for HostsFileAuditTask {
                     task_name: self.name.clone(),
                     success: false,
                     message: details.join("\n"),
+                    error_details: Some(e.to_string()),
                     ..Default::default()
                 }
             }
@@ -154,5 +186,36 @@ impl Task for HostsFileAuditTask {
             Ok(lines) => unauthorized_entries(&lines).is_empty(),
             Err(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lines(raw: &str) -> Vec<String> {
+        raw.lines().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn localhost_entries_are_allowed_regardless_of_spacing() {
+        // Tabs and differing space runs are entirely normal in a hosts file.
+        // Exact string comparison used to classify these as unauthorized and
+        // delete the legitimate localhost mapping.
+        let hosts = lines("# comment\n127.0.0.1\tlocalhost\n::1   localhost\n");
+        assert!(unauthorized_entries(&hosts).is_empty());
+    }
+
+    #[test]
+    fn redirected_domains_are_unauthorized() {
+        let hosts = lines("127.0.0.1       localhost\n127.0.0.1 www.google.com\n0.0.0.0 update.microsoft.com\n");
+        let bad = unauthorized_entries(&hosts);
+        assert_eq!(bad, vec!["127.0.0.1 www.google.com", "0.0.0.0 update.microsoft.com"]);
+    }
+
+    #[test]
+    fn comments_and_blank_lines_are_ignored() {
+        let hosts = lines("\n# Copyright (c) 1993-2009 Microsoft Corp.\n#\tsource server\n\n");
+        assert!(unauthorized_entries(&hosts).is_empty());
     }
 }

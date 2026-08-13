@@ -56,16 +56,18 @@ impl UserManagementTask {
 
     async fn get_all_user_accounts() -> Vec<AccountInfo> {
         let mut accounts = Vec::new();
-        let (success, output, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation\""),
+        let (success, output, _e) = command::powershell_query(
+            "Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation",
         )
         .await;
 
         if success && !output.is_empty() {
+            // Read the Administrators membership once rather than shelling out
+            // per account, and match names exactly.
+            let admins = crate::tasks::local_group_members("Administrators").await;
             for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()).skip(1) {
                 if let Some(mut account) = parse_account_line(line) {
-                    account.is_admin = is_user_admin(&account.username).await;
+                    account.is_admin = crate::tasks::is_group_member(&admins, &account.username);
                     accounts.push(account);
                 }
             }
@@ -107,6 +109,26 @@ impl UserManagementTask {
     ) -> (Vec<String>, Vec<String>) {
         let mut fixes = Vec::new();
         let mut issues = Vec::new();
+
+        // A real CyberPatriot README always names at least one authorized
+        // administrator. An empty authorized set therefore means README parsing
+        // failed — not that every account on the image is unauthorized. Deleting
+        // on that basis would wipe every legitimate user, so refuse instead.
+        if all_authorized.is_empty() {
+            ui::markup_line(
+                "[red]⚠ No authorized users were parsed from the README - skipping deletion.[/]",
+            );
+            ui::markup_line(
+                "[yellow]This usually means the README failed to parse. Deleting every account is never correct;[/]",
+            );
+            ui::markup_line(
+                "[yellow]re-check the README with --parse-readme before running user management.[/]",
+            );
+            issues.push(
+                "Skipped unauthorized-user deletion: README produced no authorized users".to_string(),
+            );
+            return (fixes, issues);
+        }
 
         let unauthorized: Vec<AccountInfo> = self
             .current_accounts
@@ -279,13 +301,19 @@ impl UserManagementTask {
         ui::write_line();
         ui::markup_line("[cyan]Ensuring all accounts require passwords...[/]");
         for account in &accounts {
-            let (success, _o, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Set-LocalUser -Name '{}' -PasswordNeverExpires $false\"", account.username)),
-            )
+            let (success, _o, error) = command::powershell(&format!(
+                "Set-LocalUser -Name {} -PasswordNeverExpires $false",
+                command::ps_quote(&account.username)
+            ))
             .await;
             if success {
                 ui::markup_line(&format!("[dim]? Password expiration enabled for {}[/]", ui::escape(&account.username)));
+            } else {
+                issues.push(format!(
+                    "Failed to enable password expiration for {}: {}",
+                    account.username,
+                    error.unwrap_or_default()
+                ));
             }
         }
 
@@ -447,11 +475,6 @@ fn parse_csv_line(line: &str) -> Vec<String> {
     }
     result.push(current);
     result
-}
-
-async fn is_user_admin(username: &str) -> bool {
-    let (success, output, _e) = command::execute("net", Some("localgroup Administrators")).await;
-    success && output.to_lowercase().contains(&username.to_lowercase())
 }
 
 #[async_trait]

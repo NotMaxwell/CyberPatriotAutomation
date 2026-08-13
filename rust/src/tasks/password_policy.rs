@@ -52,17 +52,31 @@ impl PasswordPolicyTask {
             }
         }
 
+        // `secedit` is spawned directly rather than through a shell, so a
+        // literal "%TEMP%" is never expanded and the export lands in a file
+        // named "%TEMP%\secpol.cfg" relative to the working directory - while
+        // the `cmd /c type` that read it back *did* expand the variable and so
+        // looked somewhere else entirely. Complexity therefore always read as
+        // disabled. Resolve the path ourselves and read the file directly.
+        let cfg_path = std::env::temp_dir().join("cpa_secpol_export.cfg");
+        let cfg_path_str = cfg_path.to_string_lossy().into_owned();
         let (sec_success, _o, _e) = command::execute(
             "secedit",
-            Some(r"/export /cfg %TEMP%\secpol.cfg /quiet"),
+            Some(&format!("/export /cfg \"{cfg_path_str}\" /quiet")),
         )
         .await;
         if sec_success {
-            let (read_success, cfg_output, _e) =
-                command::execute("cmd", Some(r"/c type %TEMP%\secpol.cfg")).await;
-            if read_success && cfg_output.contains("PasswordComplexity") {
-                policy.complexity_enabled = cfg_output.contains("PasswordComplexity = 1");
+            if let Ok(cfg_output) = std::fs::read_to_string(&cfg_path) {
+                if cfg_output.contains("PasswordComplexity") {
+                    // The exported value is written as "PasswordComplexity = 1";
+                    // tolerate any surrounding whitespace.
+                    policy.complexity_enabled = cfg_output
+                        .lines()
+                        .filter_map(|l| l.split_once('='))
+                        .any(|(k, v)| k.trim().eq_ignore_ascii_case("PasswordComplexity") && v.trim() == "1");
+                }
             }
+            let _ = std::fs::remove_file(&cfg_path);
         }
 
         policy

@@ -28,16 +28,18 @@ impl AccountPermissionsTask {
     async fn get_user_accounts() -> Vec<AccountInfo> {
         let mut accounts = Vec::new();
 
-        let (success, output, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Get-LocalUser | Select-Object Name, FullName, Enabled, PasswordRequired, PasswordNeverExpires, LastLogon | ConvertTo-Csv -NoTypeInformation\""),
+        let (success, output, _e) = command::powershell_query(
+            "Get-LocalUser | Select-Object Name, FullName, Enabled, PasswordRequired, PasswordNeverExpires, LastLogon | ConvertTo-Csv -NoTypeInformation",
         )
         .await;
 
         if success && !output.is_empty() {
+            // Read the Administrators membership once rather than shelling out
+            // per account, and match names exactly.
+            let admins = crate::tasks::local_group_members("Administrators").await;
             for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()).skip(1) {
                 if let Some(mut account) = parse_account_from_csv(line) {
-                    account.is_admin = is_user_admin(&account.username).await;
+                    account.is_admin = crate::tasks::is_group_member(&admins, &account.username);
                     account.group_memberships = get_user_groups(&account.username).await;
                     accounts.push(account);
                 }
@@ -163,10 +165,10 @@ impl AccountPermissionsTask {
                 "[yellow]Enabling password expiration for {}...[/]",
                 ui::escape(&account.username)
             ));
-            let (success, _o, error) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Set-LocalUser -Name '{}' -PasswordNeverExpires $false\"", account.username)),
-            )
+            let (success, _o, error) = command::powershell(&format!(
+                "Set-LocalUser -Name {} -PasswordNeverExpires $false",
+                command::ps_quote(&account.username)
+            ))
             .await;
             if success {
                 fixes.push(format!("Enabled password expiration for {}", account.username));
@@ -312,16 +314,11 @@ fn parse_datetime(value: &str) -> Option<DateTime<Local>> {
     None
 }
 
-async fn is_user_admin(username: &str) -> bool {
-    let (success, output, _e) = command::execute("net", Some("localgroup Administrators")).await;
-    success && output.to_lowercase().contains(&username.to_lowercase())
-}
-
 async fn get_user_groups(username: &str) -> Vec<String> {
-    let (success, output, _e) = command::execute(
-        "powershell",
-        Some(&format!("-Command \"(Get-LocalUser '{username}' | Get-LocalGroup).Name\"")),
-    )
+    let (success, output, _e) = command::powershell_query(&format!(
+        "(Get-LocalUser {} | Get-LocalGroup).Name",
+        command::ps_quote(username)
+    ))
     .await;
     if success && !output.is_empty() {
         output.split(['\r', '\n']).filter(|l| !l.is_empty()).map(|l| l.to_string()).collect()
@@ -425,8 +422,19 @@ impl Task for AccountPermissionsTask {
             }
         }
 
-        let no_password: Vec<&AccountInfo> =
-            accounts.iter().filter(|a| !a.password_required && a.is_enabled).collect();
+        // Apply the same exclusion `enforce_password_required` uses. Without it,
+        // verification permanently fails over built-in accounts that execute
+        // deliberately never touches.
+        let no_password: Vec<&AccountInfo> = accounts
+            .iter()
+            .filter(|a| {
+                !a.password_required
+                    && a.is_enabled
+                    && !AccountSecurityStandards::INSECURE_USERNAMES
+                        .iter()
+                        .any(|u| u.eq_ignore_ascii_case(&a.username))
+            })
+            .collect();
         if !no_password.is_empty() {
             ui::markup_line(&format!(
                 "[red]? {} account(s) still don't require passwords[/]",

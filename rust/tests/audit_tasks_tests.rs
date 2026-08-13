@@ -4,6 +4,50 @@
 
 use cyberpatriot_automation::tasks::*;
 
+// --- Group membership parsing -------------------------------------------------
+//
+// `is_user_admin` used to substring-search the whole `net localgroup` blob, so
+// names appearing in the surrounding prose counted as membership.
+
+const NET_LOCALGROUP_OUTPUT: &str = "Alias name     Administrators\r
+Comment        Administrators have complete and unrestricted access to the computer/domain\r
+\r
+Members\r
+\r
+-------------------------------------------------------------------------------\r
+Administrator\r
+CYBERPC\\alice\r
+bob\r
+The command completed successfully.\r
+";
+
+#[test]
+fn parse_local_group_members_reads_only_the_member_rows() {
+    let members = parse_local_group_members(NET_LOCALGROUP_OUTPUT);
+    assert_eq!(members, vec!["Administrator", "CYBERPC\\alice", "bob"]);
+}
+
+#[test]
+fn is_group_member_matches_exact_names_only() {
+    let members = parse_local_group_members(NET_LOCALGROUP_OUTPUT);
+
+    assert!(is_group_member(&members, "bob"));
+    assert!(is_group_member(&members, "BOB"), "match is case-insensitive");
+    assert!(is_group_member(&members, "Administrator"));
+    // DOMAIN\user entries match on the bare account name too.
+    assert!(is_group_member(&members, "alice"));
+
+    // These all appear in the surrounding prose and used to yield false
+    // positives under the old substring search.
+    for impostor in ["admin", "command", "access", "the", "comp"] {
+        assert!(
+            !is_group_member(&members, impostor),
+            "'{impostor}' must not be treated as an administrator"
+        );
+    }
+}
+
+
 #[tokio::test]
 async fn dns_settings_audit_name_and_description() {
     let task = DnsSettingsAuditTask::new();

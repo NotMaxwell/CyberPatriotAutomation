@@ -236,33 +236,74 @@ impl ServiceManagementTask {
         (to_disable, to_enable, do_not_touch)
     }
 
-    async fn protect_critical_services(fixes: &mut Vec<String>, _issues: &mut [String]) {
-        ui::markup_line(&format!("[cyan]Protecting {} critical services...[/]", CRITICAL_SERVICES.len()));
+    /// Query every service's status in one call, keyed by lowercased name.
+    ///
+    /// The C# original spawned a separate PowerShell process per service, which
+    /// is why it only ever sampled the first handful. One bulk query makes
+    /// checking *all* of them cheap enough to be correct.
+    async fn service_status_map() -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        let (success, output, _e) = command::powershell_query(
+            "Get-Service | Select-Object Name, Status | ConvertTo-Csv -NoTypeInformation",
+        )
+        .await;
+        if !success {
+            return map;
+        }
+        for line in output.split(['\r', '\n']).filter(|l| !l.trim().is_empty()).skip(1) {
+            let fields: Vec<&str> = line.split("\",\"").collect();
+            if fields.len() < 2 {
+                continue;
+            }
+            let name = fields[0].trim_matches('"').trim();
+            let status = fields[1].trim_matches('"').trim();
+            if !name.is_empty() {
+                map.insert(name.to_lowercase(), status.to_string());
+            }
+        }
+        map
+    }
 
-        for (service, _) in CRITICAL_SERVICES.iter().take(10) {
-            let (success, output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\"")),
-            )
-            .await;
-            if success && !output.trim().is_empty() {
-                if !output.trim().eq_ignore_ascii_case("Running") {
-                    ui::markup_line(&format!("[yellow]Starting critical service: {service}...[/]"));
-                    let (start_success, _o, start_error) =
-                        command::execute("net", Some(&format!("start \"{service}\""))).await;
-                    if start_success {
-                        fixes.push(format!("Started critical service: {service}"));
-                        ui::markup_line(&format!("[green]? Started {service}[/]"));
-                    } else {
-                        ui::markup_line(&format!(
-                            "[dim]Could not start {}: {}[/]",
-                            service,
-                            ui::escape(&start_error.unwrap_or_default())
-                        ));
-                    }
-                } else {
-                    ui::markup_line(&format!("[dim]? {service} is already running[/]"));
-                }
+    /// Ensure every protected service is running.
+    ///
+    /// The C# original iterated only the first 10 of its hard-coded critical
+    /// list, which meant services the README itself marked critical (CCS Client
+    /// above all) were never started - the exact opposite of the intent. Protect
+    /// the full `do_not_touch` set, which includes the README's own entries.
+    async fn protect_critical_services(
+        do_not_touch: &ServiceSet,
+        fixes: &mut Vec<String>,
+        issues: &mut Vec<String>,
+    ) {
+        ui::markup_line(&format!(
+            "[cyan]Protecting {} critical services...[/]",
+            do_not_touch.len()
+        ));
+
+        let statuses = Self::service_status_map().await;
+
+        for service in do_not_touch.iter() {
+            let Some(status) = statuses.get(&service.to_lowercase()) else {
+                // Not installed on this image - nothing to protect.
+                continue;
+            };
+            if status.eq_ignore_ascii_case("Running") {
+                ui::markup_line(&format!("[dim]? {service} is already running[/]"));
+                continue;
+            }
+
+            ui::markup_line(&format!("[yellow]Starting critical service: {service}...[/]"));
+            // A disabled service cannot be started until its start type is reset.
+            let _ = command::execute("sc", Some(&format!("config \"{service}\" start= auto"))).await;
+            let (start_success, _o, start_error) =
+                command::execute("net", Some(&format!("start \"{service}\""))).await;
+            if start_success {
+                fixes.push(format!("Started critical service: {service}"));
+                ui::markup_line(&format!("[green]? Started {service}[/]"));
+            } else {
+                let e = start_error.unwrap_or_default();
+                issues.push(format!("Could not start critical service {service}: {e}"));
+                ui::markup_line(&format!("[red]? Could not start {}: {}[/]", service, ui::escape(&e)));
             }
         }
     }
@@ -276,12 +317,33 @@ impl ServiceManagementTask {
             ui::markup_line(&format!("[yellow]Enabling service: {service}...[/]"));
             let (config_success, _o, config_error) =
                 command::execute("sc", Some(&format!("config \"{service}\" start= auto"))).await;
-            let _ = command::execute("net", Some(&format!("start \"{service}\""))).await;
-            if config_success {
+            if !config_success {
+                issues.push(format!("Could not enable {}: {}", service, config_error.unwrap_or_default()));
+                ui::markup_line(&format!("[red]? Could not enable {service}[/]"));
+                continue;
+            }
+
+            // The C# original discarded this result and reported success purely
+            // on `sc config`, so a service set to auto-start but failing to
+            // start was still counted as enabled.
+            let (start_success, _o, start_error) =
+                command::execute("net", Some(&format!("start \"{service}\""))).await;
+            let already_running = start_error
+                .as_deref()
+                .map(|e| e.contains("already been started"))
+                .unwrap_or(false);
+
+            if start_success || already_running {
                 fixes.push(format!("Enabled service: {service}"));
                 ui::markup_line(&format!("[green]? Enabled {service}[/]"));
             } else {
-                issues.push(format!("Could not enable {}: {}", service, config_error.unwrap_or_default()));
+                let e = start_error.unwrap_or_default();
+                issues.push(format!("Set {service} to auto-start but could not start it: {e}"));
+                ui::markup_line(&format!(
+                    "[yellow]? {} set to auto-start but did not start: {}[/]",
+                    service,
+                    ui::escape(&e)
+                ));
             }
         }
     }
@@ -305,10 +367,10 @@ impl ServiceManagementTask {
                 continue;
             }
 
-            let (check_success, check_output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Get-Service -Name '{service}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status\"")),
-            )
+            let (check_success, check_output, _e) = command::powershell_query(&format!(
+                "Get-Service -Name {} | Select-Object -ExpandProperty Status",
+                command::ps_quote(service)
+            ))
             .await;
 
             if !check_success || check_output.trim().is_empty() {
@@ -346,10 +408,10 @@ impl ServiceManagementTask {
     async fn disable_insecure_features(fixes: &mut Vec<String>, _issues: &mut [String]) {
         ui::markup_line("[cyan]Disabling insecure Windows features...[/]");
         for feature in FEATURES_TO_DISABLE {
-            let (success, _o, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Disable-WindowsOptionalFeature -Online -FeatureName '{feature}' -NoRestart -ErrorAction SilentlyContinue\"")),
-            )
+            let (success, _o, _e) = command::powershell(&format!(
+                "Disable-WindowsOptionalFeature -Online -FeatureName {} -NoRestart",
+                command::ps_quote(feature)
+            ))
             .await;
             if success {
                 fixes.push(format!("Disabled feature: {feature}"));
@@ -359,11 +421,14 @@ impl ServiceManagementTask {
             }
         }
         ui::markup_line("[cyan]Ensuring SMB1 is disabled...[/]");
-        let _ = command::execute(
-            "powershell",
-            Some("-Command \"Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction SilentlyContinue\""),
-        )
-        .await;
+        let (smb1_success, _o, _e) =
+            command::powershell("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force").await;
+        if smb1_success {
+            fixes.push("Disabled SMB1 protocol".to_string());
+            ui::markup_line("[green]? Disabled SMB1 protocol[/]");
+        } else {
+            ui::markup_line("[yellow]? Could not disable SMB1 protocol[/]");
+        }
     }
 }
 
@@ -381,9 +446,8 @@ impl Task for ServiceManagementTask {
         let mut system_info = SystemInfo::new();
         ui::markup_line("[cyan]Reading current service states...[/]");
 
-        let (success, output, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Csv -NoTypeInformation\""),
+        let (success, output, _e) = command::powershell_query(
+            "Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Csv -NoTypeInformation",
         )
         .await;
 
@@ -421,7 +485,7 @@ impl Task for ServiceManagementTask {
 
         ui::write_line();
         ui::rule("[bold yellow]Step 1: Protect Critical Services[/]");
-        Self::protect_critical_services(&mut fixes, &mut issues).await;
+        Self::protect_critical_services(&do_not_touch, &mut fixes, &mut issues).await;
 
         ui::write_line();
         ui::rule("[bold yellow]Step 2: Enable Required Services[/]");
@@ -449,29 +513,41 @@ impl Task for ServiceManagementTask {
         let mut all_good = true;
         let (to_disable, _to_enable, do_not_touch) = self.build_service_lists();
 
+        // One bulk query instead of a process per service, so every service can
+        // be checked. The C# original sampled only the first five of `toDisable`
+        // and then reported that partial result as full verification.
+        let statuses = Self::service_status_map().await;
+
         for service in do_not_touch.iter() {
-            let (success, output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\"")),
-            )
-            .await;
-            if success && output.trim().eq_ignore_ascii_case("Running") {
+            let Some(status) = statuses.get(&service.to_lowercase()) else {
+                continue;
+            };
+            if status.eq_ignore_ascii_case("Running") {
                 ui::markup_line(&format!("[green]? Critical service {service} is running[/]"));
-            } else if success && !output.trim().is_empty() {
-                ui::markup_line(&format!("[yellow]? Critical service {} is {}[/]", service, ui::escape(output.trim())));
+            } else {
+                // A critical service that is not running is a verification
+                // failure: these are the services that must stay up.
+                ui::markup_line(&format!(
+                    "[red]? Critical service {} is {}[/]",
+                    service,
+                    ui::escape(status)
+                ));
+                all_good = false;
             }
         }
 
-        for service in to_disable.iter().take(5) {
-            let (success, output, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\"")),
-            )
-            .await;
-            if success && output.trim().eq_ignore_ascii_case("Stopped") {
+        for service in to_disable.iter() {
+            let Some(status) = statuses.get(&service.to_lowercase()) else {
+                continue;
+            };
+            if status.eq_ignore_ascii_case("Stopped") {
                 ui::markup_line(&format!("[green]? Insecure service {service} is stopped[/]"));
-            } else if success && !output.trim().is_empty() {
-                ui::markup_line(&format!("[red]? Insecure service {} is still {}[/]", service, ui::escape(output.trim())));
+            } else {
+                ui::markup_line(&format!(
+                    "[red]? Insecure service {} is still {}[/]",
+                    service,
+                    ui::escape(status)
+                ));
                 all_good = false;
             }
         }

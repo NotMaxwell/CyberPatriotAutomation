@@ -32,14 +32,47 @@ impl Default for SharedFoldersAuditTask {
     }
 }
 
+/// Extract share names from `net share` output.
+///
+/// The output is a table wrapped in a header and a trailing status line:
+///
+/// ```text
+/// Share name   Resource                        Remark
+/// -------------------------------------------------------------------------------
+/// C$           C:\                             Default share
+/// IPC$                                         Remote IPC
+/// The command completed successfully.
+/// ```
+///
+/// Taking the first token of every line containing a space - as this used to -
+/// also picked up "Share" from the header and "The" from the trailing status
+/// line, so the task tried to `net share Share /delete` on entries that were
+/// never shares. Read only the rows between the separator and the status line.
 fn parse_shares(output: &str) -> Vec<String> {
-    output
-        .split('\n')
-        .filter(|l| l.contains(' '))
-        .map(|l| l.split(' ').next().unwrap_or("").trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
+    let mut shares = Vec::new();
+    let mut past_separator = false;
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("---") {
+            past_separator = true;
+            continue;
+        }
+        if !past_separator {
+            continue;
+        }
+        if trimmed.starts_with("The command completed") {
+            break;
+        }
+        if let Some(name) = trimmed.split_whitespace().next() {
+            shares.push(name.to_string());
+        }
+    }
+    shares
 }
+
 
 fn unauthorized(found: &[String]) -> Vec<String> {
     found
@@ -89,29 +122,43 @@ impl Task for SharedFoldersAuditTask {
             };
         }
 
+        let mut removed: Vec<String> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+
         for share in &unauthorized {
             let (del_success, _out, del_err) =
                 command::execute("net", Some(&format!("share {share} /delete"))).await;
             if del_success {
+                removed.push(share.clone());
                 ui::markup_line(&format!("[green]✓ Removed share: {}[/]", ui::escape(share)));
             } else {
+                let e = del_err.unwrap_or_default();
+                failures.push(format!("{share}: {e}"));
                 ui::markup_line(&format!(
                     "[red]✗ Failed to remove share: {} ({})[/]",
                     ui::escape(share),
-                    ui::escape(&del_err.unwrap_or_default())
+                    ui::escape(&e)
                 ));
             }
         }
-        if !unauthorized.is_empty() {
-            details.push(format!("Removed: {}", unauthorized.join(", ")));
-        } else {
+
+        if removed.is_empty() {
             details.push("No shares needed removal.".to_string());
+        } else {
+            details.push(format!("Removed: {}", removed.join(", ")));
+        }
+        if !failures.is_empty() {
+            details.push(format!("Failed to remove: {}", failures.join("; ")));
         }
 
         TaskResult {
             task_name: self.name.clone(),
-            success: unauthorized.is_empty(),
+            // Success means the remediation went through. The previous
+            // `unauthorized.is_empty()` reported failure precisely when the task
+            // had found and removed offending shares.
+            success: failures.is_empty(),
             message: details.join("\n"),
+            error_details: (!failures.is_empty()).then(|| failures.join("\n")),
             ..Default::default()
         }
     }
@@ -120,5 +167,36 @@ impl Task for SharedFoldersAuditTask {
         let (_success, output, _error) = command::execute("net", Some("share")).await;
         let found = parse_shares(&output);
         unauthorized(&found).is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const NET_SHARE_OUTPUT: &str = "\
+Share name   Resource                        Remark
+
+-------------------------------------------------------------------------------
+C$           C:\\                             Default share
+IPC$                                         Remote IPC
+ADMIN$       C:\\Windows                      Remote Admin
+Docs         C:\\Users\\Public\\Docs
+The command completed successfully.
+
+";
+
+    #[test]
+    fn parse_shares_ignores_header_and_status_lines() {
+        let shares = parse_shares(NET_SHARE_OUTPUT);
+        assert_eq!(shares, vec!["C$", "IPC$", "ADMIN$", "Docs"]);
+        // "Share" (header) and "The" (status line) used to be parsed as shares.
+        assert!(!shares.iter().any(|s| s == "Share" || s == "The"));
+    }
+
+    #[test]
+    fn only_non_default_shares_are_unauthorized() {
+        let shares = parse_shares(NET_SHARE_OUTPUT);
+        assert_eq!(unauthorized(&shares), vec!["Docs"]);
     }
 }

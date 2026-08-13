@@ -116,6 +116,80 @@ pub async fn execute(command: &str, arguments: Option<&str>) -> CommandOutput {
     }
 }
 
+/// Quote a value for safe interpolation into a single-quoted PowerShell string.
+///
+/// PowerShell escapes a literal `'` inside a single-quoted string by doubling
+/// it. Interpolating a raw value - an account name such as `O'Brien`, or a
+/// service display name containing an apostrophe - would otherwise close the
+/// string early and corrupt the remainder of the script.
+pub fn ps_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Wrap a script in the `powershell.exe` arguments used throughout the tool.
+///
+/// `strict` decides how cmdlet errors are surfaced - see [`powershell`] and
+/// [`powershell_query`].
+///
+/// The script is embedded inside a double-quoted `-Command` argument, so it must
+/// not itself contain `"`. Use single quotes (via [`ps_quote`] for interpolated
+/// values) for string literals.
+fn powershell_args(script: &str, strict: bool) -> String {
+    debug_assert!(
+        !script.contains('"'),
+        "PowerShell script must not contain double quotes: {script}"
+    );
+    if strict {
+        // `$ErrorActionPreference = 'Stop'` promotes non-terminating cmdlet
+        // errors to terminating ones so the catch block can map them onto a
+        // non-zero exit code *and* write the reason to stderr.
+        // `[Console]::Error` is used rather than `Write-Error` because the
+        // latter would itself terminate under Stop.
+        format!(
+            "-NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'Stop'; try {{ {script} }} catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 1 }}\""
+        )
+    } else {
+        // The trailing `exit 0` is what makes a query tolerant: without it
+        // PowerShell propagates the failure of the last statement, so asking
+        // for an object that does not exist would surface as a process
+        // failure rather than as empty output.
+        format!(
+            "-NoProfile -NonInteractive -Command \"$ErrorActionPreference = 'SilentlyContinue'; {script}; exit 0\""
+        )
+    }
+}
+
+/// Run a PowerShell script whose failure matters, reporting it via the exit code.
+///
+/// Replaces the previous `-ErrorAction SilentlyContinue` calls, which had two
+/// problems (verified against Windows PowerShell 5.1):
+///
+/// - **The reason was lost.** `SilentlyContinue` suppresses the error record
+///   entirely, so the process exited non-zero but wrote *nothing* to stderr.
+///   Callers formatting `"...: {error}"` produced an empty explanation.
+/// - **Failure was hidden unless it happened last.** PowerShell's exit code
+///   reflects only the final statement, so an error part-way through a
+///   multi-statement script still exited 0.
+///
+/// Under `Stop` + `try`/`catch` any cmdlet error becomes a non-zero exit with
+/// the message on stderr, wherever in the script it occurs.
+///
+/// Pass the bare script - no `-Command` wrapper and no `-ErrorAction` override,
+/// which would defeat the point by re-suppressing the error.
+pub async fn powershell(script: &str) -> CommandOutput {
+    execute("powershell", Some(&powershell_args(script, true))).await
+}
+
+/// Run a read-only PowerShell query, tolerating missing objects.
+///
+/// Absence is not failure here: asking for a service or account that does not
+/// exist should yield empty output rather than an error, and the caller decides
+/// what that means. Use [`powershell`] for anything that changes state.
+pub async fn powershell_query(script: &str) -> CommandOutput {
+    execute("powershell", Some(&powershell_args(script, false))).await
+}
+
+
 /// Execute a command with elevated privileges.
 ///
 /// On non-Windows platforms this behaves like [`execute`] without capturing
@@ -124,4 +198,51 @@ pub async fn execute(command: &str, arguments: Option<&str>) -> CommandOutput {
 pub async fn execute_elevated(command: &str, arguments: Option<&str>) -> CommandOutput {
     let (success, _out, err) = execute(command, arguments).await;
     (success, String::new(), err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ps_quote_wraps_and_doubles_embedded_quotes() {
+        assert_eq!(ps_quote("alice"), "'alice'");
+        // An apostrophe in an account name would otherwise close the string
+        // early and corrupt the rest of the script.
+        assert_eq!(ps_quote("O'Brien"), "'O''Brien'");
+        assert_eq!(ps_quote(""), "''");
+    }
+
+    #[test]
+    fn strict_args_promote_errors_and_set_a_failing_exit_code() {
+        let args = powershell_args("Set-Thing -Value 1", true);
+        assert!(args.contains("$ErrorActionPreference = 'Stop'"));
+        assert!(args.contains("Set-Thing -Value 1"));
+        assert!(args.contains("exit 1"), "failures must map to a non-zero exit");
+        assert!(args.contains("-NonInteractive"));
+    }
+
+    #[test]
+    fn query_args_tolerate_missing_objects() {
+        let args = powershell_args("Get-Thing", false);
+        assert!(args.contains("$ErrorActionPreference = 'SilentlyContinue'"));
+        assert!(args.contains("Get-Thing"));
+        // A query must not turn "not found" into a process failure. Without the
+        // explicit `exit 0`, PowerShell propagates the last statement's failure.
+        assert!(args.contains("exit 0"));
+        assert!(!args.contains("exit 1"));
+    }
+
+    #[test]
+    fn wrapped_scripts_have_balanced_quoting() {
+        for strict in [true, false] {
+            let args = powershell_args("Get-Service -Name 'Spooler'", strict);
+            assert_eq!(
+                args.matches('"').count() % 2,
+                0,
+                "unbalanced double quotes in: {args}"
+            );
+            assert!(args.starts_with("-NoProfile"));
+        }
+    }
 }

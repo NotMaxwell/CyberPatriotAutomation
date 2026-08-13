@@ -41,11 +41,18 @@ impl Default for TaskResult {
 
 impl TaskResult {
     /// Calculates completion rate as a percentage.
+    ///
+    /// When a task does not report per-item counts, fall back to whether the
+    /// task itself succeeded. Returning a flat 100% in that case - as this
+    /// previously did - reported full completion for tasks that had failed
+    /// outright, since no task populates `items_attempted`.
     pub fn completion_rate(&self) -> f64 {
         if self.items_attempted > 0 {
             (self.items_succeeded + self.items_skipped) as f64 / self.items_attempted as f64 * 100.0
-        } else {
+        } else if self.success {
             100.0
+        } else {
+            0.0
         }
     }
 }

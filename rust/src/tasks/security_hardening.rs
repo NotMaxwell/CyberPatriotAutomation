@@ -97,7 +97,7 @@ impl SecurityHardeningTask {
         }
     }
 
-    async fn apply_registry_settings(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn apply_registry_settings(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line(&format!("[cyan]Applying {} registry settings...[/]", REGISTRY_SETTINGS.len()));
 
         let mut success_count = 0;
@@ -112,7 +112,7 @@ impl SecurityHardeningTask {
         bar.set_message("Applying registry settings...");
 
         for (path, name, ty, value, description) in REGISTRY_SETTINGS {
-            let (success, _o, _e) = command::execute(
+            let (success, _o, error) = command::execute(
                 "reg",
                 Some(&format!("add \"{path}\" /v {name} /t {ty} /d {value} /f")),
             )
@@ -121,6 +121,16 @@ impl SecurityHardeningTask {
                 fixes.push(format!("Set {description}"));
                 success_count += 1;
             } else {
+                // Failures were counted for the on-screen tally but never
+                // recorded, so they never reached the run summary or the
+                // task's error details.
+                issues.push(format!(
+                    "Failed to set {} ({}\\{}): {}",
+                    description,
+                    path,
+                    name,
+                    error.unwrap_or_default()
+                ));
                 fail_count += 1;
             }
             bar.inc(1);
@@ -136,10 +146,10 @@ impl SecurityHardeningTask {
     async fn disable_insecure_features(fixes: &mut Vec<String>, _issues: &mut [String]) {
         ui::markup_line("[cyan]Disabling insecure Windows features...[/]");
         for feature in FEATURES_TO_DISABLE {
-            let (success, _o, _e) = command::execute(
-                "powershell",
-                Some(&format!("-Command \"Disable-WindowsOptionalFeature -Online -FeatureName '{feature}' -NoRestart -ErrorAction SilentlyContinue\"")),
-            )
+            let (success, _o, _e) = command::powershell(&format!(
+                "Disable-WindowsOptionalFeature -Online -FeatureName {} -NoRestart",
+                command::ps_quote(feature)
+            ))
             .await;
             if success {
                 fixes.push(format!("Disabled feature: {feature}"));
@@ -148,48 +158,74 @@ impl SecurityHardeningTask {
                 ui::markup_line(&format!("[dim]Feature {feature} may not exist or already disabled[/]"));
             }
         }
-        let _ = command::execute(
-            "powershell",
-            Some("-Command \"Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force -ErrorAction SilentlyContinue\""),
-        )
-        .await;
-        fixes.push("Disabled SMB1 protocol".to_string());
+        // Result was previously discarded while the fix was recorded regardless.
+        let (smb1_success, _o, _e) =
+            command::powershell("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force").await;
+        if smb1_success {
+            fixes.push("Disabled SMB1 protocol".to_string());
+            ui::markup_line("[green]? Disabled SMB1 protocol[/]");
+        } else {
+            ui::markup_line("[yellow]? Could not disable SMB1 protocol[/]");
+        }
     }
 
-    async fn configure_system_settings(fixes: &mut Vec<String>, _issues: &mut [String]) {
+    async fn configure_system_settings(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring additional system settings...[/]");
 
-        let _ = command::execute("ipconfig", Some("/flushdns")).await;
-        fixes.push("Flushed DNS cache".to_string());
-        ui::markup_line("[green]? Flushed DNS cache[/]");
+        // Each of these used to discard its result and record the fix
+        // unconditionally, so the summary credited work that never happened.
+        // `record` keeps that reporting honest.
+        fn record(
+            label: &str,
+            outcome: crate::command::CommandOutput,
+            fixes: &mut Vec<String>,
+            issues: &mut Vec<String>,
+        ) {
+            let (success, _o, error) = outcome;
+            if success {
+                fixes.push(label.to_string());
+                ui::markup_line(&format!("[green]? {label}[/]"));
+            } else {
+                let e = error.unwrap_or_default();
+                issues.push(format!("{label} failed: {e}"));
+                ui::markup_line(&format!("[yellow]? {} failed: {}[/]", label, ui::escape(&e)));
+            }
+        }
 
-        let _ = command::execute(
-            "powershell",
-            Some("-Command \"Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue\""),
-        )
-        .await;
-        fixes.push("Enabled Windows Defender real-time monitoring".to_string());
-        ui::markup_line("[green]? Enabled Windows Defender real-time monitoring[/]");
+        record(
+            "Flushed DNS cache",
+            command::execute("ipconfig", Some("/flushdns")).await,
+            fixes,
+            issues,
+        );
+        record(
+            "Enabled Windows Defender real-time monitoring",
+            command::powershell("Set-MpPreference -DisableRealtimeMonitoring $false").await,
+            fixes,
+            issues,
+        );
 
         ui::markup_line("[cyan]Updating Windows Defender definitions...[/]");
-        let _ = command::execute(
-            "powershell",
-            Some("-Command \"Update-MpSignature -ErrorAction SilentlyContinue\""),
-        )
-        .await;
-        fixes.push("Updated Windows Defender definitions".to_string());
-        ui::markup_line("[green]? Updated Windows Defender definitions[/]");
+        record(
+            "Updated Windows Defender definitions",
+            command::powershell("Update-MpSignature").await,
+            fixes,
+            issues,
+        );
 
-        let _ = command::execute("net", Some("start wuauserv")).await;
-        fixes.push("Started Windows Update service".to_string());
+        record(
+            "Started Windows Update service",
+            command::execute("net", Some("start wuauserv")).await,
+            fixes,
+            issues,
+        );
     }
 
     async fn disable_suspicious_startup(fixes: &mut Vec<String>, _issues: &mut [String]) {
         ui::markup_line("[cyan]Checking startup programs...[/]");
 
-        let (success, output, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Get-CimInstance Win32_StartupCommand | Select-Object Name, Command, Location | ConvertTo-Json\""),
+        let (success, output, _e) = command::powershell_query(
+            "Get-CimInstance Win32_StartupCommand | Select-Object Name, Command, Location | ConvertTo-Json",
         )
         .await;
         if success && !output.is_empty() {

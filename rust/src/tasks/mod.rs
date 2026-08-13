@@ -19,7 +19,7 @@ mod software_management;
 mod suspicious_scheduled_tasks_audit;
 mod user_management;
 
-pub use base::Task;
+pub use base::{is_group_member, local_group_members, parse_local_group_members, Task};
 
 pub use account_permissions::AccountPermissionsTask;
 pub use audit_policy::AuditPolicyTask;

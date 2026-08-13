@@ -72,7 +72,7 @@ async fn run_automation() {
 
     // Auto-find the README if requested and none supplied.
     if readme_file.is_none() && auto_find_readme {
-        readme_file = app_config::find_readme_file();
+        readme_file = app_config::find_readme_file().await;
     }
 
     // Parse README if needed.
@@ -268,10 +268,13 @@ fn display_overall_statistics(results: &[TaskResult]) {
     let total_succeeded: i32 = results.iter().map(|r| r.items_succeeded).sum();
     let total_skipped: i32 = results.iter().map(|r| r.items_skipped).sum();
 
+    // With no per-item counts reported, fall back to the share of tasks that
+    // succeeded. The previous flat 100% meant the headline "Overall Completion
+    // Rate" always read 100%, however many tasks had failed.
     let overall_completion_rate = if total_attempted > 0 {
         (total_succeeded + total_skipped) as f64 / total_attempted as f64 * 100.0
     } else {
-        100.0
+        success_count as f64 / results.len() as f64 * 100.0
     };
 
     let mut overall_confidence = if total_attempted > 0 {

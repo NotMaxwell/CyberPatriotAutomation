@@ -31,6 +31,37 @@ impl Default for GroupPolicyTask {
     }
 }
 
+/// Read the REG_DWORD value named `name` out of `reg query` output.
+///
+/// `reg query <key> /v <name>` prints the value on its own indented line:
+///
+/// ```text
+/// HKEY_LOCAL_MACHINE\SOFTWARE\...\System
+///     dontdisplaylastusername    REG_DWORD    0x1
+/// ```
+fn parse_reg_dword(output: &str, name: &str) -> Option<u32> {
+    for line in output.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() >= 3
+            && fields[0].eq_ignore_ascii_case(name)
+            && fields[1].eq_ignore_ascii_case("REG_DWORD")
+        {
+            let raw = fields[2];
+            let hex = raw.trim_start_matches("0x").trim_start_matches("0X");
+            return u32::from_str_radix(hex, 16).ok().or_else(|| raw.parse().ok());
+        }
+    }
+    None
+}
+
+/// Confirm a registry value is present *and* set to `expected`.
+async fn reg_dword_equals(key: &str, name: &str, expected: u32) -> bool {
+    let (success, output, _e) =
+        command::execute("reg", Some(&format!("query {key} /v {name}"))).await;
+    success && parse_reg_dword(&output, name) == Some(expected)
+}
+
+
 #[async_trait]
 impl Task for GroupPolicyTask {
     impl_task_meta!();
@@ -116,22 +147,73 @@ impl Task for GroupPolicyTask {
     }
 
     async fn verify(&mut self) -> bool {
-        let (hide_user_success, _o, _e) = command::execute(
-            "reg",
-            Some(r"query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v dontdisplaylastusername"),
-        )
-        .await;
-        let (cad_success, _o, _e) = command::execute(
-            "reg",
-            Some(r"query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v DisableCAD"),
-        )
-        .await;
-        let (ics_success, _o, _e) = command::execute("sc", Some("qc SharedAccess")).await;
-        let (anon_success, _o, _e) = command::execute(
-            "reg",
-            Some(r"query HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v restrictanonymous"),
-        )
-        .await;
-        hide_user_success && cad_success && ics_success && anon_success
+        // These checks previously only asserted that `reg query` / `sc qc`
+        // exited successfully, which is true whenever the value merely *exists*.
+        // A setting left at the wrong value therefore verified as correct.
+        const POLICIES: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+        const LSA: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa";
+
+        let hide_user_ok = reg_dword_equals(POLICIES, "dontdisplaylastusername", 1).await;
+        // DisableCAD = 0 means Ctrl+Alt+Del *is* required.
+        let cad_ok = reg_dword_equals(POLICIES, "DisableCAD", 0).await;
+        let anon_ok = reg_dword_equals(LSA, "restrictanonymous", 1).await;
+
+        let (sc_success, sc_output, _e) = command::execute("sc", Some("qc SharedAccess")).await;
+        // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
+        let ics_ok = sc_success
+            && sc_output
+                .lines()
+                .find(|l| l.to_uppercase().contains("START_TYPE"))
+                .map(|l| l.to_uppercase().contains("DISABLED"))
+                .unwrap_or(false);
+
+        if !hide_user_ok {
+            ui::markup_line("[red]? 'Don't display last user name' is not set[/]");
+        }
+        if !cad_ok {
+            ui::markup_line("[red]? Ctrl+Alt+Del is not required at logon[/]");
+        }
+        if !anon_ok {
+            ui::markup_line("[red]? Anonymous access is not restricted[/]");
+        }
+        if !ics_ok {
+            ui::markup_line("[red]? Internet Connection Sharing is not disabled[/]");
+        }
+
+        hide_user_ok && cad_ok && anon_ok && ics_ok
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const REG_QUERY_OUTPUT: &str = "\r
+HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System\r
+    dontdisplaylastusername    REG_DWORD    0x1\r
+    DisableCAD    REG_DWORD    0x0\r
+";
+
+    #[test]
+    fn parse_reg_dword_reads_the_named_value() {
+        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "dontdisplaylastusername"), Some(1));
+        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(0));
+    }
+
+    #[test]
+    fn parse_reg_dword_is_case_insensitive_on_the_value_name() {
+        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "DONTDISPLAYLASTUSERNAME"), Some(1));
+    }
+
+    #[test]
+    fn parse_reg_dword_returns_none_when_absent() {
+        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "restrictanonymous"), None);
+    }
+
+    #[test]
+    fn a_present_but_wrong_value_is_distinguishable() {
+        // The old verify only checked that `reg query` exited 0, so a value
+        // present with the wrong contents passed verification.
+        assert_ne!(parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(1));
     }
 }

@@ -31,6 +31,17 @@ fn default_readme_paths_should_contain_common_locations() {
     assert!(paths.iter().any(|p| p.contains("Desktop")));
 }
 
+// CyberPatriot images conventionally place a `.lnk` shortcut to the README on
+// the desktop of the user running the tool, rather than the file itself, so
+// `find_readme_file` must resolve shortcuts (via WScript.Shell on Windows)
+// before falling back to the literal default paths. This just exercises the
+// async entry point end-to-end without asserting a specific outcome, since
+// what (if anything) is found depends on the machine running the test.
+#[tokio::test]
+async fn find_readme_file_does_not_panic() {
+    let _ = app_config::find_readme_file().await;
+}
+
 #[test]
 fn secure_passwords_should_have_enough_passwords() {
     assert!(app_config::SECURE_PASSWORDS.len() >= 10);

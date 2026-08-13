@@ -55,11 +55,7 @@ impl SoftwareManagementTask {
         let scan_type = if self.use_quick_scan { "QuickScan" } else { "FullScan" };
         ui::markup_line(&format!("[blue]Running Windows Defender {scan_type}...[/]"));
 
-        let (update_success, _o, update_error) = command::execute(
-            "powershell",
-            Some("-Command \"Update-MpSignature -ErrorAction SilentlyContinue\""),
-        )
-        .await;
+        let (update_success, _o, update_error) = command::powershell("Update-MpSignature").await;
         if update_success {
             ui::markup_line("[green]✓ Windows Defender signatures updated[/]");
         } else {
@@ -69,11 +65,8 @@ impl SoftwareManagementTask {
             ));
         }
 
-        let (scan_success, _scan_output, scan_error) = command::execute(
-            "powershell",
-            Some(&format!("-Command \"Start-MpScan -ScanType {scan_type}\"")),
-        )
-        .await;
+        let (scan_success, _scan_output, scan_error) =
+            command::powershell(&format!("Start-MpScan -ScanType {scan_type}")).await;
 
         if !scan_success {
             ui::markup_line(&format!(
@@ -85,9 +78,8 @@ impl SoftwareManagementTask {
 
         ui::markup_line(&format!("[green]✓ Windows Defender {scan_type} completed[/]"));
 
-        let (threat_success, threat_output, _e) = command::execute(
-            "powershell",
-            Some("-Command \"Get-MpThreatDetection | Select-Object -Property ThreatID, ActionSuccess | ConvertTo-Json\""),
+        let (threat_success, threat_output, _e) = command::powershell_query(
+            "Get-MpThreatDetection | Select-Object -Property ThreatID, ActionSuccess | ConvertTo-Json",
         )
         .await;
 
@@ -96,11 +88,7 @@ impl SoftwareManagementTask {
             threats_found = threat_output.split("ThreatID").count() as i32 - 1;
             if threats_found > 0 {
                 ui::markup_line(&format!("[red]⚠ Windows Defender found {threats_found} threat(s)[/]"));
-                let (remove_success, _o, remove_error) = command::execute(
-                    "powershell",
-                    Some("-Command \"Remove-MpThreat -ErrorAction SilentlyContinue\""),
-                )
-                .await;
+                let (remove_success, _o, remove_error) = command::powershell("Remove-MpThreat").await;
                 if remove_success {
                     ui::markup_line("[green]✓ Attempted to remove detected threats[/]");
                 } else {
@@ -208,6 +196,7 @@ impl Task for SoftwareManagementTask {
             details.push("All required software is installed.".to_string());
         }
 
+        let mut removal_failures: Vec<String> = Vec::new();
         for sw in &to_remove {
             let (rem_success, _o, rem_error) = command::execute(
                 "wmic",
@@ -217,10 +206,12 @@ impl Task for SoftwareManagementTask {
             if rem_success {
                 ui::markup_line(&format!("[green]✓ Removed: {}[/]", ui::escape(sw)));
             } else {
+                let e = rem_error.unwrap_or_default();
+                removal_failures.push(format!("{sw}: {e}"));
                 ui::markup_line(&format!(
                     "[red]✗ Failed to remove: {} ({})[/]",
                     ui::escape(sw),
-                    ui::escape(&rem_error.unwrap_or_default())
+                    ui::escape(&e)
                 ));
             }
         }
@@ -242,8 +233,18 @@ impl Task for SoftwareManagementTask {
 
         TaskResult {
             task_name: self.name.clone(),
-            success: to_remove.is_empty() && to_install.is_empty() && malware_scan_success && threats_found == 0,
+            // Success reflects whether remediation succeeded, not whether there
+            // was nothing to do. The previous condition included
+            // `to_remove.is_empty()`, so successfully uninstalling prohibited
+            // software reported the task as failed. Missing required software is
+            // still a genuine outstanding problem (it needs a manual install),
+            // so that remains part of the condition.
+            success: removal_failures.is_empty()
+                && to_install.is_empty()
+                && malware_scan_success
+                && threats_found == 0,
             message: details.join("\n"),
+            error_details: (!removal_failures.is_empty()).then(|| removal_failures.join("\n")),
             ..Default::default()
         }
     }

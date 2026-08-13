@@ -16,7 +16,7 @@ behaviour, CLI flags, task pipeline, and console UI.
 ```bash
 cd rust
 cargo build --release      # binary: target/release/cyberpatriot-automation
-cargo test                 # 59 tests
+cargo test                 # 82 tests
 cargo clippy --all-targets # clean
 ```
 
@@ -59,6 +59,23 @@ cyberpatriot-automation --firewall          # -f
 - **Command execution:** on Windows the argument string is passed verbatim via
   `raw_arg` to match .NET's `ProcessStartInfo.Arguments`; both stdout/stderr
   are read concurrently under a 2-minute timeout.
+- **PowerShell invocation:** two helpers in `command.rs` replace ad-hoc
+  `-ErrorAction SilentlyContinue` calls. `powershell()` runs state-changing
+  scripts under `$ErrorActionPreference = 'Stop'` inside `try`/`catch`, so any
+  cmdlet error becomes a non-zero exit *with the message on stderr* (the C#
+  original suppressed the error record, leaving failure reasons blank, and hid
+  failures entirely when they occurred before the final statement).
+  `powershell_query()` runs read-only scripts and ends with `exit 0`, so a
+  missing object yields empty output rather than a process failure. Interpolated
+  values go through `ps_quote()`, which doubles embedded `'` — an account named
+  `O'Brien` previously produced a malformed script.
+- **README auto-discovery:** real CyberPatriot images place a `.lnk` desktop
+  shortcut (commonly named "README") on the desktop of the user running the
+  tool, rather than the HTML file itself, so `app_config::find_readme_file`
+  resolves shortcuts (via the `WScript.Shell` COM object, `resolve_shortcut_target`)
+  before falling back to the C# original's hard-coded literal paths. This is a
+  deliberate improvement over the C# `AppConfig.FindReadmeFile`, which only
+  checks literal paths and would miss a shortcut-only README.
 
 Author: Maxwell McCormick · Apache-2.0 · "CyberPatriot Automation Tool" is an
 unregistered trademark of Maxwell McCormick (see `../NOTICE`).

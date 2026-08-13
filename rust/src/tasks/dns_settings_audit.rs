@@ -31,6 +31,25 @@ impl Default for DnsSettingsAuditTask {
     }
 }
 
+/// Which insecure resolvers appear in `netsh` output.
+///
+/// Compares whole whitespace-delimited tokens. A plain substring search matched
+/// an address embedded in a longer one - "1.1.1.1" is a substring of the
+/// perfectly ordinary "10.1.1.1.1"-style text netsh prints - producing false
+/// positives on legitimate configurations.
+fn insecure_servers_in(output: &str) -> Vec<&'static str> {
+    let tokens: Vec<&str> = output
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .map(|t| t.trim_matches(|c: char| c == ':' || c == '(' || c == ')'))
+        .filter(|t| !t.is_empty())
+        .collect();
+    INSECURE_DNS
+        .iter()
+        .copied()
+        .filter(|dns| tokens.iter().any(|t| t == dns))
+        .collect()
+}
+
 #[async_trait]
 impl Task for DnsSettingsAuditTask {
     impl_task_meta!();
@@ -66,11 +85,7 @@ impl Task for DnsSettingsAuditTask {
         for l in output.split(['\n', '\r']).filter(|l| !l.is_empty()) {
             details.push(format!("  {}", l.trim()));
         }
-        let found: Vec<&str> = INSECURE_DNS
-            .iter()
-            .copied()
-            .filter(|dns| output.contains(dns))
-            .collect();
+        let found = insecure_servers_in(&output);
         if found.is_empty() {
             details.push("No insecure DNS servers found.".to_string());
             ui::markup_line("[green]✓ No insecure DNS servers found[/]");
@@ -97,6 +112,6 @@ impl Task for DnsSettingsAuditTask {
     async fn verify(&mut self) -> bool {
         let (_success, output, _error) =
             command::execute("netsh", Some("interface ip show dns")).await;
-        !INSECURE_DNS.iter().any(|dns| output.contains(dns))
+        insecure_servers_in(&output).is_empty()
     }
 }

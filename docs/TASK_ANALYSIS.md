@@ -219,8 +219,17 @@ dotnet run -- --auto-readme --all
 
 ## Default README Locations
 
-The tool automatically searches for README in:
+On a real competition image the README is presented as a **desktop shortcut
+(`.lnk`)** on the desktop of the user running the tool — the HTML file itself
+often lives elsewhere. Auto-discovery therefore looks for a README shortcut on
+the current user's desktop (then the common/Public desktop) and resolves it to
+its target, before falling back to these literal paths:
+
 - C:\Users\Public\Desktop\README.html
 - C:\CyberPatriot\README.html
 - C:\Users\Public\Documents\README.html
 - Current user's desktop
+
+> Note: shortcut resolution is currently implemented in the Rust port
+> (`app_config::find_readme_file`). The C# `AppConfig.FindReadmeFile` still
+> only checks the literal paths above.
