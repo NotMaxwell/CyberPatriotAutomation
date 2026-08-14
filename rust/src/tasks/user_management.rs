@@ -22,6 +22,77 @@ const SECURE_PASSWORDS: &[&str] = &[
     "S8!dF7@gH6#jK5$lZ4%xC3^vB2&nM1bN0(mL9)K",
 ];
 
+/// Set a local account's password.
+///
+/// Uses PowerShell rather than `net user`: `net` interactively confirms any
+/// password longer than 14 characters ("Do you want to continue this operation?
+/// (Y/N)"), and these commands run with stdin closed, so the prompt reaches EOF
+/// and `net` aborts. Every generated password is longer than that, so every
+/// password change failed. `Set-LocalUser` has no prompt and reports a real
+/// reason on failure.
+async fn set_password(username: &str, password: &str) -> Result<(), String> {
+    let script = format!(
+        "Set-LocalUser -Name {} -Password (ConvertTo-SecureString {} -AsPlainText -Force)",
+        command::ps_quote(username),
+        command::ps_quote(password)
+    );
+    match command::powershell(&script).await {
+        (true, _, _) => Ok(()),
+        (false, _, error) => Err(describe(error)),
+    }
+}
+
+/// Create a local account with the given password.
+async fn create_user(username: &str, password: &str) -> Result<(), String> {
+    let script = format!(
+        "New-LocalUser -Name {} -Password (ConvertTo-SecureString {} -AsPlainText -Force) \
+         -AccountNeverExpires -ErrorAction Stop | Out-Null",
+        command::ps_quote(username),
+        command::ps_quote(password)
+    );
+    match command::powershell(&script).await {
+        (true, _, _) => Ok(()),
+        (false, _, error) => Err(describe(error)),
+    }
+}
+
+/// Add a local account to a local group.
+async fn add_to_group(username: &str, group: &str) -> Result<(), String> {
+    let script = format!(
+        "Add-LocalGroupMember -Group {} -Member {}",
+        command::ps_quote(group),
+        command::ps_quote(username)
+    );
+    match command::powershell(&script).await {
+        (true, _, _) => Ok(()),
+        (false, _, error) => {
+            let reason = describe(error);
+            // Already a member is the desired end state, not a failure.
+            if reason.to_lowercase().contains("already a member") {
+                Ok(())
+            } else {
+                Err(reason)
+            }
+        }
+    }
+}
+
+fn describe(error: Option<String>) -> String {
+    error
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| "no reason reported".to_string())
+}
+
+/// A strong password unique to each account.
+///
+/// Cycling the fixed list alone repeated passwords once there were more
+/// accounts than entries; the index suffix keeps every account distinct while
+/// preserving length and character-class coverage.
+fn generate_password(index: usize) -> String {
+    format!("{}#{index:02}", SECURE_PASSWORDS[index % SECURE_PASSWORDS.len()])
+}
+
 /// Case-insensitive set built from an iterator of strings.
 fn ci_set<'a, I: IntoIterator<Item = &'a String>>(items: I) -> HashSet<String> {
     items.into_iter().map(|s| s.to_lowercase()).collect()
@@ -235,28 +306,24 @@ impl UserManagementTask {
         let mut fixes = Vec::new();
         let mut issues = Vec::new();
 
-        let admin_passwords: Vec<(String, String)> = self
+        // Accounts the README marks as the primary, auto-login user. READMEs
+        // state plainly that changing this password may lock you out of the
+        // machine, so it is left alone.
+        let primary_users: HashSet<String> = self
             .readme_data
             .as_ref()
             .map(|r| {
                 r.administrators
                     .iter()
-                    .filter(|a| a.password.as_deref().map(|p| !p.is_empty()).unwrap_or(false))
-                    .map(|a| (a.username.clone(), a.password.clone().unwrap()))
+                    .chain(r.users.iter())
+                    .filter(|u| u.is_primary_user)
+                    .map(|u| u.username.to_lowercase())
                     .collect()
             })
             .unwrap_or_default();
 
-        let admin_password_for = |username: &str| -> Option<String> {
-            admin_passwords
-                .iter()
-                .find(|(u, _)| u.eq_ignore_ascii_case(username))
-                .map(|(_, p)| p.clone())
-        };
-
         self.current_accounts = Self::get_all_user_accounts().await;
 
-        let mut password_index = 0usize;
         let accounts: Vec<AccountInfo> = self
             .current_accounts
             .iter()
@@ -264,36 +331,68 @@ impl UserManagementTask {
             .cloned()
             .collect();
 
+        // Every account gets a freshly generated strong password, administrators
+        // included. The README lists the passwords it *found* during an audit,
+        // not passwords that must be kept - several are trivial ("root",
+        // "data"), and setting those would both weaken the machine and be
+        // rejected outright by the complexity and length policy this run has
+        // just enforced, which is why every password change failed.
+        let mut password_index = 0usize;
         for account in &accounts {
-            if let Some(readme_password) = admin_password_for(&account.username) {
-                ui::markup_line(&format!("[yellow]Setting password for admin {} (from README)...[/]", ui::escape(&account.username)));
-                let (success, _o, error) = command::execute(
-                    "net",
-                    Some(&format!("user \"{}\" \"{}\"", account.username, readme_password)),
-                )
-                .await;
-                if success {
-                    fixes.push(format!("Set password for admin: {}", account.username));
-                    ui::markup_line(&format!("[green]? Password set for {}[/]", ui::escape(&account.username)));
-                } else {
-                    issues.push(format!("Failed to set password for {}: {}", account.username, error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to set password for {}[/]", ui::escape(&account.username)));
+            let is_authorized = ci_contains(authorized_users, &account.username)
+                || account.is_admin
+                || self
+                    .readme_data
+                    .as_ref()
+                    .map(|r| {
+                        r.administrators
+                            .iter()
+                            .any(|a| a.username.eq_ignore_ascii_case(&account.username))
+                    })
+                    .unwrap_or(false);
+            if !is_authorized {
+                continue;
+            }
+
+            if primary_users.contains(&account.username.to_lowercase()) {
+                ui::markup_line(&format!(
+                    "[dim]? Skipping {} - primary auto-login account (changing it risks lockout)[/]",
+                    ui::escape(&account.username)
+                ));
+                continue;
+            }
+
+            let password = generate_password(password_index);
+            password_index += 1;
+
+            ui::markup_line(&format!(
+                "[yellow]Setting secure password for {}...[/]",
+                ui::escape(&account.username)
+            ));
+            match set_password(&account.username, &password).await {
+                Ok(()) => {
+                    // Record the password: it is the only way back into the
+                    // account, and the log is the competitor's own machine.
+                    fixes.push(format!(
+                        "Set secure password for {}: {password}",
+                        account.username
+                    ));
+                    ui::markup_line(&format!(
+                        "[green]? {} password set to: {}[/]",
+                        ui::escape(&account.username),
+                        ui::escape(&password)
+                    ));
                 }
-            } else if ci_contains(authorized_users, &account.username) {
-                let secure_password = SECURE_PASSWORDS[password_index % SECURE_PASSWORDS.len()];
-                password_index += 1;
-                ui::markup_line(&format!("[yellow]Setting secure password for user {}...[/]", ui::escape(&account.username)));
-                let (success, _o, error) = command::execute(
-                    "net",
-                    Some(&format!("user \"{}\" \"{}\"", account.username, secure_password)),
-                )
-                .await;
-                if success {
-                    fixes.push(format!("Set secure password for user: {}", account.username));
-                    ui::markup_line(&format!("[green]? Secure password set for {}[/]", ui::escape(&account.username)));
-                } else {
-                    issues.push(format!("Failed to set password for {}: {}", account.username, error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to set password for {}[/]", ui::escape(&account.username)));
+                Err(reason) => {
+                    issues.push(format!(
+                        "Failed to set password for {}: {reason}",
+                        account.username
+                    ));
+                    ui::markup_line(&format!(
+                        "[red]? Failed to set password for {}: {}[/]",
+                        ui::escape(&account.username),
+                        ui::escape(&reason)
+                    ));
                 }
             }
         }
@@ -343,41 +442,48 @@ impl UserManagementTask {
                 continue;
             }
 
-            let password = SECURE_PASSWORDS[password_index % SECURE_PASSWORDS.len()];
+            let password = generate_password(password_index);
             password_index += 1;
 
             ui::markup_line(&format!("[yellow]Creating new user: {}...[/]", ui::escape(username)));
-            let (success, output, error) =
-                command::execute("net", Some(&format!("user \"{username}\" \"{password}\" /add"))).await;
+            match create_user(username, &password).await {
+                Ok(()) => {
+                    fixes.push(format!("Created new user {username} with password: {password}"));
+                    ui::markup_line(&format!(
+                        "[green]? Created user {} with password: {}[/]",
+                        ui::escape(username),
+                        ui::escape(&password)
+                    ));
 
-            if success {
-                fixes.push(format!("Created new user: {username}"));
-                ui::markup_line(&format!("[green]? Created user: {}[/]", ui::escape(username)));
-
-                if ci_contains(authorized_admins, username) {
-                    let (admin_success, admin_output, admin_error) = command::execute(
-                        "net",
-                        Some(&format!("localgroup Administrators \"{username}\" /add")),
-                    )
-                    .await;
-                    if admin_success {
-                        fixes.push(format!("Added {username} to Administrators"));
-                        ui::markup_line(&format!("[green]? Added {} to Administrators group[/]", ui::escape(username)));
-                    } else {
-                        let e = admin_error.unwrap_or_default();
-                        issues.push(format!("Failed to add {username} to Administrators: {e}"));
-                        ui::markup_line(&format!("[red]? Failed to add {} to Administrators: {}[/]", ui::escape(username), ui::escape(&e)));
-                        if !admin_output.trim().is_empty() {
-                            ui::markup_line(&format!("[red]Command output: {}[/]", ui::escape(&admin_output)));
+                    if ci_contains(authorized_admins, username) {
+                        match add_to_group(username, "Administrators").await {
+                            Ok(()) => {
+                                fixes.push(format!("Added {username} to Administrators"));
+                                ui::markup_line(&format!(
+                                    "[green]? Added {} to Administrators group[/]",
+                                    ui::escape(username)
+                                ));
+                            }
+                            Err(reason) => {
+                                issues.push(format!(
+                                    "Failed to add {username} to Administrators: {reason}"
+                                ));
+                                ui::markup_line(&format!(
+                                    "[red]? Failed to add {} to Administrators: {}[/]",
+                                    ui::escape(username),
+                                    ui::escape(&reason)
+                                ));
+                            }
                         }
                     }
                 }
-            } else {
-                let e = error.unwrap_or_default();
-                issues.push(format!("Failed to create user {username}: {e}"));
-                ui::markup_line(&format!("[red]? Failed to create user {}: {}[/]", ui::escape(username), ui::escape(&e)));
-                if !output.trim().is_empty() {
-                    ui::markup_line(&format!("[red]Command output: {}[/]", ui::escape(&output)));
+                Err(reason) => {
+                    issues.push(format!("Failed to create user {username}: {reason}"));
+                    ui::markup_line(&format!(
+                        "[red]? Failed to create user {}: {}[/]",
+                        ui::escape(username),
+                        ui::escape(&reason)
+                    ));
                 }
             }
         }
@@ -446,7 +552,7 @@ impl Default for UserManagementTask {
 }
 
 fn parse_account_line(csv_line: &str) -> Option<AccountInfo> {
-    let values = parse_csv_line(csv_line);
+    let values = crate::tasks::parse_csv_line(csv_line);
     if values.len() < 3 {
         return None;
     }
@@ -457,24 +563,6 @@ fn parse_account_line(csv_line: &str) -> Option<AccountInfo> {
         is_enabled: values.get(2).map(|v| trim(v).eq_ignore_ascii_case("True")).unwrap_or(false),
         ..Default::default()
     })
-}
-
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut in_quotes = false;
-    let mut current = String::new();
-    for c in line.chars() {
-        match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(c);
-            }
-            ',' if !in_quotes => result.push(std::mem::take(&mut current)),
-            _ => current.push(c),
-        }
-    }
-    result.push(current);
-    result
 }
 
 #[async_trait]

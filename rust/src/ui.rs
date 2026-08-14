@@ -9,6 +9,39 @@ use comfy_table::presets::UTF8_FULL;
 use comfy_table::{Cell, ContentArrangement, Table};
 use owo_colors::OwoColorize;
 
+/// Prepare the console for ANSI output. Call once, before anything is printed.
+///
+/// A Windows console does not interpret escape sequences until a program turns
+/// on `ENABLE_VIRTUAL_TERMINAL_PROCESSING`. `indicatif`/`console` does this, but
+/// only when the first progress bar is created - so every line printed before
+/// then appeared as raw `←[36m…` text. Enabling it up front makes the very
+/// first line render correctly.
+pub fn init() {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Console::{
+            GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+            STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        };
+
+        // SAFETY: these are simple console-handle queries. A failure at any step
+        // (output redirected to a file, no console attached) is ignored, leaving
+        // output exactly as it would have been.
+        unsafe {
+            for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+                let handle = GetStdHandle(which);
+                if handle.is_null() {
+                    continue;
+                }
+                let mut mode = 0u32;
+                if GetConsoleMode(handle, &mut mode) != 0 {
+                    SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+                }
+            }
+        }
+    }
+}
+
 /// Convert Spectre-style markup into an ANSI-colored string.
 pub fn markup(input: &str) -> String {
     let chars: Vec<char> = input.chars().collect();
@@ -92,23 +125,131 @@ fn style_to_codes(tag: &str) -> String {
     }
 }
 
+/// Render markup as plain text: style tags removed, `[[`/`]]` unescaped.
+///
+/// Used for the run log, which wants the words without the ANSI codes.
+pub fn plain(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '[' {
+            if i + 1 < chars.len() && chars[i + 1] == '[' {
+                out.push('[');
+                i += 2;
+                continue;
+            }
+            // Drop the tag entirely, whether it opens or closes a style.
+            if let Some(rel) = chars[i + 1..].iter().position(|&x| x == ']') {
+                i = i + 1 + rel + 1;
+            } else {
+                out.push(c);
+                i += 1;
+            }
+        } else if c == ']' {
+            if i + 1 < chars.len() && chars[i + 1] == ']' {
+                out.push(']');
+                i += 2;
+                continue;
+            }
+            out.push(c);
+            i += 1;
+        } else {
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Escape a string so its brackets are treated as literals by [`markup`].
 pub fn escape(input: &str) -> String {
     input.replace('[', "[[").replace(']', "]]")
 }
 
-/// Print a markup string followed by a newline.
-pub fn markup_line(input: &str) {
+/// One unit of captured output.
+#[derive(Clone)]
+pub enum Line {
+    /// Markup to be rendered when replayed.
+    Markup(String),
+    /// A section heading.
+    Section(String),
+    /// Already-rendered text (a drawn table), with its plain form for the log.
+    Rendered { rendered: String, plain: String },
+}
+
+tokio::task_local! {
+    /// When set, output is collected here instead of being printed.
+    static SINK: std::sync::Mutex<Vec<Line>>;
+}
+
+/// Run `fut` with its console output captured rather than printed.
+///
+/// Concurrent tasks would otherwise interleave line by line, producing a
+/// transcript in which no task's output is readable and a run log that is
+/// equally scrambled. Capturing per task and replaying each block whole keeps
+/// both intelligible while the work itself still overlaps.
+pub async fn capture<F: std::future::Future>(fut: F) -> (F::Output, Vec<Line>) {
+    SINK.scope(std::sync::Mutex::new(Vec::new()), async move {
+        let value = fut.await;
+        let lines = SINK.with(|s| std::mem::take(&mut *s.lock().unwrap()));
+        (value, lines)
+    })
+    .await
+}
+
+/// Print captured lines and mirror them to the run log, in order.
+pub fn replay(lines: &[Line]) {
+    for line in lines {
+        match line {
+            Line::Markup(text) => print_markup(text),
+            Line::Section(title) => print_rule(title),
+            Line::Rendered { rendered, plain } => {
+                crate::run_log::record(plain);
+                println!("{rendered}");
+            }
+        }
+    }
+}
+
+/// Route a line to the active sink, or emit it. Returns true if captured.
+fn sink(line: Line) -> bool {
+    SINK.try_with(|s| s.lock().unwrap().push(line)).is_ok()
+}
+
+fn print_markup(input: &str) {
+    crate::run_log::record(&plain(input));
     println!("{}", markup(input));
+}
+
+/// Print a markup string followed by a newline, mirroring it to the run log.
+pub fn markup_line(input: &str) {
+    if !sink(Line::Markup(input.to_string())) {
+        print_markup(input);
+    }
 }
 
 /// Print an empty line.
 pub fn write_line() {
-    println!();
+    if !sink(Line::Rendered {
+        rendered: String::new(),
+        plain: String::new(),
+    }) {
+        println!();
+    }
 }
 
 /// Print a horizontal rule with a centered, markup-styled title.
 pub fn rule(title: &str) {
+    if !sink(Line::Section(title.to_string())) {
+        print_rule(title);
+    }
+}
+
+fn print_rule(title: &str) {
+    crate::run_log::record_section(&plain(title));
     let width = 80usize;
     let rendered = markup(title);
     let visible = visible_len(&rendered);
@@ -191,6 +332,24 @@ impl TableBuilder {
         if let Some(title) = &self.title {
             markup_line(title);
         }
+
+        // Tables carry much of the record of what changed (services disabled,
+        // accounts found, updates applied), so the log keeps their rows as
+        // pipe-separated plain text.
+        let mut log_lines: Vec<String> = Vec::new();
+        if !self.headers.is_empty() {
+            log_lines.push(
+                self.headers
+                    .iter()
+                    .map(|h| plain(h))
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+            );
+        }
+        for row in &self.rows {
+            log_lines.push(row.iter().map(|c| plain(c)).collect::<Vec<_>>().join(" | "));
+        }
+
         let mut table = Table::new();
         table
             .load_preset(UTF8_FULL)
@@ -203,7 +362,16 @@ impl TableBuilder {
         for row in &self.rows {
             table.add_row(row.iter().map(|c| Cell::new(markup(c))));
         }
-        println!("{table}");
+        let rendered = table.to_string();
+        let plain_body = log_lines.join("\n");
+        if !sink(Line::Rendered {
+            rendered: rendered.clone(),
+            plain: plain_body.clone(),
+        }) {
+            crate::run_log::record(&plain_body);
+            println!("{rendered}");
+        }
+
         if let Some(note) = &self.footnote {
             markup_line(note);
         }

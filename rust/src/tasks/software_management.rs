@@ -7,6 +7,13 @@ use crate::models::{ReadmeData, SoftwareRequirement, SystemInfo, TaskResult};
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
+use std::time::Duration;
+
+/// A full or quick Defender scan runs for many minutes.
+const SCAN_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+
+/// `wmic product` is notoriously slow - minutes on a populated machine.
+const INVENTORY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 pub struct SoftwareManagementTask {
     name: String,
@@ -65,8 +72,13 @@ impl SoftwareManagementTask {
             ));
         }
 
-        let (scan_success, _scan_output, scan_error) =
-            command::powershell(&format!("Start-MpScan -ScanType {scan_type}")).await;
+        // A Defender scan runs for many minutes; under the default two-minute
+        // ceiling it was killed part-way and reported as a failure.
+        let (scan_success, _scan_output, scan_error) = command::powershell_with_timeout(
+            &format!("Start-MpScan -ScanType {scan_type}"),
+            SCAN_TIMEOUT,
+        )
+        .await;
 
         if !scan_success {
             ui::markup_line(&format!(
@@ -127,7 +139,7 @@ impl Task for SoftwareManagementTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let (_success, output, error) = command::execute("wmic", Some("product get name")).await;
+        let (_success, output, error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
         SystemInfo {
             raw_output: Some(output),
             error_output: error,
@@ -146,7 +158,7 @@ impl Task for SoftwareManagementTask {
             };
         }
 
-        let (success, output, error) = command::execute("wmic", Some("product get name")).await;
+        let (success, output, error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
         if !success {
             ui::markup_line(&format!(
                 "[red]✗ Failed to list installed software: {}[/]",
@@ -250,7 +262,7 @@ impl Task for SoftwareManagementTask {
     }
 
     async fn verify(&mut self) -> bool {
-        let (_success, output, _error) = command::execute("wmic", Some("product get name")).await;
+        let (_success, output, _error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
         let installed = Self::parse_installed(&output);
         let still_present = installed
             .iter()

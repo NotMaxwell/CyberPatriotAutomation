@@ -5,8 +5,11 @@
 # =============================================================================
 [package]
 name = "cyberpatriot-automation"
-version = "1.0.0"
+# Bump with every behavioural change and record it in CHANGELOG.md. The run log
+# stamps this value in its header and file name so a log ties back to its build.
+version = "1.8.0"
 edition = "2021"
+build = "build.rs"
 authors = ["Maxwell McCormick"]
 description = "Automates CyberPatriot competition security hardening tasks for Windows systems (Rust port)."
 license = "Apache-2.0"
@@ -29,6 +32,17 @@ uuid = { version = "1", features = ["v4"] }
 comfy-table = { version = "7", features = ["custom_styling"] }
 indicatif = "0.17"
 owo-colors = "4"
+# `winget` aligns its table columns by terminal display width, so parsing that
+# output correctly means measuring width rather than counting characters.
+unicode-width = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Used only to turn on the console's virtual-terminal flag at startup so ANSI
+# sequences render from the very first line of output.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

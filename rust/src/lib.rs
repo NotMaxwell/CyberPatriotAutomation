@@ -11,5 +11,6 @@ pub mod app_config;
 pub mod command;
 pub mod models;
 pub mod readme_parser;
+pub mod run_log;
 pub mod tasks;
 pub mod ui;

@@ -261,7 +261,7 @@ impl Default for AccountPermissionsTask {
 }
 
 fn parse_account_from_csv(csv_line: &str) -> Option<AccountInfo> {
-    let values = parse_csv_line(csv_line);
+    let values = crate::tasks::parse_csv_line(csv_line);
     if values.len() < 5 {
         return None;
     }
@@ -275,26 +275,6 @@ fn parse_account_from_csv(csv_line: &str) -> Option<AccountInfo> {
         last_logon: values.get(5).and_then(|v| parse_datetime(&trim(v))),
         ..Default::default()
     })
-}
-
-fn parse_csv_line(line: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut in_quotes = false;
-    let mut current = String::new();
-    for c in line.chars() {
-        match c {
-            '"' => {
-                in_quotes = !in_quotes;
-                current.push(c);
-            }
-            ',' if !in_quotes => {
-                result.push(std::mem::take(&mut current));
-            }
-            _ => current.push(c),
-        }
-    }
-    result.push(current);
-    result
 }
 
 fn parse_datetime(value: &str) -> Option<DateTime<Local>> {
@@ -384,6 +364,55 @@ impl Task for AccountPermissionsTask {
         }
 
         Self::display_accounts_table(&self.accounts);
+
+        // This task had no dry-run guard at all, so `--dry-run` still disabled
+        // the Guest account and rewrote password-expiry flags - the one mode in
+        // which the tool promises to change nothing.
+        if self.dry_run {
+            ui::markup_line("[yellow]DRY RUN: Previewing account permission changes (no changes will be made)[/]");
+
+            let guest_enabled = self
+                .accounts
+                .iter()
+                .any(|a| a.username.eq_ignore_ascii_case("Guest") && a.is_enabled);
+            if guest_enabled {
+                ui::markup_line("[cyan]Would disable the Guest account[/]");
+            }
+
+            let would_expire: Vec<&str> = self
+                .accounts
+                .iter()
+                .filter(|a| {
+                    a.is_enabled
+                        && a.password_never_expires
+                        && !a.username.eq_ignore_ascii_case("Administrator")
+                        && !AccountSecurityStandards::INSECURE_USERNAMES
+                            .iter()
+                            .any(|u| u.eq_ignore_ascii_case(&a.username))
+                })
+                .map(|a| a.username.as_str())
+                .collect();
+            if !would_expire.is_empty() {
+                ui::markup_line(&format!(
+                    "[cyan]Would enable password expiration for: {}[/]",
+                    ui::escape(&would_expire.join(", "))
+                ));
+            }
+
+            // The remaining steps only report; run them so the preview is complete.
+            let (_f, i) = self.enforce_password_required();
+            issues.extend(i);
+            let (_f, i) = self.review_admin_accounts();
+            issues.extend(i);
+            let (_f, i) = self.check_inactive_accounts();
+            issues.extend(i);
+
+            result.message = "DRY RUN: Account permission changes previewed.".to_string();
+            if !issues.is_empty() {
+                result.error_details = Some(issues.join("\n"));
+            }
+            return result;
+        }
 
         let (f, i) = self.check_guest_account().await;
         fixes.extend(f);

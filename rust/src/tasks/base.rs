@@ -4,6 +4,28 @@ use crate::command;
 use crate::models::{SystemInfo, TaskResult};
 use async_trait::async_trait;
 
+/// Split one line of `ConvertTo-Csv` output into its fields.
+///
+/// Quotes are kept in the returned fields so callers can `trim_matches('"')`,
+/// matching how PowerShell emits them; a comma inside quotes does not split.
+pub fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut in_quotes = false;
+    let mut current = String::new();
+    for c in line.chars() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+                current.push(c);
+            }
+            ',' if !in_quotes => result.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    result.push(current);
+    result
+}
+
 /// Read the members of a local group via `net localgroup <group>`.
 ///
 /// The output wraps the member list in a header, a dashed separator and a

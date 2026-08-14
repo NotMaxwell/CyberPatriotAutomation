@@ -120,6 +120,44 @@ async fn parse_inline_extracts_scenario_and_guidelines() {
     assert!(data.guidelines.iter().any(|g| g.contains("Read the README carefully")));
 }
 
+// OS detection has to survive however the author typed the name: markup in the
+// middle of it, a non-breaking space, or prose elsewhere naming a different
+// version. All of these previously reported "Unknown" or the wrong OS.
+
+#[tokio::test]
+async fn os_detected_through_markup_and_nbsp() {
+    let split_by_tag = r#"<html><head><title>Round 1</title></head><body>
+<h1>Training Round <b>Windows 10</b> README</h1></body></html>"#;
+    assert_eq!(parse_str(split_by_tag, "os1").await.operating_system, "Windows 10");
+
+    let nbsp = "<html><body><h1>Windows&nbsp;11 Image</h1></body></html>";
+    assert_eq!(parse_str(nbsp, "os2").await.operating_system, "Windows 11");
+}
+
+#[tokio::test]
+async fn headline_wins_over_prose_naming_another_version() {
+    // A Windows 11 image whose body warns against rolling back to Windows 10.
+    let html = r#"<html><head><title>Windows 11 Enterprise README</title></head><body>
+<p>Do not attempt to go back to Windows 10 using recovery options.</p>
+</body></html>"#;
+    assert_eq!(parse_str(html, "os3").await.operating_system, "Windows 11");
+}
+
+#[tokio::test]
+async fn server_editions_are_not_reported_as_desktop() {
+    let html = "<html><body><h1>Windows Server 2022 Standard</h1></body></html>";
+    assert_eq!(
+        parse_str(html, "os4").await.operating_system,
+        "Windows Server 2022"
+    );
+}
+
+#[tokio::test]
+async fn unrecognised_os_still_reports_unknown() {
+    let html = "<html><body><h1>Some Appliance README</h1></body></html>";
+    assert_eq!(parse_str(html, "os5").await.operating_system, "Unknown");
+}
+
 // "Do not stop or disable the X service" is standard CyberPatriot phrasing. The
 // original negative-lookbehind only covered a literal "do not " immediately
 // before "disable", so the intervening "stop or " let a critical service be

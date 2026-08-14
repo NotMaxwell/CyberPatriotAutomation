@@ -8,7 +8,9 @@ use tokio::time::timeout;
 /// Result of a command execution: (success, stdout, optional stderr).
 pub type CommandOutput = (bool, String, Option<String>);
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Default ceiling for a single command. Enough for the query and
+/// configuration utilities the tasks drive.
+pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Build a [`Command`] for the given program and raw argument string.
 ///
@@ -22,7 +24,8 @@ fn build_command(program: &str, arguments: Option<&str>) -> Command {
 
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
+        // `raw_arg` is inherent on tokio's `Command`, so the
+        // `std::os::windows::process::CommandExt` trait does not need importing.
         if !args.is_empty() {
             cmd.raw_arg(args);
         }
@@ -70,11 +73,25 @@ fn split_arguments(input: &str) -> Vec<String> {
     args
 }
 
-/// Execute a command and return the output.
+/// Execute a command and return the output, under the default timeout.
 ///
 /// Reads both output streams concurrently to avoid deadlocks, and enforces a
 /// two-minute timeout so a hung child process cannot stall the tool.
 pub async fn execute(command: &str, arguments: Option<&str>) -> CommandOutput {
+    execute_with_timeout(command, arguments, COMMAND_TIMEOUT).await
+}
+
+/// Execute a command with an explicit timeout.
+///
+/// Needed for work that legitimately runs longer than [`COMMAND_TIMEOUT`] -
+/// installing a package update can involve a download of hundreds of megabytes,
+/// and the default ceiling would kill it part-way through, leaving the package
+/// in a half-updated state and reporting a timeout rather than a real result.
+pub async fn execute_with_timeout(
+    command: &str,
+    arguments: Option<&str>,
+    limit: Duration,
+) -> CommandOutput {
     let mut cmd = build_command(command, arguments);
 
     let mut child = match cmd.spawn() {
@@ -95,7 +112,7 @@ pub async fn execute(command: &str, arguments: Option<&str>) -> CommandOutput {
         (out, err)
     });
 
-    match timeout(COMMAND_TIMEOUT, child.wait()).await {
+    match timeout(limit, child.wait()).await {
         Ok(Ok(status)) => {
             let (out, err) = reader.await.unwrap_or_default();
             let output = String::from_utf8_lossy(&out).into_owned();
@@ -180,6 +197,12 @@ pub async fn powershell(script: &str) -> CommandOutput {
     execute("powershell", Some(&powershell_args(script, true))).await
 }
 
+/// As [`powershell`], with an explicit timeout for work that legitimately runs
+/// longer than [`COMMAND_TIMEOUT`] - a malware scan, for instance.
+pub async fn powershell_with_timeout(script: &str, limit: Duration) -> CommandOutput {
+    execute_with_timeout("powershell", Some(&powershell_args(script, true)), limit).await
+}
+
 /// Run a read-only PowerShell query, tolerating missing objects.
 ///
 /// Absence is not failure here: asking for a service or account that does not
@@ -189,6 +212,48 @@ pub async fn powershell_query(script: &str) -> CommandOutput {
     execute("powershell", Some(&powershell_args(script, false))).await
 }
 
+
+/// Download `url` to `dest`, returning the reason on failure.
+///
+/// Shells out rather than linking an HTTP client: TLS, the certificate store
+/// and any configured proxy stay with the OS, and the cross-compiled binary
+/// gains no dependency. TLS 1.2 is selected explicitly because Windows
+/// PowerShell 5.1 still negotiates older protocols that most hosts now refuse,
+/// which otherwise fails with an unhelpful "underlying connection was closed".
+/// `curl` is the fallback; both follow redirects, so `aka.ms` short links work.
+pub async fn download_file(url: &str, dest: &std::path::Path) -> Result<(), String> {
+    let dest_str = dest.to_string_lossy().into_owned();
+
+    let script = format!(
+        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+         Invoke-WebRequest -Uri {} -OutFile {} -UseBasicParsing",
+        ps_quote(url),
+        ps_quote(&dest_str)
+    );
+    let (ok, _out, ps_error) = powershell(&script).await;
+    if ok && dest.is_file() {
+        return Ok(());
+    }
+
+    let mut curl_error = None;
+    for program in ["curl.exe", "curl"] {
+        let (curl_ok, _out, err) = execute(
+            program,
+            Some(&format!("-L -s -S -o \"{dest_str}\" \"{url}\"")),
+        )
+        .await;
+        if curl_ok && dest.is_file() {
+            return Ok(());
+        }
+        curl_error = err;
+    }
+
+    Err(ps_error
+        .filter(|e| !e.trim().is_empty())
+        .or(curl_error)
+        .map(|e| e.trim().to_string())
+        .unwrap_or_else(|| "no error reported".to_string()))
+}
 
 /// Execute a command with elevated privileges.
 ///

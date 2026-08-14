@@ -6,6 +6,55 @@ use cyberpatriot_automation::models::ReadmeData;
 use cyberpatriot_automation::tasks::*;
 
 #[tokio::test]
+async fn software_update_task_should_have_correct_name_and_description() {
+    let task = SoftwareUpdateTask::new();
+    assert_eq!(task.name(), "Software Updates");
+    assert!(task.description().contains("latest"));
+}
+
+#[tokio::test]
+async fn software_update_task_set_readme_data_should_accept_data() {
+    let mut task = SoftwareUpdateTask::new();
+    task.set_readme_data(ReadmeData::default());
+    assert_eq!(task.name(), "Software Updates");
+}
+
+#[tokio::test]
+async fn software_update_task_read_system_state_should_not_panic() {
+    // On a host without winget (including any non-Windows CI machine) this must
+    // degrade to an empty inventory rather than failing.
+    let mut task = SoftwareUpdateTask::new();
+    let _ = task.read_system_state().await;
+}
+
+#[tokio::test]
+async fn software_update_task_reports_failure_when_winget_is_unavailable() {
+    // The task cannot determine a "latest version" without a package catalogue,
+    // so it must say so rather than reporting a vacuous success.
+    let mut task = SoftwareUpdateTask::new();
+    let result = task.execute().await;
+    if !result.success {
+        assert!(
+            result.message.to_lowercase().contains("winget"),
+            "expected the message to explain the winget dependency, got: {}",
+            result.message
+        );
+        assert!(result.error_details.is_some());
+    }
+}
+
+#[tokio::test]
+async fn software_update_task_dry_run_never_reports_applied_updates() {
+    let mut task = SoftwareUpdateTask::new();
+    task.set_dry_run(true);
+    let result = task.execute().await;
+    assert_eq!(
+        result.items_succeeded, 0,
+        "a dry run must not record any update as applied"
+    );
+}
+
+#[tokio::test]
 async fn password_policy_task_should_have_correct_name_and_description() {
     let task = PasswordPolicyTask::new();
     assert!(!task.name().is_empty());

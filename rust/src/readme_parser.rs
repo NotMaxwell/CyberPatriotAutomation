@@ -102,28 +102,65 @@ fn extract_title(content: &str) -> String {
     "Unknown".to_string()
 }
 
+/// Operating systems recognised in a README, most specific first.
+///
+/// Server editions precede the desktop entries so that "Windows Server 2022"
+/// is not reported as a bare "Windows"; the two-digit desktop versions are
+/// mutually exclusive strings and so may appear in any order between
+/// themselves.
+const OPERATING_SYSTEMS: &[(&str, &str)] = &[
+    ("windows server 2025", "Windows Server 2025"),
+    ("windows server 2022", "Windows Server 2022"),
+    ("windows server 2019", "Windows Server 2019"),
+    ("windows server 2016", "Windows Server 2016"),
+    ("windows server 2012", "Windows Server 2012"),
+    ("windows 11", "Windows 11"),
+    ("windows 10", "Windows 10"),
+    ("windows 8.1", "Windows 8.1"),
+    ("windows 7", "Windows 7"),
+    ("ubuntu", "Ubuntu Linux"),
+    ("debian", "Debian Linux"),
+    ("fedora", "Fedora Linux"),
+    ("linux", "Linux"),
+];
+
+/// Flatten markup and whitespace so OS names survive however they were typed.
+///
+/// Matching against the raw HTML missed anything the author had split with
+/// markup or a non-breaking space - `Windows&nbsp;10` decodes to a U+00A0 that
+/// never equals the plain space in the search string, and `Windows <b>10</b>`
+/// has a tag in the middle. Both are ordinary in hand-written READMEs and both
+/// produced "Unknown".
+fn normalize_for_os_match(content: &str) -> String {
+    let text = strip_html_tags(content);
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn match_operating_system(haystack: &str) -> Option<&'static str> {
+    OPERATING_SYSTEMS
+        .iter()
+        .find(|(needle, _)| haystack.contains(needle))
+        .map(|(_, label)| *label)
+}
+
 fn detect_operating_system(content: &str) -> String {
-    let lower = content.to_lowercase();
-    if lower.contains("windows 10") {
-        "Windows 10"
-    } else if lower.contains("windows 11") {
-        "Windows 11"
-    } else if lower.contains("windows server 2019") {
-        "Windows Server 2019"
-    } else if lower.contains("windows server 2022") {
-        "Windows Server 2022"
-    } else if lower.contains("windows server 2016") {
-        "Windows Server 2016"
-    } else if lower.contains("ubuntu") {
-        "Ubuntu Linux"
-    } else if lower.contains("debian") {
-        "Debian Linux"
-    } else if lower.contains("linux") {
-        "Linux"
-    } else {
-        "Unknown"
+    // The title and first heading name the image on essentially every official
+    // README ("Training Round Windows 10 README"). Consulting them first avoids
+    // misreading prose such as "do not upgrade from Windows 10" in a Windows 11
+    // image, which a whole-document scan would match.
+    let headline = re(r"(?is)<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>");
+    for caps in headline.captures_iter(content) {
+        if let Some(os) = match_operating_system(&normalize_for_os_match(&caps[1])) {
+            return os.to_string();
+        }
     }
-    .to_string()
+
+    match_operating_system(&normalize_for_os_match(content))
+        .unwrap_or("Unknown")
+        .to_string()
 }
 
 /// Extract all sections (h2 headers and their content). The C# version used a
