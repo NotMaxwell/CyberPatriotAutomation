@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // CyberPatriot Automation Tool - Group Policy Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -90,25 +90,83 @@ public class GroupPolicyTask : BaseTask
         };
     }
 
+    /// <summary>
+    /// Read a REG_DWORD value out of <c>reg query</c> output.
+    /// </summary>
+    /// <remarks>
+    /// The value appears on its own indented line, e.g.
+    /// <c>    dontdisplaylastusername    REG_DWORD    0x1</c>.
+    /// </remarks>
+    public static uint? ParseRegDword(string output, string name)
+    {
+        foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (
+                fields.Length >= 3
+                && fields[0].Equals(name, StringComparison.OrdinalIgnoreCase)
+                && fields[1].Equals("REG_DWORD", StringComparison.OrdinalIgnoreCase)
+            )
+            {
+                var raw = fields[2];
+                if (
+                    raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    && uint.TryParse(
+                        raw[2..],
+                        System.Globalization.NumberStyles.HexNumber,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out var hex
+                    )
+                )
+                    return hex;
+                if (uint.TryParse(raw, out var dec))
+                    return dec;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Confirm a registry value is present *and* set to the expected value.</summary>
+    private static async Task<bool> RegDwordEqualsAsync(string key, string name, uint expected)
+    {
+        var (success, output, _) = await CommandExecutor.ExecuteAsync("reg", $"query {key} /v {name}");
+        return success && ParseRegDword(output, name) == expected;
+    }
+
     public override async Task<bool> VerifyAsync()
     {
-        // Check all registry/service settings
-        var (hideUserSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v dontdisplaylastusername"
-        );
-        var (ctrlAltDelSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v DisableCAD"
-        );
-        var (icsSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-            "sc",
-            "qc SharedAccess"
-        );
-        var (anonSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "query HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa /v restrictanonymous"
-        );
-        return hideUserSuccess && ctrlAltDelSuccess && icsSuccess && anonSuccess;
+        // These checks previously only asserted that `reg query` / `sc qc` exited
+        // successfully, which is true whenever the value merely *exists*. A
+        // setting left at the wrong value therefore verified as correct.
+        const string policies =
+            "HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System";
+        const string lsa = "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa";
+
+        var hideUserOk = await RegDwordEqualsAsync(policies, "dontdisplaylastusername", 1);
+        // DisableCAD = 0 means Ctrl+Alt+Del *is* required.
+        var ctrlAltDelOk = await RegDwordEqualsAsync(policies, "DisableCAD", 0);
+        var anonOk = await RegDwordEqualsAsync(lsa, "restrictanonymous", 1);
+
+        var (scSuccess, scOutput, _) = await CommandExecutor.ExecuteAsync("sc", "qc SharedAccess");
+        // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
+        var icsOk =
+            scSuccess
+            && scOutput
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Any(l =>
+                    l.Contains("START_TYPE", StringComparison.OrdinalIgnoreCase)
+                    && l.Contains("DISABLED", StringComparison.OrdinalIgnoreCase)
+                );
+
+        if (!hideUserOk)
+            AnsiConsole.MarkupLine("[red]? 'Don't display last user name' is not set[/]");
+        if (!ctrlAltDelOk)
+            AnsiConsole.MarkupLine("[red]? Ctrl+Alt+Del is not required at logon[/]");
+        if (!anonOk)
+            AnsiConsole.MarkupLine("[red]? Anonymous access is not restricted[/]");
+        if (!icsOk)
+            AnsiConsole.MarkupLine("[red]? Internet Connection Sharing is not disabled[/]");
+
+        return hideUserOk && ctrlAltDelOk && anonOk && icsOk;
     }
 }

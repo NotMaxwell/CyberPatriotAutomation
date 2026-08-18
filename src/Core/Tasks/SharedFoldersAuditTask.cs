@@ -30,13 +30,8 @@ public class SharedFoldersAuditTask : BaseTask
     public override async Task<TaskResult> ExecuteAsync()
     {
         var (success, output, error) = await CommandExecutor.ExecuteAsync("net", "share");
-        var lines = output?.Split('\n') ?? Array.Empty<string>();
         var allowed = new[] { "ADMIN$", "C$", "IPC$" };
-        var found = lines
-            .Where(l => l.Contains(" "))
-            .Select(l => l.Split(' ')[0].Trim())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
+        var found = ParseShares(output ?? string.Empty);
         var unauthorized = found.Except(allowed, StringComparer.OrdinalIgnoreCase).ToList();
 
         var details = new List<string>();
@@ -62,28 +57,92 @@ public class SharedFoldersAuditTask : BaseTask
             };
         }
 
+        var removed = new List<string>();
+        var failures = new List<string>();
+
         foreach (var share in unauthorized)
         {
-            var (delSuccess, delOut, delErr) = await CommandExecutor.ExecuteAsync(
+            var (delSuccess, _, delErr) = await CommandExecutor.ExecuteAsync(
                 "net",
                 $"share {share} /delete"
             );
             if (delSuccess)
-                AnsiConsole.MarkupLine($"[green]✓ Removed share: {share}[/]");
+            {
+                removed.Add(share);
+                AnsiConsole.MarkupLine($"[green]✓ Removed share: {Markup.Escape(share)}[/]");
+            }
             else
-                AnsiConsole.MarkupLine($"[red]✗ Failed to remove share: {share} ({delErr})[/]");
+            {
+                failures.Add($"{share}: {delErr}");
+                AnsiConsole.MarkupLine(
+                    $"[red]✗ Failed to remove share: {Markup.Escape(share)} ({Markup.Escape(delErr ?? "")})[/]"
+                );
+            }
         }
-        if (unauthorized.Count > 0)
-            details.Add($"Removed: {string.Join(", ", unauthorized)}");
-        else
-            details.Add("No shares needed removal.");
+
+        details.Add(
+            removed.Count > 0
+                ? $"Removed: {string.Join(", ", removed)}"
+                : "No shares needed removal."
+        );
+        if (failures.Count > 0)
+            details.Add($"Failed to remove: {string.Join("; ", failures)}");
 
         return new TaskResult
         {
             TaskName = Name,
-            Success = unauthorized.Count == 0,
+            // Success means the remediation went through. The previous
+            // `unauthorized.Count == 0` reported failure precisely when the task
+            // had found and removed offending shares.
+            Success = failures.Count == 0,
             Message = string.Join("\n", details),
+            ErrorDetails = failures.Count > 0 ? string.Join("\n", failures) : null,
         };
+    }
+
+    /// <summary>
+    /// Extract share names from <c>net share</c> output.
+    /// </summary>
+    /// <remarks>
+    /// The output is a table wrapped in a header and a trailing status line.
+    /// Taking the first token of every line containing a space also picked up
+    /// "Share" from the header and "The" from "The command completed
+    /// successfully.", so the task tried to <c>net share Share /delete</c> on
+    /// entries that were never shares. Read only the rows between the separator
+    /// and the status line.
+    /// </remarks>
+    public static List<string> ParseShares(string output)
+    {
+        var shares = new List<string>();
+        var pastSeparator = false;
+
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0)
+                continue;
+
+            if (line.StartsWith("---", StringComparison.Ordinal))
+            {
+                pastSeparator = true;
+                continue;
+            }
+
+            if (!pastSeparator)
+                continue;
+
+            if (line.StartsWith("The command completed", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            var name = line.Split(
+                (char[]?)null,
+                StringSplitOptions.RemoveEmptyEntries
+            ).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(name))
+                shares.Add(name);
+        }
+
+        return shares;
     }
 
     public override async Task<bool> VerifyAsync()
@@ -91,11 +150,7 @@ public class SharedFoldersAuditTask : BaseTask
         var (success, output, error) = await CommandExecutor.ExecuteAsync("net", "share");
         var lines = output?.Split('\n') ?? Array.Empty<string>();
         var allowed = new[] { "ADMIN$", "C$", "IPC$" };
-        var found = lines
-            .Where(l => l.Contains(" "))
-            .Select(l => l.Split(' ')[0].Trim())
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
+        var found = ParseShares(output ?? string.Empty);
         var unauthorized = found.Except(allowed, StringComparer.OrdinalIgnoreCase).ToList();
         return unauthorized.Count == 0;
     }

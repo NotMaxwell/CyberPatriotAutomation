@@ -135,7 +135,10 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
         return new TaskResult
         {
             TaskName = Name,
-            Success = disabledTasks.Count > 0 && failedToDisable.Count == 0,
+            // Success means every suspicious task was dealt with. The previous
+            // `disabledTasks.Count > 0 && ...` also reported failure whenever
+            // there was simply nothing to disable.
+            Success = failedToDisable.Count == 0,
             Message = string.Join("\n", details),
         };
     }

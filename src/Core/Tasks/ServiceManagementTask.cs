@@ -232,48 +232,91 @@ public class ServiceManagementTask : BaseTask
         return result;
     }
 
+    /// <summary>
+    /// Query every service's status in one call, keyed by name.
+    /// </summary>
+    /// <remarks>
+    /// Spawning a separate PowerShell process per service is why the original
+    /// only ever sampled a handful. One bulk query makes checking all of them
+    /// cheap enough to be correct.
+    /// </remarks>
+    private static async Task<Dictionary<string, string>> GetServiceStatusesAsync()
+    {
+        var statuses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
+            "Get-Service | Select-Object Name, Status | ConvertTo-Csv -NoTypeInformation"
+        );
+        if (!success)
+            return statuses;
+
+        foreach (
+            var line in output
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Skip(1)
+        )
+        {
+            var fields = line.Split("\",\"");
+            if (fields.Length < 2)
+                continue;
+            var name = fields[0].Trim().Trim('"').Trim();
+            var status = fields[1].Trim().Trim('"').Trim();
+            if (name.Length > 0)
+                statuses[name] = status;
+        }
+
+        return statuses;
+    }
+
     public override async Task<bool> VerifyAsync()
     {
         bool allGood = true;
         var (toDisable, _, doNotTouch) = BuildServiceLists();
 
+        // One bulk query instead of a process per service, so every service can
+        // be checked. Sampling only the first five of toDisable and reporting
+        // that partial result as full verification was the previous behaviour.
+        var statuses = await GetServiceStatusesAsync();
+
         // Verify critical services are running
         foreach (var service in doNotTouch)
         {
-            var (success, output, _) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\""
-            );
+            if (!statuses.TryGetValue(service, out var status))
+                continue;
 
-            if (success && output.Trim().Equals("Running", StringComparison.OrdinalIgnoreCase))
-            {
-                AnsiConsole.MarkupLine($"[green]? Critical service {service} is running[/]");
-            }
-            else if (success && !string.IsNullOrEmpty(output.Trim()))
+            if (status.Equals("Running", StringComparison.OrdinalIgnoreCase))
             {
                 AnsiConsole.MarkupLine(
-                    $"[yellow]? Critical service {service} is {output.Trim()}[/]"
+                    $"[green]? Critical service {Markup.Escape(service)} is running[/]"
                 );
+            }
+            else
+            {
+                // A critical service that is not running is a verification
+                // failure: these are the services that must stay up.
+                AnsiConsole.MarkupLine(
+                    $"[red]? Critical service {Markup.Escape(service)} is {Markup.Escape(status)}[/]"
+                );
+                allGood = false;
             }
         }
 
-        // Verify insecure services are disabled (sample check)
-        var checkServices = toDisable.Take(5).ToList();
-        foreach (var service in checkServices)
+        // Verify insecure services are disabled
+        foreach (var service in toDisable)
         {
-            var (success, output, _) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\""
-            );
+            if (!statuses.TryGetValue(service, out var status))
+                continue;
 
-            if (success && output.Trim().Equals("Stopped", StringComparison.OrdinalIgnoreCase))
-            {
-                AnsiConsole.MarkupLine($"[green]? Insecure service {service} is stopped[/]");
-            }
-            else if (success && !string.IsNullOrEmpty(output.Trim()))
+            if (status.Equals("Stopped", StringComparison.OrdinalIgnoreCase))
             {
                 AnsiConsole.MarkupLine(
-                    $"[red]? Insecure service {service} is still {output.Trim()}[/]"
+                    $"[green]? Insecure service {Markup.Escape(service)} is stopped[/]"
+                );
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(
+                    $"[red]? Insecure service {Markup.Escape(service)} is still {Markup.Escape(status)}[/]"
                 );
                 allGood = false;
             }
@@ -399,38 +442,46 @@ public class ServiceManagementTask : BaseTask
     {
         AnsiConsole.MarkupLine($"[cyan]Protecting {doNotTouch.Count} critical services...[/]");
 
-        foreach (var service in CriticalServices.Keys.Take(10)) // Check top 10 critical services
+        // Iterating only the first ten of the hard-coded critical list meant
+        // services the README itself marks critical - CCS Client above all -
+        // were never started, the exact opposite of the intent. Protect the full
+        // doNotTouch set, which includes the README's own entries.
+        var statuses = await GetServiceStatusesAsync();
+
+        foreach (var service in doNotTouch)
         {
-            var (success, output, _) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).Status\""
+            // Not installed on this image - nothing to protect.
+            if (!statuses.TryGetValue(service, out var status))
+                continue;
+
+            if (status.Equals("Running", StringComparison.OrdinalIgnoreCase))
+            {
+                AnsiConsole.MarkupLine($"[dim]? {Markup.Escape(service)} is already running[/]");
+                continue;
+            }
+
+            AnsiConsole.MarkupLine(
+                $"[yellow]Starting critical service: {Markup.Escape(service)}...[/]"
             );
 
-            if (success && !string.IsNullOrEmpty(output.Trim()))
-            {
-                if (!output.Trim().Equals("Running", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Try to start the service
-                    AnsiConsole.MarkupLine($"[yellow]Starting critical service: {service}...[/]");
-                    var (startSuccess, _, startError) = await CommandExecutor.ExecuteAsync(
-                        "net",
-                        $"start \"{service}\""
-                    );
+            // A disabled service cannot be started until its start type is reset.
+            await CommandExecutor.ExecuteAsync("sc", $"config \"{service}\" start= auto");
+            var (startSuccess, _, startError) = await CommandExecutor.ExecuteAsync(
+                "net",
+                $"start \"{service}\""
+            );
 
-                    if (startSuccess)
-                    {
-                        fixes.Add($"Started critical service: {service}");
-                        AnsiConsole.MarkupLine($"[green]? Started {service}[/]");
-                    }
-                    else
-                    {
-                        AnsiConsole.MarkupLine($"[dim]Could not start {service}: {startError}[/]");
-                    }
-                }
-                else
-                {
-                    AnsiConsole.MarkupLine($"[dim]? {service} is already running[/]");
-                }
+            if (startSuccess)
+            {
+                fixes.Add($"Started critical service: {service}");
+                AnsiConsole.MarkupLine($"[green]? Started {Markup.Escape(service)}[/]");
+            }
+            else
+            {
+                issues.Add($"Could not start critical service {service}: {startError}");
+                AnsiConsole.MarkupLine(
+                    $"[red]? Could not start {Markup.Escape(service)}: {Markup.Escape(startError ?? "")}[/]"
+                );
             }
         }
     }

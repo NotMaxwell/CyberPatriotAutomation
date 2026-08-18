@@ -118,6 +118,7 @@ public class SoftwareManagementTask : BaseTask
             details.Add("All required software is installed.");
 
         // Remove prohibited software
+        var removalFailures = new List<string>();
         foreach (var sw in toRemove)
         {
             var (remSuccess, _, remError) = await CommandExecutor.ExecuteAsync(
@@ -125,9 +126,16 @@ public class SoftwareManagementTask : BaseTask
                 $"product where name=\"{sw}\" call uninstall /nointeractive"
             );
             if (remSuccess)
-                AnsiConsole.MarkupLine($"[green]✓ Removed: {sw}[/]");
+            {
+                AnsiConsole.MarkupLine($"[green]✓ Removed: {Markup.Escape(sw)}[/]");
+            }
             else
-                AnsiConsole.MarkupLine($"[red]✗ Failed to remove: {sw} ({remError})[/]");
+            {
+                removalFailures.Add($"{sw}: {remError}");
+                AnsiConsole.MarkupLine(
+                    $"[red]✗ Failed to remove: {Markup.Escape(sw)} ({Markup.Escape(remError ?? "")})[/]"
+                );
+            }
         }
         // Install required software (assumes installer is available in a known location)
         foreach (var sw in toInstall)
@@ -152,8 +160,18 @@ public class SoftwareManagementTask : BaseTask
         return new TaskResult
         {
             TaskName = Name,
-            Success = toRemove.Count == 0 && toInstall.Count == 0 && malwareScanSuccess && threatsFound == 0,
+            // Success reflects whether remediation succeeded, not whether there
+            // was nothing to do. Including `toRemove.Count == 0` meant
+            // successfully uninstalling prohibited software reported the task as
+            // failed. Missing required software is still a genuine outstanding
+            // problem needing a manual install, so it remains in the condition.
+            Success =
+                removalFailures.Count == 0
+                && toInstall.Count == 0
+                && malwareScanSuccess
+                && threatsFound == 0,
             Message = string.Join("\n", details),
+            ErrorDetails = removalFailures.Count > 0 ? string.Join("\n", removalFailures) : null,
         };
     }
 

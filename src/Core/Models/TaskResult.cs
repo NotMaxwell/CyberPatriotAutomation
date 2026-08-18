@@ -39,6 +39,16 @@ public class TaskResult
     /// <summary>
     /// Calculates completion rate as a percentage
     /// </summary>
+    /// <remarks>
+    /// When a task reports no per-item counts, fall back to whether the task
+    /// itself succeeded. Returning a flat 100% in that case reported full
+    /// completion for tasks that had failed outright - and since no task
+    /// populates <see cref="ItemsAttempted"/>, that was every task.
+    /// </remarks>
     public double CompletionRate =>
-        ItemsAttempted > 0 ? (double)(ItemsSucceeded + ItemsSkipped) / ItemsAttempted * 100 : 100;
+        ItemsAttempted > 0
+            ? (double)(ItemsSucceeded + ItemsSkipped) / ItemsAttempted * 100
+            : Success
+                ? 100
+                : 0;
 }

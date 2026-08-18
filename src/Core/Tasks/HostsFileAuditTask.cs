@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // CyberPatriot Automation Tool - Hosts File Audit Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -19,6 +19,26 @@ namespace CyberPatriotAutomation.Core.Tasks;
 public class HostsFileAuditTask : BaseTask
 {
     private const string HostsFilePath = @"C:\Windows\System32\drivers\etc\hosts";
+    /// <summary>
+    /// Collapse runs of whitespace so entries compare on content, not formatting.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AllowedEntries"/> is written with a fixed run of spaces.
+    /// Comparing raw strings meant a hosts file using a tab or a different number
+    /// of spaces - entirely normal - failed to match, so the legitimate localhost
+    /// mapping was classified as unauthorized and deleted.
+    /// </remarks>
+    private static string NormalizeEntry(string line) =>
+        string.Join(' ', line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+    public static bool IsAllowedEntry(string line)
+    {
+        var normalized = NormalizeEntry(line);
+        return AllowedEntries.Any(a =>
+            NormalizeEntry(a).Equals(normalized, StringComparison.OrdinalIgnoreCase)
+        );
+    }
+
     private static readonly string[] AllowedEntries = new[]
     {
         "127.0.0.1       localhost",
@@ -66,7 +86,7 @@ public class HostsFileAuditTask : BaseTask
         var unauthorized = lines
             .Select(l => l.Trim())
             .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#"))
-            .Except(AllowedEntries, StringComparer.OrdinalIgnoreCase)
+            .Where(l => !IsAllowedEntry(l))
             .ToList();
 
         var details = new List<string>();
@@ -94,28 +114,40 @@ public class HostsFileAuditTask : BaseTask
             };
         }
 
+        // Nothing to do - don't rewrite a system file for no reason.
+        if (unauthorized.Count == 0)
+        {
+            details.Add("No entries needed removal.");
+            AnsiConsole.MarkupLine("[green]✓ No unauthorized hosts entries found[/]");
+            return new TaskResult
+            {
+                TaskName = Name,
+                Success = true,
+                Message = string.Join("\n", details),
+            };
+        }
+
         // Remove unauthorized entries
         var newLines = lines
             .Where(l =>
-                string.IsNullOrWhiteSpace(l)
-                || l.Trim().StartsWith("#")
-                || AllowedEntries.Contains(l.Trim(), StringComparer.OrdinalIgnoreCase)
+                string.IsNullOrWhiteSpace(l) || l.Trim().StartsWith("#") || IsAllowedEntry(l.Trim())
             )
             .ToArray();
         try
         {
             await File.WriteAllLinesAsync(HostsFilePath, newLines);
-            if (unauthorized.Count > 0)
-                details.Add($"Removed: {string.Join(", ", unauthorized)}");
-            else
-                details.Add("No entries needed removal.");
+            details.Add($"Removed: {string.Join(", ", unauthorized)}");
             AnsiConsole.MarkupLine(
                 $"[green]✓ Removed unauthorized hosts entries: {string.Join(", ", unauthorized)}[/]"
             );
             return new TaskResult
             {
                 TaskName = Name,
-                Success = unauthorized.Count == 0,
+                // Success reflects the remediation having been applied. The
+                // previous `unauthorized.Count == 0` inverted this: cleaning up
+                // entries reported the task as failed, and only a file needing no
+                // work at all counted as a success.
+                Success = true,
                 Message = string.Join("\n", details),
             };
         }
@@ -146,7 +178,7 @@ public class HostsFileAuditTask : BaseTask
         var unauthorized = lines
             .Select(l => l.Trim())
             .Where(l => !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#"))
-            .Except(AllowedEntries, StringComparer.OrdinalIgnoreCase)
+            .Where(l => !IsAllowedEntry(l))
             .ToList();
         return unauthorized.Count == 0;
     }

@@ -465,10 +465,16 @@ public class AuditPolicyTask : BaseTask
 
             if (success && !string.IsNullOrEmpty(output))
             {
-                if (
-                    output.Contains("Success and Failure")
-                    || (output.Contains("Success") && output.Contains("Failure"))
-                )
+                // `auditpol /get /category:"X"` prints one line per subcategory.
+                // Testing the whole blob for "Success" AND "Failure" passed as
+                // soon as one subcategory audited Success and a *different* one
+                // audited Failure - even with others set to "No Auditing".
+                // Require that no subcategory is left unaudited instead.
+                var unaudited = output
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Count(l => l.Contains("No Auditing", StringComparison.OrdinalIgnoreCase));
+
+                if (unaudited == 0)
                 {
                     AnsiConsole.MarkupLine(
                         $"[green]? {category}: Success and Failure auditing enabled[/]"
@@ -476,7 +482,9 @@ public class AuditPolicyTask : BaseTask
                 }
                 else
                 {
-                    AnsiConsole.MarkupLine($"[red]? {category}: Auditing not fully configured[/]");
+                    AnsiConsole.MarkupLine(
+                        $"[red]? {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
+                    );
                     allGood = false;
                 }
             }
