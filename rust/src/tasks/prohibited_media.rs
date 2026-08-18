@@ -1,6 +1,5 @@
 //! Scan for and remove prohibited media files from user directories.
 
-use crate::app_config;
 use crate::impl_task_meta;
 use crate::models::{ReadmeData, SystemInfo, TaskResult};
 use crate::tasks::Task;
@@ -47,7 +46,6 @@ struct FoundFile {
     name: String,
     extension: String,
     length: u64,
-    creation_time: Option<SystemTime>,
     last_write_time: Option<SystemTime>,
     directory_name: Option<String>,
 }
@@ -57,7 +55,6 @@ pub struct ProhibitedMediaTask {
     description: String,
     dry_run: bool,
     readme_data: Option<ReadmeData>,
-    backup_folder: PathBuf,
     found_files: Vec<FoundFile>,
 }
 
@@ -70,7 +67,6 @@ impl ProhibitedMediaTask {
                     .to_string(),
             dry_run: false,
             readme_data: None,
-            backup_folder: PathBuf::new(),
             found_files: Vec::new(),
         }
     }
@@ -118,6 +114,15 @@ impl ProhibitedMediaTask {
         let file_name = file.name.to_lowercase();
         let extension = file.extension.to_lowercase();
 
+        // Never delete this tool or anything alongside it. The game-pattern list
+        // contains "riot", which is a substring of "cyberPATRIOTautomation.exe",
+        // so the scanner classified its own binary as a game and queued it for
+        // deletion whenever it was run from a folder under C:\Users - which is
+        // where a competitor runs it from.
+        if self.is_own_executable(file) {
+            return false;
+        }
+
         if MEDIA_EXTENSIONS.contains(&extension.as_str()) {
             if file.length < 10000 && extension == ".wav" {
                 return false;
@@ -153,6 +158,26 @@ impl ProhibitedMediaTask {
         }
 
         false
+    }
+
+    /// Is this the running tool, or a file sitting beside it?
+    ///
+    /// Windows locks a running executable, so deleting it would fail anyway and
+    /// be reported as an error; the sibling check additionally protects the
+    /// run log and any files shipped with the tool.
+    fn is_own_executable(&self, file: &FoundFile) -> bool {
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
+
+        if file.full_name == exe {
+            return true;
+        }
+
+        match (exe.parent(), file.full_name.parent()) {
+            (Some(exe_dir), Some(file_dir)) => exe_dir == file_dir,
+            _ => false,
+        }
     }
 
     fn categorize_file(file: &FoundFile) -> &'static str {
@@ -247,11 +272,12 @@ impl ProhibitedMediaTask {
 
     fn display_summary(&self, fixes: &[String], issues: &[String]) {
         ui::markup_line("[bold]Removal Summary[/]");
-        ui::markup_line(&format!("[green]Files Removed:[/] {}", fixes.len()));
+        ui::markup_line(&format!("[green]Files Deleted:[/] {}", fixes.len()));
         ui::markup_line(&format!("[red]Errors:[/] {}", issues.len()));
-        ui::markup_line(&format!("[cyan]Backup Location:[/] {}", ui::escape(&self.backup_folder.to_string_lossy())));
         ui::write_line();
-        ui::markup_line("[dim]A detailed log has been saved to the backup folder.[/]");
+        ui::markup_line(
+            "[dim]Files were deleted permanently. Every deletion is listed in the run log.[/]",
+        );
     }
 }
 
@@ -272,7 +298,6 @@ fn to_found_file(path: &Path, metadata: &std::fs::Metadata) -> Option<FoundFile>
         name,
         extension,
         length: metadata.len(),
-        creation_time: metadata.created().ok(),
         last_write_time: metadata.modified().ok(),
         directory_name: path.parent().map(|p| p.to_string_lossy().into_owned()),
     })
@@ -329,11 +354,6 @@ impl Task for ProhibitedMediaTask {
         ui::markup_line("[dim]This may take a few minutes...[/]");
         ui::write_line();
 
-        self.backup_folder = app_config::desktop_dir().join(format!(
-            "CyberPatriot_RemovedFiles_{}",
-            Local::now().format("%Y%m%d_%H%M%S")
-        ));
-
         let users_path = Path::new(r"C:\Users");
         if users_path.exists() {
             self.scan_directory(users_path);
@@ -363,36 +383,10 @@ impl Task for ProhibitedMediaTask {
         if self.dry_run {
             ui::markup_line("[yellow]DRY RUN: Previewing prohibited media removal (no changes will be made)[/]");
             ui::markup_line(&format!("[cyan]Would remove {} prohibited files[/]", self.found_files.len()));
-            ui::markup_line(&format!("[cyan]Would back up files to: {}[/]", ui::escape(&self.backup_folder.to_string_lossy())));
+            ui::markup_line("[cyan]Files would be deleted permanently, not backed up[/]");
             result.message = format!("DRY RUN: Would remove {} prohibited files.", self.found_files.len());
             return result;
         }
-
-        if let Err(e) = std::fs::create_dir_all(&self.backup_folder) {
-            result.success = false;
-            result.message = "Failed to complete prohibited media scan".to_string();
-            result.error_details = Some(e.to_string());
-            ui::write_exception(&e.to_string());
-            return result;
-        }
-
-        let media_dir = self.backup_folder.join("Media");
-        let hacking_dir = self.backup_folder.join("HackingTools");
-        let games_dir = self.backup_folder.join("Games");
-        let other_dir = self.backup_folder.join("Other");
-        for d in [&media_dir, &hacking_dir, &games_dir, &other_dir] {
-            let _ = std::fs::create_dir_all(d);
-        }
-
-        let log_path = self.backup_folder.join("removal_log.txt");
-        let mut log_entries: Vec<String> = vec![
-            "CyberPatriot Prohibited Files Removal Log".to_string(),
-            format!("Date: {}", Local::now().format("%m/%d/%Y %H:%M:%S")),
-            format!("Total files found: {}", self.found_files.len()),
-            String::new(),
-            "Files removed:".to_string(),
-            format!("={}", "=".repeat(79)),
-        ];
 
         ui::write_line();
         ui::rule("[bold yellow]Removing Prohibited Files[/]");
@@ -401,39 +395,39 @@ impl Task for ProhibitedMediaTask {
         let total_count = self.found_files.len();
         let found = std::mem::take(&mut self.found_files);
 
+        // Files are deleted outright rather than copied to a review folder. A
+        // backup left the prohibited content on the machine - just relocated -
+        // which does not clear the finding it was flagged for, and doubled the
+        // disk written during the scan. Every deletion is recorded in the run
+        // log, which is the record for review.
         for (index, file) in found.iter().enumerate() {
             let category = Self::categorize_file(file);
-            let backup_dir = match category {
-                "Media" => &media_dir,
-                "HackingTool" => &hacking_dir,
-                "Game" => &games_dir,
-                _ => &other_dir,
-            };
 
-            let stem = file
-                .full_name
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            let backup_file_name = format!("{}_{}{}", stem, uuid::Uuid::new_v4().simple(), file.extension);
-            let backup_path = backup_dir.join(&backup_file_name);
-
-            let copy_result = std::fs::copy(&file.full_name, &backup_path);
-            match copy_result.and_then(|_| std::fs::remove_file(&file.full_name)) {
+            match std::fs::remove_file(&file.full_name) {
                 Ok(_) => {
-                    log_entries.push(format!("[{category}] {}", file.full_name.to_string_lossy()));
-                    log_entries.push(format!("  ✓ Backed up to: {}", backup_path.to_string_lossy()));
-                    log_entries.push(format!("  ✓ Size: {} bytes", file.length));
-                    log_entries.push(format!("  ✓ Created: {}", format_time(file.creation_time)));
-                    log_entries.push(format!("  ✓ Modified: {}", format_time(file.last_write_time)));
-                    log_entries.push(String::new());
-                    fixes.push(format!("Removed {category}: {}", file.name));
+                    ui::markup_line(&format!(
+                        "[green]Deleted [{}] {}[/]",
+                        category,
+                        ui::escape(&file.full_name.to_string_lossy())
+                    ));
+                    fixes.push(format!(
+                        "Deleted {category}: {} ({} bytes, modified {})",
+                        file.full_name.to_string_lossy(),
+                        file.length,
+                        format_time(file.last_write_time)
+                    ));
                 }
                 Err(e) => {
-                    issues.push(format!("Failed to remove {}: {}", file.full_name.to_string_lossy(), e));
-                    log_entries.push(format!("[ERROR] Failed to remove: {}", file.full_name.to_string_lossy()));
-                    log_entries.push(format!("  ✗ Error: {e}"));
-                    log_entries.push(String::new());
+                    issues.push(format!(
+                        "Failed to delete {}: {}",
+                        file.full_name.to_string_lossy(),
+                        e
+                    ));
+                    ui::markup_line(&format!(
+                        "[red]Failed to delete {}: {}[/]",
+                        ui::escape(&file.full_name.to_string_lossy()),
+                        ui::escape(&e.to_string())
+                    ));
                 }
             }
 
@@ -443,20 +437,20 @@ impl Task for ProhibitedMediaTask {
             }
         }
 
-        log_entries.push(String::new());
-        log_entries.push(format!("={}", "=".repeat(79)));
-        log_entries.push(format!("Summary: {} files removed, {} errors", fixes.len(), issues.len()));
-        let _ = std::fs::write(&log_path, log_entries.join("\n"));
-
         ui::write_line();
         self.display_summary(&fixes, &issues);
 
-        result.message = format!(
-            "Removed {} prohibited files. Backups saved to: {}",
-            fixes.len(),
-            self.backup_folder.to_string_lossy()
-        );
+        result.items_attempted = total_count as i32;
+        result.items_succeeded = fixes.len() as i32;
+        result.success = issues.is_empty();
+        result.message = format!("Deleted {} prohibited file(s).", fixes.len());
         if !issues.is_empty() {
+            result.message = format!(
+                "Deleted {} of {} prohibited file(s); {} could not be deleted.",
+                fixes.len(),
+                total_count,
+                issues.len()
+            );
             result.error_details = Some(issues.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
         }
 

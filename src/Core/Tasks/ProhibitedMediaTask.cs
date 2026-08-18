@@ -5,13 +5,12 @@ using Spectre.Console;
 namespace CyberPatriotAutomation.Core.Tasks;
 
 /// <summary>
-/// Task to scan for and remove prohibited media files from user directories
-/// Backs up files to a desktop folder before deletion for review
+/// Task to scan for and remove prohibited media files from user directories.
+/// Files are deleted permanently; every deletion is recorded in the run log.
 /// </summary>
 public class ProhibitedMediaTask : BaseTask
 {
     private ReadmeData? _readmeData;
-    private string _backupFolder = string.Empty;
     private readonly List<FileInfo> _foundFiles = new();
 
     /// <summary>
@@ -173,12 +172,6 @@ public class ProhibitedMediaTask : BaseTask
         AnsiConsole.MarkupLine("[dim]This may take a few minutes...[/]");
         AnsiConsole.WriteLine();
 
-        // Create backup folder on desktop
-        _backupFolder = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            $"CyberPatriot_RemovedFiles_{DateTime.Now:yyyyMMdd_HHmmss}"
-        );
-
         // Scan user directories
         var usersPath = @"C:\Users";
         if (Directory.Exists(usersPath))
@@ -221,27 +214,13 @@ public class ProhibitedMediaTask : BaseTask
                 AnsiConsole.MarkupLine(
                     $"[cyan]Would remove {_foundFiles.Count} prohibited files[/]"
                 );
-                AnsiConsole.MarkupLine($"[cyan]Would back up files to: {_backupFolder}[/]");
+                AnsiConsole.MarkupLine(
+                    "[cyan]Files would be deleted permanently, not backed up[/]"
+                );
                 result.Message = $"DRY RUN: Would remove {_foundFiles.Count} prohibited files.";
                 return result;
             }
 
-            // Create backup directory
-            Directory.CreateDirectory(_backupFolder);
-
-            // Create subdirectories for organization
-            var mediaDir = Path.Combine(_backupFolder, "Media");
-            var hackingDir = Path.Combine(_backupFolder, "HackingTools");
-            var gamesDir = Path.Combine(_backupFolder, "Games");
-            var otherDir = Path.Combine(_backupFolder, "Other");
-
-            Directory.CreateDirectory(mediaDir);
-            Directory.CreateDirectory(hackingDir);
-            Directory.CreateDirectory(gamesDir);
-            Directory.CreateDirectory(otherDir);
-
-            // Create a log file
-            var logPath = Path.Combine(_backupFolder, "removal_log.txt");
             var logEntries = new List<string>
             {
                 "CyberPatriot Prohibited Files Removal Log",
@@ -263,45 +242,28 @@ public class ProhibitedMediaTask : BaseTask
 
             foreach (var file in _foundFiles)
             {
+                // Files are deleted outright rather than copied to a review
+                // folder. A backup left the prohibited content on the machine -
+                // just relocated - which does not clear the finding it was
+                // flagged for, and doubled the disk written during the scan.
+                // Every deletion is recorded in the run log.
+                var category = CategorizeFile(file);
                 try
                 {
-                    // Determine category and backup location
-                    var category = CategorizeFile(file);
-                    var backupDir = category switch
-                    {
-                        "Media" => mediaDir,
-                        "HackingTool" => hackingDir,
-                        "Game" => gamesDir,
-                        _ => otherDir,
-                    };
+                    var size = file.Length;
+                    var modified = file.LastWriteTime;
 
-                    // Generate unique backup filename
-                    var backupFileName =
-                        $"{Path.GetFileNameWithoutExtension(file.Name)}_{Guid.NewGuid():N}{file.Extension}";
-                    var backupPath = Path.Combine(backupDir, backupFileName);
-
-                    // Copy file to backup
-                    File.Copy(file.FullName, backupPath, true);
-
-                    // Log the removal
-                    logEntries.Add($"[{category}] {file.FullName}");
-                    logEntries.Add($"  ✓ Backed up to: {backupPath}");
-                    logEntries.Add($"  ✓ Size: {file.Length:N0} bytes");
-                    logEntries.Add($"  ✓ Created: {file.CreationTime}");
-                    logEntries.Add($"  ✓ Modified: {file.LastWriteTime}");
-                    logEntries.Add("");
-
-                    // Delete the original file
                     File.Delete(file.FullName);
 
-                    fixes.Add($"Removed {category}: {file.Name}");
+                    logEntries.Add($"[{category}] Deleted: {file.FullName}");
+                    logEntries.Add($"  Size: {size:N0} bytes, modified {modified}");
+                    fixes.Add($"Deleted {category}: {file.FullName}");
                 }
                 catch (Exception ex)
                 {
-                    issues.Add($"Failed to remove {file.FullName}: {ex.Message}");
-                    logEntries.Add($"[ERROR] Failed to remove: {file.FullName}");
-                    logEntries.Add($"  ✗ Error: {ex.Message}");
-                    logEntries.Add("");
+                    issues.Add($"Failed to delete {file.FullName}: {ex.Message}");
+                    logEntries.Add($"[ERROR] Failed to delete: {file.FullName}");
+                    logEntries.Add($"  Error: {ex.Message}");
                 }
 
                 processedCount++;
@@ -315,20 +277,27 @@ public class ProhibitedMediaTask : BaseTask
                 }
             }
 
-            // Write log file
+            // Every deletion is already mirrored into the run log, which is the
+            // record for review now that nothing is copied aside.
             logEntries.Add("");
             logEntries.Add("=" + new string('=', 79));
-            logEntries.Add($"Summary: {fixes.Count} files removed, {issues.Count} errors");
-            await File.WriteAllLinesAsync(logPath, logEntries);
+            logEntries.Add($"Summary: {fixes.Count} files deleted, {issues.Count} errors");
+            foreach (var entry in logEntries)
+                RunLog.RecordRaw(entry);
 
             // Display summary
             AnsiConsole.WriteLine();
             DisplaySummary(fixes, issues);
 
-            result.Message =
-                $"Removed {fixes.Count} prohibited files. Backups saved to: {_backupFolder}";
+            result.ItemsAttempted = _foundFiles.Count;
+            result.ItemsSucceeded = fixes.Count;
+            result.Success = issues.Count == 0;
+            result.Message = $"Deleted {fixes.Count} prohibited file(s).";
             if (issues.Count > 0)
             {
+                result.Message =
+                    $"Deleted {fixes.Count} of {_foundFiles.Count} prohibited file(s); "
+                    + $"{issues.Count} could not be deleted.";
                 result.ErrorDetails = string.Join("\n", issues.Take(10));
             }
         }
@@ -415,10 +384,47 @@ public class ProhibitedMediaTask : BaseTask
         }
     }
 
+    /// <summary>
+    /// Is this the running tool, or a file sitting beside it?
+    /// </summary>
+    /// <remarks>
+    /// The game-pattern list contains "riot", which is a substring of
+    /// "cyberPATRIOTautomation.exe", so the scanner classified its own binary as
+    /// a game and queued it for deletion whenever it was run from a folder under
+    /// C:\Users - which is where a competitor runs it from. Windows locks a
+    /// running executable so the delete would fail anyway and be reported as an
+    /// error; the sibling check additionally protects the run log and anything
+    /// shipped alongside the tool.
+    /// </remarks>
+    private static bool IsOwnExecutable(FileInfo file)
+    {
+        try
+        {
+            var exe = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(exe))
+                return false;
+
+            if (string.Equals(file.FullName, exe, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var exeDir = Path.GetDirectoryName(exe);
+            return !string.IsNullOrEmpty(exeDir)
+                && string.Equals(file.DirectoryName, exeDir, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private bool IsProhibitedFile(FileInfo file)
     {
         var fileName = file.Name.ToLowerInvariant();
         var extension = file.Extension.ToLowerInvariant();
+
+        // Never delete this tool or anything alongside it.
+        if (IsOwnExecutable(file))
+            return false;
 
         // Check for media files
         if (MediaExtensions.Contains(extension))
@@ -591,11 +597,10 @@ public class ProhibitedMediaTask : BaseTask
         var panel = new Panel(
             new Markup(
                 $"""
-                [green]Files Removed:[/] {fixes.Count}
+                [green]Files Deleted:[/] {fixes.Count}
                 [red]Errors:[/] {issues.Count}
-                [cyan]Backup Location:[/] {_backupFolder}
 
-                [dim]A detailed log has been saved to the backup folder.[/]
+                [dim]Files were deleted permanently. Every deletion is listed in the run log.[/]
                 """
             )
         ).Header("[bold]Removal Summary[/]").Border(BoxBorder.Rounded).BorderColor(Color.Green);

@@ -20,6 +20,14 @@ namespace CyberPatriotAutomation.Core.Tasks;
 /// </summary>
 public class SoftwareManagementTask : BaseTask
 {
+    /// <summary>A full or quick Defender scan runs for many minutes.</summary>
+    private static readonly TimeSpan ScanTimeout = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// `wmic product` is notoriously slow - minutes on a populated machine.
+    /// </summary>
+    private static readonly TimeSpan InventoryTimeout = TimeSpan.FromMinutes(10);
+
     public List<string> ProhibitedSoftware { get; set; } = new();
     public List<SoftwareRequirement> RequiredSoftware { get; set; } = new();
     public bool RunMalwareScan { get; set; } = true;
@@ -47,7 +55,8 @@ public class SoftwareManagementTask : BaseTask
     {
         var (success, output, error) = await CommandExecutor.ExecuteAsync(
             "wmic",
-            "product get name"
+            "product get name",
+            InventoryTimeout
         );
         return new SystemInfo { RawOutput = output, ErrorOutput = error };
     }
@@ -69,7 +78,8 @@ public class SoftwareManagementTask : BaseTask
 
         var (success, output, error) = await CommandExecutor.ExecuteAsync(
             "wmic",
-            "product get name"
+            "product get name",
+            InventoryTimeout
         );
         if (!success)
         {
@@ -179,7 +189,8 @@ public class SoftwareManagementTask : BaseTask
     {
         var (success, output, error) = await CommandExecutor.ExecuteAsync(
             "wmic",
-            "product get name"
+            "product get name",
+            InventoryTimeout
         );
         var installed = output
             .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
@@ -213,10 +224,11 @@ public class SoftwareManagementTask : BaseTask
         else
             AnsiConsole.MarkupLine($"[yellow]⚠ Could not update signatures: {updateError}[/]");
 
-        // Run the scan
-        var (scanSuccess, scanOutput, scanError) = await CommandExecutor.ExecuteAsync(
-            "powershell",
-            $"-Command \"Start-MpScan -ScanType {scanType}\""
+        // Run the scan. A Defender scan runs for many minutes; under the default
+        // two-minute ceiling it was killed part-way and reported as a failure.
+        var (scanSuccess, scanOutput, scanError) = await CommandExecutor.PowerShellAsync(
+            $"Start-MpScan -ScanType {scanType}",
+            ScanTimeout
         );
 
         if (!scanSuccess)

@@ -45,6 +45,18 @@ public class Program
                 && !parseReadmeOnly
             );
 
+        if (cliArgs.Contains("--version") || cliArgs.Contains("-V"))
+        {
+            Console.WriteLine($"CyberPatriot Automation Tool {AppConfig.VersionString}");
+            return;
+        }
+
+        // Where to write the run log; --log <path> overrides the default.
+        var logPath = ExtractArgument(cliArgs, "--log") ?? RunLog.DefaultLogPath();
+        foreach (var line in RunLog.Header(string.Join(' ', cliArgs)))
+            RunLog.RecordRaw(line);
+        RunLog.AttachToConsole();
+
         // Auto-find the README if requested and none supplied. The flag was
         // previously parsed but never acted on, so --auto-readme did nothing.
         var discoveryAttempts = new List<string>();
@@ -132,6 +144,32 @@ public class Program
                     "[yellow]No README file specified. Use --readme <file> to parse one.[/]"
                 );
             }
+
+            // --parse-readme is a report, not a run. Combining it with task flags
+            // silently did nothing, which reads as the tasks having been skipped
+            // for some other reason.
+            if (
+                runAll
+                || runPasswordPolicy
+                || runAccountPermissions
+                || runUserManagement
+                || runServiceManagement
+                || runAuditPolicy
+                || runFirewall
+                || runSecurityHardening
+                || runMediaScan
+            )
+            {
+                AnsiConsole.WriteLine();
+                AnsiConsole.MarkupLine(
+                    "[yellow]Note: --parse-readme only reports the README; no tasks were run.[/]"
+                );
+                AnsiConsole.MarkupLine(
+                    "[yellow]Drop --parse-readme to apply them - the README is displayed either way.[/]"
+                );
+            }
+
+            await FinishLogAsync(logPath);
             return;
         }
 
@@ -310,6 +348,28 @@ public class Program
         AnsiConsole.WriteLine();
         AnsiConsole.Write(new Rule("[bold green]✓ Automation Complete[/]").RuleStyle("green"));
         AnsiConsole.WriteLine();
+
+        RunLog.AppendResults(results);
+        await FinishLogAsync(logPath);
+    }
+
+    /// <summary>
+    /// Write the run log, reporting where it went or why it could not be written.
+    /// </summary>
+    static async Task FinishLogAsync(string path)
+    {
+        try
+        {
+            await RunLog.WriteToAsync(path);
+            AnsiConsole.MarkupLine($"[dim]Run log written to: {Markup.Escape(path)}[/]");
+        }
+        catch (Exception ex)
+        {
+            AnsiConsole.MarkupLine(
+                $"[yellow]Could not write run log to {Markup.Escape(path)}: "
+                    + $"{Markup.Escape(ex.Message)}[/]"
+            );
+        }
     }
 
     // Helper functions

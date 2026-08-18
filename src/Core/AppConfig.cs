@@ -53,9 +53,32 @@ public static class AppConfig
     public const string ScoringReportShortcut = "CyberPatriot Scoring Report";
 
     /// <summary>
-    /// Application version
+    /// Application version, taken from the assembly so the two cannot drift.
     /// </summary>
-    public const string Version = "1.0.0";
+    /// <remarks>
+    /// Bump &lt;Version&gt; in the csproj with every behavioural change; the run log
+    /// stamps this in its header and file name, so a log can always be tied back
+    /// to the build that produced it.
+    /// </remarks>
+    public static readonly string Version =
+        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version is { } v
+            ? $"{v.Major}.{v.Minor}.{v.Build}"
+            : "0.0.0";
+
+    /// <summary>Version and build date as one display string.</summary>
+    public static string VersionString
+    {
+        get
+        {
+            // The assembly's write time distinguishes two builds of the same
+            // version, which happens while iterating between releases.
+            var location = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            var built = string.IsNullOrEmpty(location)
+                ? DateTime.Now
+                : File.GetLastWriteTime(location);
+            return $"v{Version} (build {built:yyyy-MM-dd})";
+        }
+    }
 
     /// <summary>
     /// Try to find the README file automatically
