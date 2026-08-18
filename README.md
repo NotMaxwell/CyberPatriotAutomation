@@ -112,8 +112,9 @@ Download the latest release from the [Releases](https://github.com/NotMaxwell/Cy
 # Run all tasks (dry run - preview only)
 dotnet run -- --all --dry-run
 
-# Run all tasks with README
-dotnet run -- --readme "C:\Users\Public\Desktop\README.html" --all
+# Run all tasks with README (a .url shortcut, a .lnk, an .html file
+# or an https:// address all work)
+dotnet run -- --readme "C:\CyberPatriot\README.url" --all
 
 # Auto-find README and run all tasks
 dotnet run -- --auto-readme --all
@@ -121,6 +122,39 @@ dotnet run -- --auto-readme --all
 # Parse README only (don't run tasks)
 dotnet run -- --readme "README.html" --parse-readme
 ```
+
+### How the README is located
+
+> [!IMPORTANT]
+> **On a standard competition image the README is not a file on disk.**
+> `C:\CyberPatriot\README.url` is an *Internet Shortcut* naming an `https://`
+> document, which is what the competitor's browser opens —
+> `C:\CyberPatriot\` contains no `README.html`.
+
+`--auto-readme` therefore resolves shortcuts rather than looking only for
+literal paths. It checks, in order:
+
+1. A README shortcut on the current user's desktop, then the public desktop
+2. `C:\CyberPatriot\README.url`, then `C:\CyberPatriot\README.html`
+3. The public desktop and documents folders
+4. Every user's desktop (`C:\Users\*\Desktop\README.*`)
+
+Shortcuts **chain** on a real image (desktop `.lnk` → `README.url` → the
+document) and are followed to the end. A remote target is downloaded; the URL is
+unique per image and changes every competition, so it is always read from the
+shortcut at run time and never hard-coded. This requires network access — if the
+image is isolated, open the README in a browser, save it as HTML, and pass it
+with `--readme <file>`.
+
+The run reports which document it settled on:
+
+```
+Using README: C:\Users\you\AppData\Local\Temp\cyberpatriot_readme.html
+              (resolved from C:\CyberPatriot\README.url)
+```
+
+If discovery fails it lists every location it checked, distinguishing "not
+found" from "exists but could not be resolved".
 
 ### Run Specific Tasks
 

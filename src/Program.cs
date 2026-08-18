@@ -45,11 +45,76 @@ public class Program
                 && !parseReadmeOnly
             );
 
-        // Parse README if needed
+        // Auto-find the README if requested and none supplied. The flag was
+        // previously parsed but never acted on, so --auto-readme did nothing.
+        var discoveryAttempts = new List<string>();
+        if (string.IsNullOrEmpty(readmeFile) && autoFindReadme)
+        {
+            readmeFile = await AppConfig.FindReadmeFileAsync(discoveryAttempts);
+        }
+
+        // Parse README if needed.
+        //
+        // An explicitly supplied path is resolved the same way an auto-discovered
+        // one is: the documented location on a competition image is
+        // C:\CyberPatriot\README.url, so --readme pointing at a .url (or .lnk, or
+        // an https:// address) has to follow it rather than parse the shortcut
+        // itself as HTML.
         ReadmeData? readmeData = null;
         if (!string.IsNullOrEmpty(readmeFile))
         {
-            readmeData = await ReadmeParser.ParseHtmlReadmeAsync(readmeFile);
+            var indirect =
+                AppConfig.IsRemoteTarget(readmeFile)
+                || Path.GetExtension(readmeFile).Equals(".url", StringComparison.OrdinalIgnoreCase)
+                || Path.GetExtension(readmeFile).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+
+            var resolved = await AppConfig.ResolveReadmeCandidateAsync(readmeFile);
+
+            if (resolved != null)
+            {
+                // Say which document was actually used. Without this a shortcut
+                // resolving to the wrong target is invisible: the run reports an
+                // empty README with nothing to point at.
+                AnsiConsole.MarkupLine(
+                    resolved == readmeFile
+                        ? $"[dim]Using README: {Markup.Escape(resolved)}[/]"
+                        : $"[dim]Using README: {Markup.Escape(resolved)} (resolved from {Markup.Escape(readmeFile)})[/]"
+                );
+                readmeData = await ReadmeParser.ParseHtmlReadmeAsync(resolved);
+            }
+            else if (indirect)
+            {
+                // A shortcut or URL that could not be followed must not be fed to
+                // the HTML parser: an INI file yields a README with no title and
+                // no detectable OS, reporting "Unknown" for everything and hiding
+                // the real failure.
+                AnsiConsole.MarkupLine(
+                    $"[red]Could not obtain the README from {Markup.Escape(readmeFile)}[/]"
+                );
+                AnsiConsole.MarkupLine(
+                    "[yellow]If the image has no network access, open the README in a browser, "
+                        + "save it as HTML, and pass it with --readme <file>.[/]"
+                );
+            }
+            else
+            {
+                // A plain path that does not exist: let the parser report "not
+                // found" against exactly what was typed.
+                readmeData = await ReadmeParser.ParseHtmlReadmeAsync(readmeFile);
+            }
+        }
+        else if (autoFindReadme)
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]No README found automatically. Pass --readme <file> to specify one.[/]"
+            );
+            // Show where it looked, so a candidate that exists but cannot be
+            // followed is visible rather than silently skipped.
+            AnsiConsole.MarkupLine("[dim]Locations checked:[/]");
+            foreach (var attempt in discoveryAttempts)
+            {
+                AnsiConsole.MarkupLine($"[dim]  - {Markup.Escape(attempt)}[/]");
+            }
         }
 
         // Build task list

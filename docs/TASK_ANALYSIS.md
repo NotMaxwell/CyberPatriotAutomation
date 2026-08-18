@@ -219,16 +219,22 @@ dotnet run -- --auto-readme --all
 
 ## Default README Locations
 
-On a real competition image the README is presented as a **desktop shortcut
-(`.lnk`)** on the desktop of the user running the tool — the HTML file itself
-often lives elsewhere. Auto-discovery therefore looks for a README shortcut on
-the current user's desktop (then the common/Public desktop) and resolves it to
-its target, before falling back to these literal paths:
+On a standard competition image the README is **not a file on disk**:
+`C:\CyberPatriot\README.url` is an Internet Shortcut naming a remote `https://`
+document, which is what the competitor's browser opens — `C:\CyberPatriot\`
+contains no `README.html`. Auto-discovery therefore resolves shortcuts rather
+than looking only for literal paths. Search order:
 
-- C:\Users\Public\Desktop\README.html
-- C:\CyberPatriot\README.html
-- C:\Users\Public\Documents\README.html
-- Current user's desktop
+1. A README shortcut (`.url` or `.lnk`) on the current user's desktop, then the
+   common/Public desktop
+2. `C:\CyberPatriot\README.url`, then `C:\CyberPatriot\README.html`
+3. `C:\Users\Public\Desktop\README.*` and `C:\Users\Public\Documents\README.html`
+4. The current user's desktop, then every user's desktop
+
+Shortcuts **chain** (desktop `.lnk` → `README.url` → the document) and are
+followed to the end, bounded so a shortcut loop terminates. A remote target is
+downloaded. The URL is unique per image and changes every competition, so it is
+read from the shortcut at run time and never hard-coded.
 
 > Note: shortcut resolution is currently implemented in the Rust port
 > (`app_config::find_readme_file`). The C# `AppConfig.FindReadmeFile` still
