@@ -117,6 +117,33 @@ public class Program
             }
         }
 
+        // Parse-only mode: display the parsed data and stop. The flag previously
+        // only suppressed runAll, so it printed nothing and ran no tasks - an
+        // empty summary table with no indication why.
+        if (parseReadmeOnly)
+        {
+            if (readmeData != null)
+            {
+                ReadmeParser.DisplayParsedData(readmeData);
+            }
+            else
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]No README file specified. Use --readme <file> to parse one.[/]"
+                );
+            }
+            return;
+        }
+
+        // Show what was extracted before acting on it. The tasks are driven by
+        // this data - which users are authorised, which services are critical -
+        // so seeing it first is what makes the run reviewable.
+        if (readmeData != null)
+        {
+            ReadmeParser.DisplayParsedData(readmeData);
+            AnsiConsole.WriteLine();
+        }
+
         // Build task list
         var tasks = new List<BaseTask>();
         if (runPasswordPolicy || runAll)

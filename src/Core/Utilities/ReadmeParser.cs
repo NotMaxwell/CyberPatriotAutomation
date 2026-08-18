@@ -121,28 +121,76 @@ public class ReadmeParser
     /// <summary>
     /// Detect the operating system from the README content
     /// </summary>
+    /// <summary>
+    /// Operating systems recognised in a README, most specific first.
+    /// </summary>
+    /// <remarks>
+    /// Server editions precede the desktop entries so "Windows Server 2022" is
+    /// not reported as a bare "Windows".
+    /// </remarks>
+    private static readonly (string Needle, string Label)[] OperatingSystems = new[]
+    {
+        ("windows server 2025", "Windows Server 2025"),
+        ("windows server 2022", "Windows Server 2022"),
+        ("windows server 2019", "Windows Server 2019"),
+        ("windows server 2016", "Windows Server 2016"),
+        ("windows server 2012", "Windows Server 2012"),
+        ("windows 11", "Windows 11"),
+        ("windows 10", "Windows 10"),
+        ("windows 8.1", "Windows 8.1"),
+        ("windows 7", "Windows 7"),
+        ("ubuntu", "Ubuntu Linux"),
+        ("debian", "Debian Linux"),
+        ("fedora", "Fedora Linux"),
+        ("linux", "Linux"),
+    };
+
+    /// <summary>
+    /// Flatten markup and whitespace so OS names survive however they were typed.
+    /// </summary>
+    /// <remarks>
+    /// Matching against raw HTML missed anything split by markup or a
+    /// non-breaking space - <c>Windows&amp;nbsp;10</c> decodes to a U+00A0 that
+    /// never equals the plain space being searched for, and
+    /// <c>Windows &lt;b&gt;10&lt;/b&gt;</c> has a tag in the middle. Both are
+    /// ordinary in hand-written READMEs and both produced "Unknown".
+    /// </remarks>
+    private static string NormalizeForOsMatch(string content) =>
+        string.Join(
+                ' ',
+                StripHtmlTags(content).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            )
+            .ToLowerInvariant();
+
+    private static string? MatchOperatingSystem(string haystack)
+    {
+        foreach (var (needle, label) in OperatingSystems)
+        {
+            if (haystack.Contains(needle, StringComparison.Ordinal))
+                return label;
+        }
+        return null;
+    }
+
     private static string DetectOperatingSystem(string content)
     {
-        var lowerContent = content.ToLower();
+        // The title and first heading name the image on essentially every
+        // official README ("Training Round Windows 10 README"). Consulting them
+        // first avoids misreading prose such as "do not go back to Windows 10"
+        // in a Windows 11 image, which a whole-document scan would match.
+        var headlines = Regex.Matches(
+            content,
+            @"<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline
+        );
+        foreach (Match headline in headlines)
+        {
+            var match = MatchOperatingSystem(NormalizeForOsMatch(headline.Groups[1].Value));
+            if (match != null)
+                return match;
+        }
 
-        if (lowerContent.Contains("windows 10"))
-            return "Windows 10";
-        if (lowerContent.Contains("windows 11"))
-            return "Windows 11";
-        if (lowerContent.Contains("windows server 2019"))
-            return "Windows Server 2019";
-        if (lowerContent.Contains("windows server 2022"))
-            return "Windows Server 2022";
-        if (lowerContent.Contains("windows server 2016"))
-            return "Windows Server 2016";
-        if (lowerContent.Contains("ubuntu"))
-            return "Ubuntu Linux";
-        if (lowerContent.Contains("debian"))
-            return "Debian Linux";
-        if (lowerContent.Contains("linux"))
-            return "Linux";
-
-        return "Unknown";
+        return MatchOperatingSystem(NormalizeForOsMatch(content)) ?? "Unknown";
     }
 
     /// <summary>
@@ -217,8 +265,20 @@ public class ReadmeParser
     /// </summary>
     private static void ParseUserBlock(string content, ReadmeData data)
     {
-        // First strip HTML but preserve line structure
-        var cleanedContent = Regex.Replace(content, @"<[^>]+>", "");
+        // Turn line-breaking tags into newlines *before* stripping markup. Only a
+        // <pre> block carries real newlines; a list written with <br> or one
+        // <p>/<li> per user collapses to a single line once tags are removed, and
+        // the whole block is then rejected as one over-long "username" - so such
+        // a README yielded no users at all.
+        var withBreaks = Regex.Replace(
+            content,
+            @"<\s*(?:br\s*/?|/p|/li|/div|/tr|/h[1-6])\s*>",
+            "\n",
+            RegexOptions.IgnoreCase | RegexOptions.Singleline
+        );
+
+        // Then strip the remaining HTML, preserving the line structure above.
+        var cleanedContent = Regex.Replace(withBreaks, @"<[^>]+>", "");
         cleanedContent = HttpUtility.HtmlDecode(cleanedContent);
 
         var lines = cleanedContent.Split(
@@ -276,20 +336,13 @@ public class ReadmeParser
                 && line.Length < 100
             ) // Usernames shouldn't be too long
             {
-                // This might be a username
-                var username = line;
-
                 // Check for "(you)" notation indicating primary user
                 bool isPrimary = lowerLine.Contains("(you)");
-                if (isPrimary)
-                {
-                    username = Regex
-                        .Replace(username, @"\s*\(you\)\s*", "", RegexOptions.IgnoreCase)
-                        .Trim();
-                }
 
-                // Clean up the username
-                username = username.Trim();
+                // READMEs annotate entries as "alice (you)" but also
+                // "bob (Admin)". Stripping any parenthetical leaves the account
+                // name to be validated on its own.
+                var username = Regex.Replace(line, @"\s*\([^)]*\)\s*", "").Trim();
 
                 if (!string.IsNullOrWhiteSpace(username) && IsValidUsername(username))
                 {
@@ -316,17 +369,40 @@ public class ReadmeParser
     /// <summary>
     /// Check if a string looks like a valid username
     /// </summary>
+    /// <summary>
+    /// Characters Windows forbids in a local account name. Their presence is a
+    /// reliable sign the line is prose rather than a username.
+    /// </summary>
+    private static readonly char[] InvalidUsernameChars =
+    {
+        '"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '@', '.', '!',
+    };
+
     private static bool IsValidUsername(string username)
     {
+        username = username.Trim();
+
         if (string.IsNullOrWhiteSpace(username))
             return false;
-        if (username.Length > 50)
+
+        // Windows caps local account names at 20 characters. Allowing 50 let
+        // whole sentences from the surrounding prose be recorded as users.
+        if (username.Length > 20)
             return false;
+
         if (username.Contains("password", StringComparison.OrdinalIgnoreCase))
             return false;
         if (username.Contains("authorized", StringComparison.OrdinalIgnoreCase))
             return false;
-        if (username.Contains(":"))
+        if (username.IndexOfAny(InvalidUsernameChars) >= 0)
+            return false;
+
+        // Windows does permit a space ("John Smith"), but a run of three or more
+        // words is prose. Erring permissive here is deliberate: a real user
+        // wrongly rejected is absent from the authorized set and would be
+        // deleted, whereas a junk entry only ever protects an account.
+        var words = username.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length > 2 || words.Any(IsCommonWord))
             return false;
 
         // Should contain at least one letter
@@ -385,21 +461,18 @@ public class ReadmeParser
                     RegexOptions.IgnoreCase
                 );
 
+                // The phrase this match came from, used to decide "latest" below.
+                var matchedPhrase = match.Value;
+
                 foreach (var name in softwareNames)
                 {
                     var cleanName = name.Trim().Trim(',', '.', ' ');
 
-                    // Skip common words that aren't software
                     if (
                         string.IsNullOrWhiteSpace(cleanName)
                         || cleanName.Length < 2
                         || cleanName.Length > 50
-                        || cleanName.Equals("the", StringComparison.OrdinalIgnoreCase)
-                        || cleanName.Equals("a", StringComparison.OrdinalIgnoreCase)
-                        || cleanName.Equals("an", StringComparison.OrdinalIgnoreCase)
-                        || cleanName.Equals("for", StringComparison.OrdinalIgnoreCase)
-                        || cleanName.Equals("use", StringComparison.OrdinalIgnoreCase)
-                        || cleanName.Equals("company", StringComparison.OrdinalIgnoreCase)
+                        || !IsPlausibleSoftwareName(cleanName)
                     )
                     {
                         continue;
@@ -412,9 +485,13 @@ public class ReadmeParser
                             new SoftwareRequirement
                             {
                                 Name = cleanName,
-                                ShouldBeLatest =
-                                    lowerContent.Contains("latest")
-                                    && lowerContent.Contains(cleanName.ToLower()),
+                                // Testing whether the *whole document* contained
+                                // "latest" meant a single mention anywhere flagged
+                                // every package as "Latest Stable".
+                                ShouldBeLatest = matchedPhrase.Contains(
+                                    "latest",
+                                    StringComparison.OrdinalIgnoreCase
+                                ),
                                 IsRequired = true,
                             }
                         );
@@ -434,6 +511,42 @@ public class ReadmeParser
                 software.Notes = (software.Notes ?? "") + " Do not install via Microsoft Store.";
             }
         }
+    }
+
+    /// <summary>
+    /// Generic nouns that appear in these phrasings but never name a product.
+    /// </summary>
+    private static readonly HashSet<string> SoftwareNameNoise = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        "a", "an", "use", "company", "software", "program", "programs", "application",
+        "applications", "app", "apps", "tool", "tools", "version", "versions", "access",
+        "browser", "browsers", "system", "systems", "file", "files", "data", "internet",
+    };
+
+    /// <summary>
+    /// Does this captured fragment plausibly name a piece of software?
+    /// </summary>
+    /// <remarks>
+    /// The extraction patterns - notably the broad "access to ... ." one - happily
+    /// capture ordinary prose, so "access to administrative tools." was recorded
+    /// as required software named "administrative tools". Real product names are
+    /// proper nouns, so require the fragment to start with an uppercase letter
+    /// and not be an everyday word. This mirrors the check already applied to
+    /// actionable software items.
+    /// </remarks>
+    private static bool IsPlausibleSoftwareName(string name)
+    {
+        if (name.Length == 0 || !char.IsUpper(name[0]))
+            return false;
+        if (IsCommonWord(name) || SoftwareNameNoise.Contains(name))
+            return false;
+
+        // Multi-word fragments are almost always prose rather than a product
+        // name; every word would need to be capitalised to read as one.
+        return name.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+            .All(w => w.Length > 0 && char.IsUpper(w[0]));
     }
 
     /// <summary>
@@ -487,33 +600,53 @@ public class ReadmeParser
 
         // Look for mentions of services that should be disabled
         // But NOT "do not disable" phrases
-        var disablePatterns = new[]
-        {
-            @"(?<!do\s+not\s+)disable\s+(?:the\s+)?([A-Za-z0-9\s]+?)\s+service",
-            @"([A-Za-z0-9\s]+?)\s+service\s+should\s+(?:be\s+)?disabled",
-        };
+        // The original negative lookbehind only covered a literal "do not "
+        // directly before "disable", so the very common competition phrasing
+        // "do not stop or disable the X service" slipped through and queued a
+        // critical service for disabling. Allow an intervening "<verb> or " and
+        // the other negation forms READMEs use.
+        var negated = new Regex(
+            @"(?:do\s+not|do\s*n'?t|never|must\s+not|should\s+not)\s+(?:\w+\s+or\s+)?$",
+            RegexOptions.IgnoreCase
+        );
 
-        foreach (var pattern in disablePatterns)
+        // Collect first so every "do not disable" is registered as critical
+        // before any prohibited entry is added.
+        var toProhibit = new List<string>();
+        foreach (
+            Match match in Regex.Matches(
+                content,
+                @"disable\s+(?:the\s+)?([A-Za-z0-9\s]+?)\s+service",
+                RegexOptions.IgnoreCase
+            )
+        )
         {
-            var matches = Regex.Matches(content, pattern, RegexOptions.IgnoreCase);
-            foreach (Match match in matches)
+            var service = match.Groups[1].Value.Trim();
+            if (negated.IsMatch(content[..match.Index]))
             {
-                var service = match.Groups[1].Value.Trim();
-                if (!string.IsNullOrWhiteSpace(service) && service.Length < 50)
-                {
-                    // Don't add if it's already marked as critical
-                    if (
-                        !data.ProhibitedServices.Contains(service, StringComparer.OrdinalIgnoreCase)
-                        && !data.CriticalServices.Contains(
-                            service,
-                            StringComparer.OrdinalIgnoreCase
-                        )
-                    )
-                    {
-                        data.ProhibitedServices.Add(service);
-                    }
-                }
+                // "Do not disable X" means X is critical, not merely not-prohibited.
+                AddCriticalService(service, data);
             }
+            else
+            {
+                toProhibit.Add(service);
+            }
+        }
+
+        foreach (
+            Match match in Regex.Matches(
+                content,
+                @"([A-Za-z0-9\s]+?)\s+service\s+should\s+(?:be\s+)?disabled",
+                RegexOptions.IgnoreCase
+            )
+        )
+        {
+            toProhibit.Add(match.Groups[1].Value.Trim());
+        }
+
+        foreach (var service in toProhibit)
+        {
+            AddProhibitedService(service, data);
         }
 
         // Check for CCS Client service warning (must be critical, not prohibited)
@@ -529,6 +662,37 @@ public class ReadmeParser
                 data.CriticalServices.Add("CCS Client");
             }
         }
+
+        // Final safety net: a service named as critical must never also be queued
+        // for disabling, whichever pattern happened to match it first. Disabling a
+        // scored critical service is one of the costliest mistakes in competition.
+        data.ProhibitedServices.RemoveAll(p =>
+            data.CriticalServices.Contains(p, StringComparer.OrdinalIgnoreCase)
+        );
+    }
+
+    /// <summary>
+    /// Record a service the README says must stay running, de-duplicated.
+    /// </summary>
+    private static void AddCriticalService(string service, ReadmeData data)
+    {
+        if (string.IsNullOrWhiteSpace(service) || service.Length >= 50)
+            return;
+        if (!data.CriticalServices.Contains(service, StringComparer.OrdinalIgnoreCase))
+            data.CriticalServices.Add(service);
+    }
+
+    private static void AddProhibitedService(string service, ReadmeData data)
+    {
+        if (string.IsNullOrWhiteSpace(service) || service.Length >= 50)
+            return;
+        if (
+            !data.ProhibitedServices.Contains(service, StringComparer.OrdinalIgnoreCase)
+            && !data.CriticalServices.Contains(service, StringComparer.OrdinalIgnoreCase)
+        )
+        {
+            data.ProhibitedServices.Add(service);
+        }
     }
 
     /// <summary>
@@ -539,13 +703,15 @@ public class ReadmeParser
         // Pattern for "Make a new group called X and add ... users"
         var groupPattern =
             @"(?:make|create)\s+(?:a\s+)?(?:new\s+)?group\s+(?:called\s+)?[""']?(\w+)[""']?\s+and\s+add\s+(?:the\s+following\s+users?\s+to\s+(?:the\s+)?[""']?\w+[""']?\s+group:?\s*)?([^.]+)";
-        var groupMatch = Regex.Match(
-            content,
-            groupPattern,
-            RegexOptions.IgnoreCase | RegexOptions.Singleline
-        );
-
-        if (groupMatch.Success)
+        // A single Regex.Match meant a README asking for two groups only ever
+        // produced the first one. Iterate over every match.
+        foreach (
+            Match groupMatch in Regex.Matches(
+                content,
+                groupPattern,
+                RegexOptions.IgnoreCase | RegexOptions.Singleline
+            )
+        )
         {
             var groupName = groupMatch.Groups[1].Value.Trim();
             var membersText = StripHtmlTags(groupMatch.Groups[2].Value);
@@ -557,7 +723,11 @@ public class ReadmeParser
                 .Where(m => !string.IsNullOrWhiteSpace(m) && IsValidUsername(m))
                 .ToList();
 
-            if (!string.IsNullOrWhiteSpace(groupName) && members.Count > 0)
+            var alreadyPresent = data.GroupRequirements.Any(g =>
+                g.GroupName.Equals(groupName, StringComparison.OrdinalIgnoreCase)
+            );
+
+            if (!string.IsNullOrWhiteSpace(groupName) && members.Count > 0 && !alreadyPresent)
             {
                 data.GroupRequirements.Add(
                     new GroupRequirement { GroupName = groupName, Members = members }
