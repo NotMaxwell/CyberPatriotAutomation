@@ -56,6 +56,57 @@ public class AccountPermissionsTask : BaseTask
             // Display current accounts
             DisplayAccountsTable(_accounts);
 
+            // This task had no dry-run guard at all, so --dry-run still disabled
+            // the Guest account and rewrote password-expiry flags - the one mode
+            // in which the tool promises to change nothing.
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    "[yellow]DRY RUN: Previewing account permission changes (no changes will be made)[/]"
+                );
+
+                if (
+                    _accounts.Any(a =>
+                        a.Username.Equals("Guest", StringComparison.OrdinalIgnoreCase) && a.IsEnabled
+                    )
+                )
+                {
+                    AnsiConsole.MarkupLine("[cyan]Would disable the Guest account[/]");
+                }
+
+                var wouldExpire = _accounts
+                    .Where(a =>
+                        a.IsEnabled
+                        && a.PasswordNeverExpires
+                        && !a.Username.Equals("Administrator", StringComparison.OrdinalIgnoreCase)
+                        && !AccountSecurityStandards.InsecureUsernames.Contains(
+                            a.Username,
+                            StringComparer.OrdinalIgnoreCase
+                        )
+                    )
+                    .Select(a => a.Username)
+                    .ToList();
+                if (wouldExpire.Count > 0)
+                {
+                    AnsiConsole.MarkupLine(
+                        $"[cyan]Would enable password expiration for: {Markup.Escape(string.Join(", ", wouldExpire))}[/]"
+                    );
+                }
+
+                // The remaining steps only report; run them so the preview is complete.
+                var previewPassword = await EnforcePasswordRequiredAsync();
+                issues.AddRange(previewPassword.Issues);
+                var previewAdmin = await ReviewAdminAccountsAsync();
+                issues.AddRange(previewAdmin.Issues);
+                var previewInactive = await CheckInactiveAccountsAsync();
+                issues.AddRange(previewInactive.Issues);
+
+                result.Message = "DRY RUN: Account permission changes previewed.";
+                if (issues.Count > 0)
+                    result.ErrorDetails = string.Join("\n", issues);
+                return result;
+            }
+
             // Check and fix Guest account
             var guestFixes = await CheckGuestAccountAsync();
             fixes.AddRange(guestFixes.Fixes);
@@ -141,14 +192,17 @@ public class AccountPermissionsTask : BaseTask
         var accounts = new List<AccountInfo>();
 
         // Get all local users using PowerShell
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "powershell",
-            "-Command \"Get-LocalUser | Select-Object Name, FullName, Enabled, PasswordRequired, PasswordNeverExpires, LastLogon | ConvertTo-Csv -NoTypeInformation\""
+        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
+            "Get-LocalUser | Select-Object Name, FullName, Enabled, PasswordRequired, PasswordNeverExpires, LastLogon | ConvertTo-Csv -NoTypeInformation"
         );
 
         if (success && !string.IsNullOrEmpty(output))
         {
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+
+            // Read the Administrators membership once rather than shelling out
+            // per account, and match names exactly.
+            var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
 
             // Skip header
             foreach (var line in lines.Skip(1))
@@ -156,8 +210,7 @@ public class AccountPermissionsTask : BaseTask
                 var account = ParseAccountFromCsv(line);
                 if (account != null)
                 {
-                    // Check if user is admin
-                    account.IsAdmin = await IsUserAdminAsync(account.Username);
+                    account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
                     account.GroupMemberships = await GetUserGroupsAsync(account.Username);
                     accounts.Add(account);
                 }
@@ -236,22 +289,11 @@ public class AccountPermissionsTask : BaseTask
         return null;
     }
 
-    private async Task<bool> IsUserAdminAsync(string username)
-    {
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "net",
-            $"localgroup Administrators"
-        );
-
-        return success && output.Contains(username, StringComparison.OrdinalIgnoreCase);
-    }
-
     private async Task<List<string>> GetUserGroupsAsync(string username)
     {
         var groups = new List<string>();
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "powershell",
-            $"-Command \"(Get-LocalUser '{username}' | Get-LocalGroup).Name\""
+        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
+            $"(Get-LocalUser {CommandExecutor.PsQuote(username)} | Get-LocalGroup).Name"
         );
 
         if (success && !string.IsNullOrEmpty(output))

@@ -257,21 +257,24 @@ public class UserManagementTask : BaseTask
     {
         var accounts = new List<AccountInfo>();
 
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "powershell",
-            "-Command \"Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation\""
+        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
+            "Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation"
         );
 
         if (success && !string.IsNullOrEmpty(output))
         {
             var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
 
+            // Read the Administrators membership once rather than shelling out
+            // per account, and match names exactly.
+            var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
+
             foreach (var line in lines.Skip(1))
             {
                 var account = ParseAccountLine(line);
                 if (account != null)
                 {
-                    account.IsAdmin = await IsUserAdminAsync(account.Username);
+                    account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
                     accounts.Add(account);
                 }
             }
@@ -330,15 +333,6 @@ public class UserManagementTask : BaseTask
         return result;
     }
 
-    private async Task<bool> IsUserAdminAsync(string username)
-    {
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "net",
-            "localgroup Administrators"
-        );
-        return success && output.Contains(username, StringComparison.OrdinalIgnoreCase);
-    }
-
     private bool IsSystemAccount(string username)
     {
         var systemAccounts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -387,6 +381,20 @@ public class UserManagementTask : BaseTask
     {
         var fixes = new List<string>();
         var issues = new List<string>();
+
+        // An empty authorised set means the README did not parse, not that every
+        // account on the machine is unauthorised. Without this guard a parsing
+        // failure deletes every enabled non-system account - a real README always
+        // names at least one administrator.
+        if (allAuthorized.Count == 0)
+        {
+            var message =
+                "Refusing to delete any users: the README produced no authorized accounts. "
+                + "Check that the correct README was parsed before running user management.";
+            issues.Add(message);
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(message)}[/]");
+            return (fixes, issues);
+        }
 
         var unauthorizedUsers = _currentAccounts
             .Where(a =>
@@ -472,34 +480,24 @@ public class UserManagementTask : BaseTask
                     $"[yellow]Adding {account.Username} to Administrators group...[/]"
                 );
 
-                var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"localgroup Administrators \"{account.Username}\" /add"
+                var failure = await LocalAccounts.AddToGroupAsync(
+                    account.Username,
+                    "Administrators"
                 );
 
-                if (success)
+                if (failure == null)
                 {
                     fixes.Add($"Added {account.Username} to Administrators group");
                     AnsiConsole.MarkupLine(
-                        $"[green]? {account.Username} is now an administrator[/]"
+                        $"[green]? {Markup.Escape(account.Username)} is now an administrator[/]"
                     );
                 }
                 else
                 {
-                    // May already be a member
-                    if (error?.Contains("already a member") == true)
-                    {
-                        AnsiConsole.MarkupLine(
-                            $"[dim]{account.Username} is already in Administrators group[/]"
-                        );
-                    }
-                    else
-                    {
-                        issues.Add($"Failed to add {account.Username} to Administrators: {error}");
-                        AnsiConsole.MarkupLine(
-                            $"[red]? Failed to add {account.Username} to Administrators[/]"
-                        );
-                    }
+                    issues.Add($"Failed to add {account.Username} to Administrators: {failure}");
+                    AnsiConsole.MarkupLine(
+                        $"[red]? Failed to add {Markup.Escape(account.Username)} to Administrators[/]"
+                    );
                 }
             }
             else if (!shouldBeAdmin && isCurrentlyAdmin)
@@ -509,23 +507,23 @@ public class UserManagementTask : BaseTask
                     $"[yellow]Removing {account.Username} from Administrators group...[/]"
                 );
 
-                var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"localgroup Administrators \"{account.Username}\" /delete"
+                var failure = await LocalAccounts.RemoveFromGroupAsync(
+                    account.Username,
+                    "Administrators"
                 );
 
-                if (success)
+                if (failure == null)
                 {
                     fixes.Add($"Removed {account.Username} from Administrators group");
                     AnsiConsole.MarkupLine(
-                        $"[green]? {account.Username} is no longer an administrator[/]"
+                        $"[green]? {Markup.Escape(account.Username)} is no longer an administrator[/]"
                     );
                 }
                 else
                 {
-                    issues.Add($"Failed to remove {account.Username} from Administrators: {error}");
+                    issues.Add($"Failed to remove {account.Username} from Administrators: {failure}");
                     AnsiConsole.MarkupLine(
-                        $"[red]? Failed to remove {account.Username} from Administrators[/]"
+                        $"[red]? Failed to remove {Markup.Escape(account.Username)} from Administrators[/]"
                     );
                 }
             }
@@ -552,77 +550,71 @@ public class UserManagementTask : BaseTask
         var fixes = new List<string>();
         var issues = new List<string>();
 
-        // Get admin passwords from README
-        var adminPasswords =
-            _readmeData
-                ?.Administrators.Where(a => !string.IsNullOrEmpty(a.Password))
-                .ToDictionary(a => a.Username, a => a.Password!, StringComparer.OrdinalIgnoreCase)
-            ?? new Dictionary<string, string>();
+        // Accounts the README marks as the primary, auto-login user. READMEs
+        // state plainly that changing this password may lock you out of the
+        // machine, so it is left alone.
+        var primaryUsers = LocalAccounts.PrimaryUsers(_readmeData);
+
+        var readmeAdmins = new HashSet<string>(
+            _readmeData?.Administrators.Select(a => a.Username) ?? Enumerable.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase
+        );
 
         // Refresh account list
         _currentAccounts = await GetAllUserAccountsAsync();
 
         int passwordIndex = 0;
 
+        // Every account gets a freshly generated strong password, administrators
+        // included. The README lists the passwords an audit *found*, not
+        // passwords that must be kept - several are trivial ("root", "data"), and
+        // setting those would both weaken the machine and be rejected outright by
+        // the complexity and length policy this run enforces moments earlier,
+        // which is why every password change failed.
         foreach (
             var account in _currentAccounts.Where(a => a.IsEnabled && !IsSystemAccount(a.Username))
         )
         {
-            // Check if this is an admin with a known password from README
-            if (adminPasswords.TryGetValue(account.Username, out var readmePassword))
+            var isAuthorized =
+                authorizedUsers.Contains(account.Username)
+                || account.IsAdmin
+                || readmeAdmins.Contains(account.Username);
+            if (!isAuthorized)
+                continue;
+
+            if (primaryUsers.Contains(account.Username))
             {
-                // Admin with password from README - set their password to the README password
                 AnsiConsole.MarkupLine(
-                    $"[yellow]Setting password for admin {account.Username} (from README)...[/]"
+                    $"[dim]? Skipping {Markup.Escape(account.Username)} - primary auto-login account "
+                        + "(changing it risks lockout)[/]"
                 );
-
-                var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"user \"{account.Username}\" \"{readmePassword}\""
-                );
-
-                if (success)
-                {
-                    fixes.Add($"Set password for admin: {account.Username}");
-                    AnsiConsole.MarkupLine($"[green]? Password set for {account.Username}[/]");
-                }
-                else
-                {
-                    issues.Add($"Failed to set password for {account.Username}: {error}");
-                    AnsiConsole.MarkupLine(
-                        $"[red]? Failed to set password for {account.Username}[/]"
-                    );
-                }
+                continue;
             }
-            else if (authorizedUsers.Contains(account.Username))
+
+            var password = LocalAccounts.GeneratePassword(passwordIndex);
+            passwordIndex++;
+
+            AnsiConsole.MarkupLine(
+                $"[yellow]Setting secure password for {Markup.Escape(account.Username)}...[/]"
+            );
+
+            var failure = await LocalAccounts.SetPasswordAsync(account.Username, password);
+            if (failure == null)
             {
-                // Standard user - set a secure password from our list
-                var securePassword = SecurePasswords[passwordIndex % SecurePasswords.Length];
-                passwordIndex++;
-
+                // Record the password: it is the only way back into the account,
+                // and the log stays on the competitor's own machine.
+                fixes.Add($"Set secure password for {account.Username}: {password}");
                 AnsiConsole.MarkupLine(
-                    $"[yellow]Setting secure password for user {account.Username}...[/]"
+                    $"[green]? {Markup.Escape(account.Username)} password set to: {Markup.Escape(password)}[/]"
                 );
-
-                var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"user \"{account.Username}\" \"{securePassword}\""
+            }
+            else
+            {
+                issues.Add($"Failed to set password for {account.Username}: {failure}");
+                AnsiConsole.MarkupLine(
+                    $"[red]? Failed to set password for {Markup.Escape(account.Username)}: "
+                        + $"{Markup.Escape(failure)}[/]"
                 );
-
-                if (success)
-                {
-                    fixes.Add($"Set secure password for user: {account.Username}");
-                    AnsiConsole.MarkupLine(
-                        $"[green]? Secure password set for {account.Username}[/]"
-                    );
-                }
-                else
-                {
-                    issues.Add($"Failed to set password for {account.Username}: {error}");
-                    AnsiConsole.MarkupLine(
-                        $"[red]? Failed to set password for {account.Username}[/]"
-                    );
-                }
             }
         }
 
@@ -635,15 +627,20 @@ public class UserManagementTask : BaseTask
         )
         {
             // Set password to never expire = false, and password required
-            var (success, _, _) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"Set-LocalUser -Name '{account.Username}' -PasswordNeverExpires $false\""
+            var (success, _, error) = await CommandExecutor.PowerShellAsync(
+                $"Set-LocalUser -Name {CommandExecutor.PsQuote(account.Username)} -PasswordNeverExpires $false"
             );
 
             if (success)
             {
                 AnsiConsole.MarkupLine(
-                    $"[dim]? Password expiration enabled for {account.Username}[/]"
+                    $"[dim]? Password expiration enabled for {Markup.Escape(account.Username)}[/]"
+                );
+            }
+            else
+            {
+                issues.Add(
+                    $"Failed to enable password expiration for {account.Username}: {error}"
                 );
             }
         }
@@ -686,49 +683,53 @@ public class UserManagementTask : BaseTask
             }
 
             // Generate a secure password
-            var password = SecurePasswords[passwordIndex % SecurePasswords.Length];
+            var password = LocalAccounts.GeneratePassword(passwordIndex);
             passwordIndex++;
 
-            AnsiConsole.MarkupLine($"[yellow]Creating new user: {username}...[/]");
+            AnsiConsole.MarkupLine($"[yellow]Creating new user: {Markup.Escape(username)}...[/]");
 
-            var (success, output, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"user \"{username}\" \"{password}\" /add"
-            );
+            var failure = await LocalAccounts.CreateUserAsync(username, password);
 
-            if (success)
+            if (failure == null)
             {
-                fixes.Add($"Created new user: {username}");
-                AnsiConsole.MarkupLine($"[green]? Created user: {username}[/]");
+                fixes.Add($"Created new user {username} with password: {password}");
+                AnsiConsole.MarkupLine(
+                    $"[green]? Created user {Markup.Escape(username)} with password: "
+                        + $"{Markup.Escape(password)}[/]"
+                );
 
                 // If this user should be an admin, add them to Administrators
                 if (authorizedAdmins.Contains(username))
                 {
-                    var (adminSuccess, adminOutput, adminError) = await CommandExecutor.ExecuteAsync(
-                        "net",
-                        $"localgroup Administrators \"{username}\" /add"
+                    var adminFailure = await LocalAccounts.AddToGroupAsync(
+                        username,
+                        "Administrators"
                     );
 
-                    if (adminSuccess)
+                    if (adminFailure == null)
                     {
                         fixes.Add($"Added {username} to Administrators");
-                        AnsiConsole.MarkupLine($"[green]? Added {username} to Administrators group[/]");
+                        AnsiConsole.MarkupLine(
+                            $"[green]? Added {Markup.Escape(username)} to Administrators group[/]"
+                        );
                     }
                     else
                     {
-                        issues.Add($"Failed to add {username} to Administrators: {adminError}");
-                        AnsiConsole.MarkupLine($"[red]? Failed to add {username} to Administrators: {adminError}[/]");
-                        if (!string.IsNullOrWhiteSpace(adminOutput))
-                            AnsiConsole.MarkupLine($"[red]Command output: {adminOutput}[/]");
+                        issues.Add($"Failed to add {username} to Administrators: {adminFailure}");
+                        AnsiConsole.MarkupLine(
+                            $"[red]? Failed to add {Markup.Escape(username)} to Administrators: "
+                                + $"{Markup.Escape(adminFailure)}[/]"
+                        );
                     }
                 }
             }
             else
             {
-                issues.Add($"Failed to create user {username}: {error}");
-                AnsiConsole.MarkupLine($"[red]? Failed to create user {username}: {error}[/]");
-                if (!string.IsNullOrWhiteSpace(output))
-                    AnsiConsole.MarkupLine($"[red]Command output: {output}[/]");
+                issues.Add($"Failed to create user {username}: {failure}");
+                AnsiConsole.MarkupLine(
+                    $"[red]? Failed to create user {Markup.Escape(username)}: "
+                        + $"{Markup.Escape(failure)}[/]"
+                );
             }
         }
 
