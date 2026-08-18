@@ -482,7 +482,10 @@ impl Task for SoftwareUpdateTask {
                 .push(format!("{} {}", app.name, app.version));
         }
 
-        self.winget_available = Self::ensure_winget().await;
+        // Detect only. Reading system state must observe, not change the
+        // machine - installing a package here would also mean `--dry-run`
+        // installed software before reaching the dry-run check.
+        self.winget_available = Self::detect_winget().await;
         if !self.winget_available {
             ui::markup_line(
                 "[yellow]⚠ winget is not available - cannot determine latest versions[/]",
@@ -507,10 +510,17 @@ impl Task for SoftwareUpdateTask {
 
         if self.installed.is_empty() && self.updates.is_empty() {
             self.installed = Self::read_installed_software().await;
+            self.winget_available = Self::detect_winget().await;
+        }
+
+        // Installing the package manager is itself a change to the machine, so
+        // it belongs here rather than in the read phase, and never under
+        // `--dry-run`.
+        if !self.winget_available && !self.dry_run {
             self.winget_available = Self::ensure_winget().await;
-            if self.winget_available {
-                self.updates = Self::read_available_updates().await;
-            }
+        }
+        if self.winget_available && self.updates.is_empty() {
+            self.updates = Self::read_available_updates().await;
         }
 
         // Without a catalogue there is no "latest version" to compare against,

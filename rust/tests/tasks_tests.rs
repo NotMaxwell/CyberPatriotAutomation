@@ -28,11 +28,21 @@ async fn software_update_task_read_system_state_should_not_panic() {
 }
 
 #[tokio::test]
-async fn software_update_task_reports_failure_when_winget_is_unavailable() {
-    // The task cannot determine a "latest version" without a package catalogue,
-    // so it must say so rather than reporting a vacuous success.
+async fn software_update_task_dry_run_applies_nothing_and_installs_nothing() {
+    // Exercised under dry run deliberately: a real run may install the package
+    // manager, and a test must not reach the network or change the machine.
+    // Dry run must also never claim an update was applied.
     let mut task = SoftwareUpdateTask::new();
+    task.set_dry_run(true);
     let result = task.execute().await;
+
+    assert_eq!(
+        result.items_succeeded, 0,
+        "a dry run must not record any update as applied"
+    );
+
+    // Without a catalogue the task must say so rather than report a vacuous
+    // success.
     if !result.success {
         assert!(
             result.message.to_lowercase().contains("winget"),
@@ -41,17 +51,6 @@ async fn software_update_task_reports_failure_when_winget_is_unavailable() {
         );
         assert!(result.error_details.is_some());
     }
-}
-
-#[tokio::test]
-async fn software_update_task_dry_run_never_reports_applied_updates() {
-    let mut task = SoftwareUpdateTask::new();
-    task.set_dry_run(true);
-    let result = task.execute().await;
-    assert_eq!(
-        result.items_succeeded, 0,
-        "a dry run must not record any update as applied"
-    );
 }
 
 #[tokio::test]

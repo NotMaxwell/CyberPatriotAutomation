@@ -39,6 +39,10 @@ entry here.** Patch for fixes, minor for new behaviour or tasks.
   security hardening both rewrite services, so concurrent writes would race.
   Each concurrent task's output is captured and replayed whole, so the
   transcript and log stay readable.
+- **`--dry-run` no longer installs the package manager.** The winget install ran
+  from `read_system_state`, before `execute` reached its dry-run check, so a
+  "changes nothing" run could install software. Detection now happens in the
+  read phase and installation only in `execute`, never under `--dry-run`.
 - **Fixed two operations that were being killed mid-flight.** The Defender scan
   and `wmic product` both ran under the default two-minute ceiling despite
   taking far longer, and were reported as failures when the timeout fired.
