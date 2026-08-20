@@ -35,6 +35,26 @@ public class CommandExecutor
         TimeSpan timeout
     )
     {
+        var (exitCode, output, error) = await ExecuteForExitCodeAsync(command, arguments, timeout);
+        return (exitCode == 0, output, error);
+    }
+
+    /// <summary>
+    /// Execute a command and report its exit code rather than just success.
+    /// </summary>
+    /// <remarks>
+    /// Some tools use a non-zero exit code to mean "done, with a caveat" -
+    /// Chocolatey returns 3010 and 1641 for "succeeded, reboot pending". Callers
+    /// that treat those as failure roll back work that actually completed, so
+    /// they need the code itself. A null exit code means the process never ran or
+    /// was killed at the timeout.
+    /// </remarks>
+    public static async Task<(int? ExitCode, string Output, string? Error)> ExecuteForExitCodeAsync(
+        string command,
+        string? arguments,
+        TimeSpan timeout
+    )
+    {
         try
         {
             var processInfo = new ProcessStartInfo
@@ -49,7 +69,7 @@ public class CommandExecutor
 
             using var process = Process.Start(processInfo);
             if (process == null)
-                return (false, string.Empty, "Failed to start process");
+                return (null, string.Empty, "Failed to start process");
 
             // Read both output streams concurrently to avoid deadlocks when one stream
             // fills its buffer while the other is being read.
@@ -72,18 +92,18 @@ public class CommandExecutor
                         process.Kill(true);
                 }
                 catch { }
-                return (false, await SafeGetTaskResultAsync(outputTask), "Process timed out");
+                return (null, await SafeGetTaskResultAsync(outputTask), "Process timed out");
             }
 
             var output = await SafeGetTaskResultAsync(outputTask);
             var error = await SafeGetTaskResultAsync(errorTask);
 
-            return (process.ExitCode == 0, output, string.IsNullOrEmpty(error) ? null : error);
+            return (process.ExitCode, output, string.IsNullOrEmpty(error) ? null : error);
         }
         catch (Exception ex)
         {
             AnsiConsole.WriteException(ex);
-            return (false, string.Empty, ex.Message);
+            return (null, string.Empty, ex.Message);
         }
     }
 

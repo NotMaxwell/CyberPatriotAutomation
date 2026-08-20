@@ -30,6 +30,67 @@ public class SoftwareManagementTask : BaseTask
 
     public List<string> ProhibitedSoftware { get; set; } = new();
     public List<SoftwareRequirement> RequiredSoftware { get; set; } = new();
+
+    /// <summary>
+    /// Upgrade already-installed Chocolatey packages as part of the run.
+    /// </summary>
+    /// <remarks>
+    /// Out-of-date software is scored separately from missing software, so this
+    /// defaults on. It only runs when Chocolatey is already present.
+    /// </remarks>
+    public bool UpdateInstalledSoftware { get; set; } = true;
+
+    /// <summary>
+    /// Chocolatey package ids for the software READMEs ask for by display name.
+    /// </summary>
+    /// <remarks>
+    /// A README says "Mozilla Firefox"; the package is "firefox". Without the
+    /// mapping every install would look up a package that does not exist. Names
+    /// not listed fall through to a normalised form of the display name, which is
+    /// right often enough to be worth trying before reporting a failure.
+    /// </remarks>
+    private static readonly Dictionary<string, string> PackageIds = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        ["Mozilla Firefox"] = "firefox",
+        ["Firefox"] = "firefox",
+        ["Google Chrome"] = "googlechrome",
+        ["Chrome"] = "googlechrome",
+        ["7-Zip"] = "7zip",
+        ["7Zip"] = "7zip",
+        ["Notepad++"] = "notepadplusplus",
+        ["VLC"] = "vlc",
+        ["VLC media player"] = "vlc",
+        ["Wireshark"] = "wireshark",
+        ["PuTTY"] = "putty",
+        ["Python"] = "python",
+        ["Adobe Acrobat Reader DC"] = "adobereader",
+        ["Adobe Reader"] = "adobereader",
+        ["Microsoft Edge"] = "microsoft-edge",
+        ["Thunderbird"] = "thunderbird",
+        ["Mozilla Thunderbird"] = "thunderbird",
+        ["LibreOffice"] = "libreoffice-fresh",
+        ["Git"] = "git",
+        ["Malwarebytes"] = "malwarebytes",
+    };
+
+    /// <summary>The Chocolatey package id to install for a requirement.</summary>
+    private static string PackageIdFor(SoftwareRequirement requirement)
+    {
+        if (PackageIds.TryGetValue(requirement.Name, out var mapped))
+            return mapped;
+
+        // Chocolatey ids are lower-case and unspaced; this is a best effort for
+        // anything the table does not name explicitly.
+        return new string(
+            requirement
+                .Name.ToLowerInvariant()
+                .Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '.')
+                .ToArray()
+        );
+    }
+
     public bool RunMalwareScan { get; set; } = true;
     public bool UseQuickScan { get; set; } = true; // Quick scan by default, set false for full scan
 
@@ -51,14 +112,45 @@ public class SoftwareManagementTask : BaseTask
         RequiredSoftware = readme.RequiredSoftware?.ToList() ?? new List<SoftwareRequirement>();
     }
 
-    public override async Task<SystemInfo> ReadSystemStateAsync()
+    /// <summary>
+    /// The installed-software list, from the uninstall registry where possible.
+    /// Returns null when the inventory could not be read at all.
+    /// </summary>
+    private static async Task<List<string>?> ReadInstalledSoftwareAsync()
     {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
+#if WINDOWS
+        var fromRegistry = Native.NativeInstalledSoftware.EnumerateNames();
+        if (fromRegistry is not null)
+            return fromRegistry;
+#endif
+
+        // Fallback only. `wmic product` is deprecated, misses non-MSI installs,
+        // and reconfigures every installed product just to list them.
+        var (success, output, _) = await CommandExecutor.ExecuteAsync(
             "wmic",
             "product get name",
             InventoryTimeout
         );
-        return new SystemInfo { RawOutput = output, ErrorOutput = error };
+        if (!success)
+            return null;
+
+        return output
+            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .Where(l => !string.IsNullOrWhiteSpace(l) && l != "Name")
+            .ToList();
+    }
+
+    public override async Task<SystemInfo> ReadSystemStateAsync()
+    {
+        var installed = await ReadInstalledSoftwareAsync();
+        return new SystemInfo
+        {
+            RawOutput = installed is null
+                ? string.Empty
+                : string.Join(Environment.NewLine, installed),
+            ErrorOutput = installed is null ? "Could not read installed software" : string.Empty,
+        };
     }
 
     public override async Task<TaskResult> ExecuteAsync()
@@ -76,26 +168,17 @@ public class SoftwareManagementTask : BaseTask
             };
         }
 
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "wmic",
-            "product get name",
-            InventoryTimeout
-        );
-        if (!success)
+        var installed = await ReadInstalledSoftwareAsync();
+        if (installed is null)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Failed to list installed software: {error}[/]");
+            AnsiConsole.MarkupLine("[red]✗ Failed to list installed software[/]");
             return new TaskResult
             {
                 TaskName = Name,
                 Success = false,
-                Message = error ?? "Unknown error",
+                Message = "Could not read the installed software inventory",
             };
         }
-        var installed = output
-            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => !string.IsNullOrWhiteSpace(l) && l != "Name")
-            .ToList();
         var toRemove = installed
             .Where(i =>
                 ProhibitedSoftware.Any(p => i.Contains(p, StringComparison.OrdinalIgnoreCase))
@@ -129,12 +212,35 @@ public class SoftwareManagementTask : BaseTask
 
         // Remove prohibited software
         var removalFailures = new List<string>();
+        var chocoPackages = await Chocolatey.ListInstalledAsync();
         foreach (var sw in toRemove)
         {
-            var (remSuccess, _, remError) = await CommandExecutor.ExecuteAsync(
-                "wmic",
-                $"product where name=\"{sw}\" call uninstall /nointeractive"
-            );
+            // Prefer Chocolatey when it owns the package: it uninstalls silently
+            // and reports a real reason. `wmic product call uninstall` stays as
+            // the fallback for software Chocolatey did not install.
+            string? remError = null;
+            var remSuccess = false;
+
+            if (
+                chocoPackages is not null
+                && chocoPackages.Any(p => p.Contains(sw, StringComparison.OrdinalIgnoreCase))
+            )
+            {
+                var package = chocoPackages.First(p =>
+                    p.Contains(sw, StringComparison.OrdinalIgnoreCase)
+                );
+                remError = await Chocolatey.UninstallAsync(package);
+                remSuccess = remError is null;
+            }
+
+            if (!remSuccess)
+            {
+                (remSuccess, _, remError) = await CommandExecutor.ExecuteAsync(
+                    "wmic",
+                    $"product where name=\"{sw}\" call uninstall /nointeractive"
+                );
+            }
+
             if (remSuccess)
             {
                 AnsiConsole.MarkupLine($"[green]✓ Removed: {Markup.Escape(sw)}[/]");
@@ -147,13 +253,74 @@ public class SoftwareManagementTask : BaseTask
                 );
             }
         }
-        // Install required software (assumes installer is available in a known location)
-        foreach (var sw in toInstall)
+        // Install required software through Chocolatey, bootstrapping it if absent.
+        var installFailures = new List<string>();
+        var installedNow = new List<string>();
+        if (toInstall.Count > 0)
         {
-            // This is a placeholder; actual install logic may require more info
-            AnsiConsole.MarkupLine(
-                $"[yellow]Required software not installed: {sw.Name} (manual install may be needed)[/]"
-            );
+            var chocoError = await Chocolatey.EnsureAvailableAsync();
+            if (chocoError is not null)
+            {
+                foreach (var sw in toInstall)
+                {
+                    installFailures.Add($"{sw.Name}: {chocoError}");
+                    AnsiConsole.MarkupLine(
+                        $"[red]✗ Cannot install {Markup.Escape(sw.Name)}: {Markup.Escape(chocoError)}[/]"
+                    );
+                }
+                details.Add($"Chocolatey unavailable: {chocoError}");
+            }
+            else
+            {
+                foreach (var sw in toInstall)
+                {
+                    var package = PackageIdFor(sw);
+                    AnsiConsole.MarkupLine(
+                        $"[cyan]Installing {Markup.Escape(sw.Name)} (choco: {Markup.Escape(package)})...[/]"
+                    );
+
+                    var failure = await Chocolatey.InstallAsync(package);
+                    if (failure is null)
+                    {
+                        installedNow.Add(sw.Name);
+                        AnsiConsole.MarkupLine($"[green]✓ Installed: {Markup.Escape(sw.Name)}[/]");
+                    }
+                    else
+                    {
+                        installFailures.Add($"{sw.Name}: {failure}");
+                        AnsiConsole.MarkupLine(
+                            $"[red]✗ Failed to install {Markup.Escape(sw.Name)}: {Markup.Escape(failure)}[/]"
+                        );
+                    }
+                }
+            }
+        }
+
+        if (installedNow.Count > 0)
+            details.Add($"Installed via Chocolatey: {string.Join(", ", installedNow)}");
+        if (installFailures.Count > 0)
+            details.Add($"Failed to install: {string.Join("; ", installFailures)}");
+
+        // Bring already-present packages up to date. Out-of-date software is a
+        // scored finding in its own right, so this runs even when nothing was
+        // missing - but only when Chocolatey is already usable, since installing
+        // it purely to run an upgrade is not worth the download.
+        if (UpdateInstalledSoftware && await Chocolatey.IsAvailableAsync())
+        {
+            AnsiConsole.MarkupLine("[cyan]Updating installed packages...[/]");
+            var upgradeError = await Chocolatey.UpgradeAllAsync();
+            if (upgradeError is null)
+            {
+                details.Add("Updated installed packages via Chocolatey");
+                AnsiConsole.MarkupLine("[green]✓ Packages updated[/]");
+            }
+            else
+            {
+                details.Add($"Package update reported: {upgradeError}");
+                AnsiConsole.MarkupLine(
+                    $"[yellow]! Package update reported: {Markup.Escape(upgradeError)}[/]"
+                );
+            }
         }
 
         // Run Windows Defender malware scan
@@ -177,26 +344,20 @@ public class SoftwareManagementTask : BaseTask
             // problem needing a manual install, so it remains in the condition.
             Success =
                 removalFailures.Count == 0
-                && toInstall.Count == 0
+                && installFailures.Count == 0
                 && malwareScanSuccess
                 && threatsFound == 0,
             Message = string.Join("\n", details),
-            ErrorDetails = removalFailures.Count > 0 ? string.Join("\n", removalFailures) : null,
+            ErrorDetails =
+                removalFailures.Count + installFailures.Count > 0
+                    ? string.Join("\n", removalFailures.Concat(installFailures))
+                    : null,
         };
     }
 
     public override async Task<bool> VerifyAsync()
     {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "wmic",
-            "product get name",
-            InventoryTimeout
-        );
-        var installed = output
-            .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(l => l.Trim())
-            .Where(l => !string.IsNullOrWhiteSpace(l) && l != "Name")
-            .ToList();
+        var installed = await ReadInstalledSoftwareAsync() ?? new List<string>();
         var stillPresent = installed.Any(i =>
             ProhibitedSoftware.Any(p => i.Contains(p, StringComparison.OrdinalIgnoreCase))
         );

@@ -143,45 +143,67 @@ public class PasswordPolicyTask : BaseTask
     {
         var policy = new PasswordPolicyInfo();
 
-        // Use net accounts to get current policy on Windows
-        var (success, output, _) = await CommandExecutor.ExecuteAsync("net", "accounts");
-
-        if (success && !string.IsNullOrEmpty(output))
+#if WINDOWS
+        // Read the policy as data first. `net accounts` prints a localised table,
+        // and on a non-English image every line test below fails to match, which
+        // leaves the policy at its zero defaults and reads as "already compliant".
+        var nativePolicy = Native.NativeAccounts.GetPasswordPolicy();
+        if (nativePolicy is { } n)
         {
-            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in lines)
+            policy.MinPasswordLength = n.MinPasswordLength;
+            policy.MaxPasswordAge = n.MaxPasswordAgeDays;
+            policy.MinPasswordAge = n.MinPasswordAgeDays;
+            policy.PasswordHistoryCount = n.PasswordHistoryLength;
+            policy.LockoutThreshold = n.LockoutThreshold;
+            policy.LockoutDuration = n.LockoutDurationMinutes;
+            policy.LockoutObservationWindow = n.LockoutObservationMinutes;
+        }
+        else
+#endif
+        {
+            // Fallback: parse the table `net accounts` prints. Matches an
+            // English-language console only, which is why it is the fallback.
+            var (success, output, _) = await CommandExecutor.ExecuteAsync("net", "accounts");
+            if (success && !string.IsNullOrEmpty(output))
             {
-                if (line.Contains("Minimum password length"))
+                var lines = output.Split(
+                    new[] { '\r', '\n' },
+                    StringSplitOptions.RemoveEmptyEntries
+                );
+
+                foreach (var line in lines)
                 {
-                    var value = ExtractNumericValue(line);
-                    policy.MinPasswordLength = value;
-                }
-                else if (line.Contains("Maximum password age"))
-                {
-                    var value = ExtractNumericValue(line);
-                    policy.MaxPasswordAge = value == -1 ? 0 : value; // -1 means unlimited/never
-                }
-                else if (line.Contains("Minimum password age"))
-                {
-                    policy.MinPasswordAge = ExtractNumericValue(line);
-                }
-                else if (line.Contains("Length of password history"))
-                {
-                    policy.PasswordHistoryCount = ExtractNumericValue(line);
-                }
-                else if (line.Contains("Lockout threshold"))
-                {
-                    var value = ExtractNumericValue(line);
-                    policy.LockoutThreshold = value == -1 ? 0 : value;
-                }
-                else if (line.Contains("Lockout duration"))
-                {
-                    policy.LockoutDuration = ExtractNumericValue(line);
-                }
-                else if (line.Contains("Lockout observation window"))
-                {
-                    policy.LockoutObservationWindow = ExtractNumericValue(line);
+                    if (line.Contains("Minimum password length"))
+                    {
+                        var value = ExtractNumericValue(line);
+                        policy.MinPasswordLength = value;
+                    }
+                    else if (line.Contains("Maximum password age"))
+                    {
+                        var value = ExtractNumericValue(line);
+                        policy.MaxPasswordAge = value == -1 ? 0 : value; // -1 means unlimited/never
+                    }
+                    else if (line.Contains("Minimum password age"))
+                    {
+                        policy.MinPasswordAge = ExtractNumericValue(line);
+                    }
+                    else if (line.Contains("Length of password history"))
+                    {
+                        policy.PasswordHistoryCount = ExtractNumericValue(line);
+                    }
+                    else if (line.Contains("Lockout threshold"))
+                    {
+                        var value = ExtractNumericValue(line);
+                        policy.LockoutThreshold = value == -1 ? 0 : value;
+                    }
+                    else if (line.Contains("Lockout duration"))
+                    {
+                        policy.LockoutDuration = ExtractNumericValue(line);
+                    }
+                    else if (line.Contains("Lockout observation window"))
+                    {
+                        policy.LockoutObservationWindow = ExtractNumericValue(line);
+                    }
                 }
             }
         }

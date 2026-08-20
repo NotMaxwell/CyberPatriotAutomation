@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -73,12 +73,15 @@ public static class AppConfig
     {
         get
         {
-            // The assembly's write time distinguishes two builds of the same
+            // The executable's write time distinguishes two builds of the same
             // version, which happens while iterating between releases.
-            var location = System.Reflection.Assembly.GetExecutingAssembly().Location;
-            var built = string.IsNullOrEmpty(location)
-                ? DateTime.Now
-                : File.GetLastWriteTime(location);
+            // Assembly.Location is empty in a single-file publish, which silently
+            // turned this into "today"; ProcessPath points at the real .exe.
+            var location = Environment.ProcessPath;
+            var built =
+                string.IsNullOrEmpty(location) || !File.Exists(location)
+                    ? DateTime.Now
+                    : File.GetLastWriteTime(location);
             return $"v{Version} (build {built:yyyy-MM-dd})";
         }
     }

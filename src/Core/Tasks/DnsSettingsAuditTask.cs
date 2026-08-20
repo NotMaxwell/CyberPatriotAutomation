@@ -4,7 +4,10 @@
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
 using System.Threading.Tasks;
 using CyberPatriotAutomation.Core.Models;
 using CyberPatriotAutomation.Core.Utilities;
@@ -23,72 +26,87 @@ public class DnsSettingsAuditTask : BaseTask
         Description = "Audits DNS settings for security compliance.";
     }
 
-    public override async Task<SystemInfo> ReadSystemStateAsync()
+    /// <summary>
+    /// The DNS servers configured on every live, non-loopback interface.
+    /// </summary>
+    /// <remarks>
+    /// This replaced parsing <c>netsh interface ip show dns</c>, whose layout and
+    /// headings are localised. It also removes a subtler bug: the old check ran
+    /// <c>output.Contains("1.1.1.1")</c> over the whole blob, so a resolver at
+    /// 11.1.1.10 matched the substring and was reported as public DNS. Comparing
+    /// <see cref="IPAddress"/> values makes the match exact.
+    /// </remarks>
+    private static List<(string Interface, IPAddress Address)> ReadDnsServers() =>
+        NetworkInterface
+            .GetAllNetworkInterfaces()
+            .Where(nic =>
+                nic.OperationalStatus == OperationalStatus.Up
+                && nic.NetworkInterfaceType != NetworkInterfaceType.Loopback
+            )
+            .SelectMany(nic =>
+                nic.GetIPProperties()
+                    .DnsAddresses.Select(address => (Interface: nic.Name, Address: address))
+            )
+            .ToList();
+
+    /// <summary>Public resolvers a competition image is not expected to use.</summary>
+    private static readonly IPAddress[] InsecureDnsServers =
+    [
+        IPAddress.Parse("8.8.8.8"),
+        IPAddress.Parse("8.8.4.4"),
+        IPAddress.Parse("1.1.1.1"),
+        IPAddress.Parse("1.0.0.1"),
+    ];
+
+    private static List<IPAddress> FindInsecure(
+        IEnumerable<(string Interface, IPAddress Address)> servers
+    ) => servers.Select(s => s.Address).Where(InsecureDnsServers.Contains).Distinct().ToList();
+
+    public override Task<SystemInfo> ReadSystemStateAsync()
     {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "netsh",
-            "interface ip show dns"
+        var servers = ReadDnsServers();
+        var text = string.Join(
+            Environment.NewLine,
+            servers.Select(s => $"{s.Interface}: {s.Address}")
         );
-        return new SystemInfo { RawOutput = output, ErrorOutput = error };
+        return Task.FromResult(new SystemInfo { RawOutput = text, ErrorOutput = string.Empty });
     }
 
-    public override async Task<TaskResult> ExecuteAsync()
+    public override Task<TaskResult> ExecuteAsync()
     {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "netsh",
-            "interface ip show dns"
-        );
+        var servers = ReadDnsServers();
         var details = new List<string>();
-        if (!success)
-        {
-            details.Add($"Failed to read DNS settings: {error}");
-            AnsiConsole.MarkupLine($"[red]✗ Failed to read DNS settings: {error}[/]");
-            return new TaskResult
-            {
-                TaskName = Name,
-                Success = false,
-                Message = string.Join("\n", details),
-            };
-        }
+
         details.Add("DNS settings output:");
-        details.AddRange(
-            output
-                .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(l => $"  {l.Trim()}")
-        );
-        // Example: Check for public DNS (e.g., 8.8.8.8, 1.1.1.1) and flag as non-compliant
-        var insecureDns = new[] { "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1" };
-        var found = insecureDns.Where(dns => output.Contains(dns)).ToList();
+        details.AddRange(servers.Select(s => $"  {s.Interface}: {s.Address}"));
+
+        var found = FindInsecure(servers);
         if (found.Count == 0)
         {
             details.Add("No insecure DNS servers found.");
             AnsiConsole.MarkupLine("[green]✓ No insecure DNS servers found[/]");
-            return new TaskResult
-            {
-                TaskName = Name,
-                Success = true,
-                Message = string.Join("\n", details),
-            };
+            return Task.FromResult(
+                new TaskResult
+                {
+                    TaskName = Name,
+                    Success = true,
+                    Message = string.Join("\n", details),
+                }
+            );
         }
         details.Add($"Insecure DNS servers found: {string.Join(", ", found)}");
         // No dry-run support; just report
         AnsiConsole.MarkupLine($"[red]✗ Insecure DNS servers found: {string.Join(", ", found)}[/]");
-        return new TaskResult
-        {
-            TaskName = Name,
-            Success = false,
-            Message = string.Join("\n", details),
-        };
+        return Task.FromResult(
+            new TaskResult
+            {
+                TaskName = Name,
+                Success = false,
+                Message = string.Join("\n", details),
+            }
+        );
     }
 
-    public override async Task<bool> VerifyAsync()
-    {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "netsh",
-            "interface ip show dns"
-        );
-        var insecureDns = new[] { "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1" };
-        var found = insecureDns.Where(dns => output.Contains(dns)).ToList();
-        return found.Count == 0;
-    }
+    public override Task<bool> VerifyAsync() =>
+        Task.FromResult(FindInsecure(ReadDnsServers()).Count == 0);
 }

@@ -451,6 +451,31 @@ public class AuditPolicyTask : BaseTask
 
         foreach (var category in categoriesToCheck)
         {
+#if WINDOWS
+            if (Native.NativeAuditPolicy.CategoryGuids.TryGetValue(category, out var verifyGuid))
+            {
+                var states = Native.NativeAuditPolicy.Query(verifyGuid);
+                if (states is not null)
+                {
+                    var unauditedCount = states.Count(state => state.IsUnaudited);
+                    if (unauditedCount == 0)
+                    {
+                        AnsiConsole.MarkupLine(
+                            $"[green]? {category}: Success and Failure auditing enabled[/]"
+                        );
+                    }
+                    else
+                    {
+                        AnsiConsole.MarkupLine(
+                            $"[red]? {category}: {unauditedCount} subcategory(ies) still set to No Auditing[/]"
+                        );
+                        allGood = false;
+                    }
+                    continue;
+                }
+            }
+#endif
+
             var (success, output, _) = await CommandExecutor.ExecuteAsync(
                 "auditpol",
                 $"/get /category:\"{category}\""
@@ -551,13 +576,40 @@ public class AuditPolicyTask : BaseTask
         {
             AnsiConsole.MarkupLine($"[cyan]Configuring {category}...[/]");
 
-            // Enable success auditing
+#if WINDOWS
+            // advapi32 addresses the category by GUID and sets every subcategory
+            // under it in one call, so this works on any display language.
+            if (Native.NativeAuditPolicy.CategoryGuids.TryGetValue(category, out var guid))
+            {
+                var configured = Native.NativeAuditPolicy.EnableSuccessAndFailure(
+                    guid,
+                    out var nativeError
+                );
+                if (configured is { } count)
+                {
+                    progressTable.AddRow(
+                        category,
+                        $"[green]? Success & Failure ({count} subcategories)[/]"
+                    );
+                    fixes.Add(
+                        $"Configured audit: {category} (Success & Failure, {count} subcategories)"
+                    );
+                    continue;
+                }
+
+                progressTable.AddRow(category, "[red]? Failed[/]");
+                issues.Add($"Failed to configure {category}: {nativeError}");
+                continue;
+            }
+#endif
+
+            // Fallback: auditpol.exe. Its /category: argument only matches on an
+            // English-language image.
             var (successEnable, _, successError) = await CommandExecutor.ExecuteAsync(
                 "auditpol",
                 $"/set /category:\"{category}\" /success:enable"
             );
 
-            // Enable failure auditing
             var (failureEnable, _, failureError) = await CommandExecutor.ExecuteAsync(
                 "auditpol",
                 $"/set /category:\"{category}\" /failure:enable"
@@ -581,6 +633,34 @@ public class AuditPolicyTask : BaseTask
     private async Task ConfigureAdvancedAuditPoliciesAsync(List<string> fixes, List<string> issues)
     {
         AnsiConsole.MarkupLine("[cyan]Configuring advanced audit subcategories...[/]");
+
+#if WINDOWS
+        // ConfigureAuditCategoriesAsync already set every subcategory of all nine
+        // categories in one advapi32 call each, so re-issuing roughly 120
+        // auditpol processes here would change nothing. Report what is actually
+        // audited instead, read back from the API.
+        var auditedSubcategories = 0;
+        var policyReadable = true;
+        foreach (var categoryGuid in Native.NativeAuditPolicy.CategoryGuids.Values)
+        {
+            var states = Native.NativeAuditPolicy.Query(categoryGuid);
+            if (states is null)
+            {
+                policyReadable = false;
+                break;
+            }
+            auditedSubcategories += states.Count(state => !state.IsUnaudited);
+        }
+
+        if (policyReadable)
+        {
+            fixes.Add($"Configured {auditedSubcategories} audit subcategories");
+            AnsiConsole.MarkupLine(
+                $"[green]? Configured {auditedSubcategories} audit subcategories[/]"
+            );
+            return;
+        }
+#endif
 
         int configuredCount = 0;
 

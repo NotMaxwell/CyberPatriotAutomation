@@ -28,6 +28,14 @@ public static class LocalAccounts
     /// </remarks>
     public static async Task<List<string>> GetGroupMembersAsync(string group)
     {
+#if WINDOWS
+        // netapi32 returns the members as data, so there is nothing to parse and
+        // nothing that depends on the console language. ParseGroupMembers stays
+        // as the fallback for the rare case the call itself fails.
+        var native = Native.NativeAccounts.GetGroupMembers(group);
+        if (native is not null)
+            return native;
+#endif
         var (success, output, _) = await CommandExecutor.ExecuteAsync(
             "net",
             $"localgroup \"{group}\""

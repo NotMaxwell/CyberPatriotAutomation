@@ -216,6 +216,22 @@ public class FirewallConfigurationTask : BaseTask
     {
         AnsiConsole.MarkupLine("[cyan]Enabling firewall for all profiles...[/]");
 
+#if WINDOWS
+        // INetFwPolicy2 addresses the profiles by enum, so this works whatever the
+        // display language, reports a real HRESULT on failure, and avoids the
+        // PowerShell launch that dominated this task's runtime.
+        var enabled = Native.NativeFirewall.EnableAllProfiles(out var comError);
+        if (enabled is not null)
+        {
+            fixes.Add($"Enabled firewall for {string.Join(", ", enabled)} profiles");
+            AnsiConsole.MarkupLine("[green]? Firewall enabled for all profiles[/]");
+            return;
+        }
+        AnsiConsole.MarkupLine(
+            $"[yellow]! Firewall COM path unavailable ({comError}); falling back[/]"
+        );
+#endif
+
         var (success, _, error) = await CommandExecutor.ExecuteAsync(
             "powershell",
             "-Command \"Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True\""
