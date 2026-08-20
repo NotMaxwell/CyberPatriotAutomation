@@ -375,7 +375,24 @@ public class ReadmeParser
     /// </summary>
     private static readonly char[] InvalidUsernameChars =
     {
-        '"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '@', '.', '!',
+        '"',
+        '/',
+        '\\',
+        '[',
+        ']',
+        ':',
+        ';',
+        '|',
+        '=',
+        ',',
+        '+',
+        '*',
+        '?',
+        '<',
+        '>',
+        '@',
+        '.',
+        '!',
     };
 
     private static bool IsValidUsername(string username)
@@ -520,9 +537,30 @@ public class ReadmeParser
         StringComparer.OrdinalIgnoreCase
     )
     {
-        "a", "an", "use", "company", "software", "program", "programs", "application",
-        "applications", "app", "apps", "tool", "tools", "version", "versions", "access",
-        "browser", "browsers", "system", "systems", "file", "files", "data", "internet",
+        "a",
+        "an",
+        "use",
+        "company",
+        "software",
+        "program",
+        "programs",
+        "application",
+        "applications",
+        "app",
+        "apps",
+        "tool",
+        "tools",
+        "version",
+        "versions",
+        "access",
+        "browser",
+        "browsers",
+        "system",
+        "systems",
+        "file",
+        "files",
+        "data",
+        "internet",
     };
 
     /// <summary>

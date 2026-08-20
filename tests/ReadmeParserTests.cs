@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool - ReadmeParser Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -28,7 +28,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractTitle()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -38,7 +39,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractOperatingSystem()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -48,7 +50,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractAdministrators()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -58,7 +61,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractAdminPasswords()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -68,7 +72,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractUsers()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -78,7 +83,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractCriticalServices()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -88,7 +94,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractGuidelines()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -98,7 +105,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractRequiredSoftware()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -108,7 +116,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractGroupRequirements()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 
@@ -118,7 +127,8 @@ public class ReadmeParserTests
     [Fact]
     public async Task ParseHtmlReadmeAsync_ShouldExtractUsersToCreate()
     {
-        if (!File.Exists(SampleReadmePath)) return;
+        if (!File.Exists(SampleReadmePath))
+            return;
 
         var result = await ReadmeParser.ParseHtmlReadmeAsync(SampleReadmePath);
 

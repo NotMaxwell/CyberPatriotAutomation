@@ -16,103 +16,105 @@ public class ServiceManagementTask : BaseTask
     /// Services that should generally be DISABLED for security
     /// Based on CyberPatriot best practices and CIS benchmarks
     /// </summary>
-    private static readonly Dictionary<string, string> ServicesToDisable =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            // Remote Access Services (High Risk)
-            { "TermService", "Remote Desktop Services" },
-            { "SessionEnv", "Remote Desktop Configuration" },
-            { "UmRdpService", "Remote Desktop Services UserMode Port Redirector" },
-            { "RemoteRegistry", "Remote Registry" },
-            { "RemoteAccess", "Routing and Remote Access" },
-            { "RasMan", "Remote Access Connection Manager" },
-            { "RasAuto", "Remote Access Auto Connection Manager" },
-            // Telnet/FTP Services (Insecure Protocols)
-            { "TlntSvr", "Telnet" },
-            { "ftpsvc", "FTP Publishing Service" },
-            { "Msftpsvc", "Microsoft FTP Service (Legacy)" },
-            // SNMP Services
-            { "SNMP", "SNMP Service" },
-            { "SNMPTRAP", "SNMP Trap" },
-            // Network Discovery Services
-            { "SSDPSRV", "SSDP Discovery" },
-            { "upnphost", "UPnP Device Host" },
-            // Sharing Services
-            { "SharedAccess", "Internet Connection Sharing (ICS)" },
-            { "HomeGroupProvider", "HomeGroup Provider" },
-            { "HomeGroupListener", "HomeGroup Listener" },
-            { "LanmanServer", "Server (File/Print Sharing)" },
-            // Web Services (unless required)
-            { "W3SVC", "World Wide Web Publishing Service" },
-            { "IISADMIN", "IIS Admin Service" },
-            { "WAS", "Windows Process Activation Service" },
-            // Telephony Services
-            { "TapiSrv", "Telephony" },
-            // Messaging Services
-            { "Messenger", "Messenger (Legacy)" },
-            // Xbox Services (not needed in enterprise)
-            { "XblAuthManager", "Xbox Live Auth Manager" },
-            { "XblGameSave", "Xbox Live Game Save" },
-            { "XboxGipSvc", "Xbox Accessory Management Service" },
-            { "XboxNetApiSvc", "Xbox Live Networking Service" },
-            // Other potentially risky services
-            { "mnmsrvc", "NetMeeting Remote Desktop Sharing" },
-            { "NetTcpPortSharing", "Net.Tcp Port Sharing Service" },
-            { "simptcp", "Simple TCP/IP Services" },
-            { "p2pimsvc", "Peer Networking Identity Manager" },
-            { "p2psvc", "Peer Networking Grouping" },
-            { "PNRPsvc", "Peer Name Resolution Protocol" },
-            { "Fax", "Fax" },
-            { "Smtpsvc", "Simple Mail Transfer Protocol (SMTP)" },
-            { "IPRIP", "RIP Listener" },
-            { "Dfs", "Distributed File System" },
-            { "MSDTC", "Distributed Transaction Coordinator" },
-            { "ERSvc", "Error Reporting Service" },
-            { "WerSvc", "Windows Error Reporting Service" },
-            { "helpsvc", "Help and Support" },
-            { "seclogon", "Secondary Logon" },
-            { "SENS", "System Event Notification Service" },
-            { "SCardSvr", "Smart Card" },
-            { "SCPolicySvc", "Smart Card Removal Policy" },
-            { "TabletInputService", "Tablet PC Input Service" },
-            { "WMPNetworkSvc", "Windows Media Player Network Sharing Service" },
-            { "icssvc", "Windows Mobile Hotspot Service" },
-            { "lfsvc", "Geolocation Service" },
-            { "MapsBroker", "Downloaded Maps Manager" },
-            { "PhoneSvc", "Phone Service" },
-            { "WalletService", "Wallet Service" },
-            { "RetailDemo", "Retail Demo Service" },
-            { "DiagTrack", "Connected User Experiences and Telemetry" },
-            { "dmwappushservice", "WAP Push Message Routing Service" },
-        };
+    private static readonly Dictionary<string, string> ServicesToDisable = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        // Remote Access Services (High Risk)
+        { "TermService", "Remote Desktop Services" },
+        { "SessionEnv", "Remote Desktop Configuration" },
+        { "UmRdpService", "Remote Desktop Services UserMode Port Redirector" },
+        { "RemoteRegistry", "Remote Registry" },
+        { "RemoteAccess", "Routing and Remote Access" },
+        { "RasMan", "Remote Access Connection Manager" },
+        { "RasAuto", "Remote Access Auto Connection Manager" },
+        // Telnet/FTP Services (Insecure Protocols)
+        { "TlntSvr", "Telnet" },
+        { "ftpsvc", "FTP Publishing Service" },
+        { "Msftpsvc", "Microsoft FTP Service (Legacy)" },
+        // SNMP Services
+        { "SNMP", "SNMP Service" },
+        { "SNMPTRAP", "SNMP Trap" },
+        // Network Discovery Services
+        { "SSDPSRV", "SSDP Discovery" },
+        { "upnphost", "UPnP Device Host" },
+        // Sharing Services
+        { "SharedAccess", "Internet Connection Sharing (ICS)" },
+        { "HomeGroupProvider", "HomeGroup Provider" },
+        { "HomeGroupListener", "HomeGroup Listener" },
+        { "LanmanServer", "Server (File/Print Sharing)" },
+        // Web Services (unless required)
+        { "W3SVC", "World Wide Web Publishing Service" },
+        { "IISADMIN", "IIS Admin Service" },
+        { "WAS", "Windows Process Activation Service" },
+        // Telephony Services
+        { "TapiSrv", "Telephony" },
+        // Messaging Services
+        { "Messenger", "Messenger (Legacy)" },
+        // Xbox Services (not needed in enterprise)
+        { "XblAuthManager", "Xbox Live Auth Manager" },
+        { "XblGameSave", "Xbox Live Game Save" },
+        { "XboxGipSvc", "Xbox Accessory Management Service" },
+        { "XboxNetApiSvc", "Xbox Live Networking Service" },
+        // Other potentially risky services
+        { "mnmsrvc", "NetMeeting Remote Desktop Sharing" },
+        { "NetTcpPortSharing", "Net.Tcp Port Sharing Service" },
+        { "simptcp", "Simple TCP/IP Services" },
+        { "p2pimsvc", "Peer Networking Identity Manager" },
+        { "p2psvc", "Peer Networking Grouping" },
+        { "PNRPsvc", "Peer Name Resolution Protocol" },
+        { "Fax", "Fax" },
+        { "Smtpsvc", "Simple Mail Transfer Protocol (SMTP)" },
+        { "IPRIP", "RIP Listener" },
+        { "Dfs", "Distributed File System" },
+        { "MSDTC", "Distributed Transaction Coordinator" },
+        { "ERSvc", "Error Reporting Service" },
+        { "WerSvc", "Windows Error Reporting Service" },
+        { "helpsvc", "Help and Support" },
+        { "seclogon", "Secondary Logon" },
+        { "SENS", "System Event Notification Service" },
+        { "SCardSvr", "Smart Card" },
+        { "SCPolicySvc", "Smart Card Removal Policy" },
+        { "TabletInputService", "Tablet PC Input Service" },
+        { "WMPNetworkSvc", "Windows Media Player Network Sharing Service" },
+        { "icssvc", "Windows Mobile Hotspot Service" },
+        { "lfsvc", "Geolocation Service" },
+        { "MapsBroker", "Downloaded Maps Manager" },
+        { "PhoneSvc", "Phone Service" },
+        { "WalletService", "Wallet Service" },
+        { "RetailDemo", "Retail Demo Service" },
+        { "DiagTrack", "Connected User Experiences and Telemetry" },
+        { "dmwappushservice", "WAP Push Message Routing Service" },
+    };
 
     /// <summary>
     /// Services that should generally REMAIN ENABLED for system functionality
     /// </summary>
-    private static readonly Dictionary<string, string> CriticalServices =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
-            { "wuauserv", "Windows Update" },
-            { "WinDefend", "Windows Defender Antivirus Service" },
-            { "SecurityHealthService", "Windows Security Service" },
-            { "wscsvc", "Security Center" },
-            { "MpsSvc", "Windows Defender Firewall" },
-            { "EventLog", "Windows Event Log" },
-            { "Schedule", "Task Scheduler" },
-            { "Winmgmt", "Windows Management Instrumentation" },
-            { "CryptSvc", "Cryptographic Services" },
-            { "DcomLaunch", "DCOM Server Process Launcher" },
-            { "RpcSs", "Remote Procedure Call (RPC)" },
-            { "RpcEptMapper", "RPC Endpoint Mapper" },
-            { "Dhcp", "DHCP Client" },
-            { "Dnscache", "DNS Client" },
-            { "NlaSvc", "Network Location Awareness" },
-            { "nsi", "Network Store Interface Service" },
-            { "BFE", "Base Filtering Engine" },
-            { "BITS", "Background Intelligent Transfer Service" },
-            { "TrustedInstaller", "Windows Modules Installer" },
-            { "Spooler", "Print Spooler" }, // May be needed - check README
-        };
+    private static readonly Dictionary<string, string> CriticalServices = new(
+        StringComparer.OrdinalIgnoreCase
+    )
+    {
+        { "wuauserv", "Windows Update" },
+        { "WinDefend", "Windows Defender Antivirus Service" },
+        { "SecurityHealthService", "Windows Security Service" },
+        { "wscsvc", "Security Center" },
+        { "MpsSvc", "Windows Defender Firewall" },
+        { "EventLog", "Windows Event Log" },
+        { "Schedule", "Task Scheduler" },
+        { "Winmgmt", "Windows Management Instrumentation" },
+        { "CryptSvc", "Cryptographic Services" },
+        { "DcomLaunch", "DCOM Server Process Launcher" },
+        { "RpcSs", "Remote Procedure Call (RPC)" },
+        { "RpcEptMapper", "RPC Endpoint Mapper" },
+        { "Dhcp", "DHCP Client" },
+        { "Dnscache", "DNS Client" },
+        { "NlaSvc", "Network Location Awareness" },
+        { "nsi", "Network Store Interface Service" },
+        { "BFE", "Base Filtering Engine" },
+        { "BITS", "Background Intelligent Transfer Service" },
+        { "TrustedInstaller", "Windows Modules Installer" },
+        { "Spooler", "Print Spooler" }, // May be needed - check README
+    };
 
     public ServiceManagementTask()
     {

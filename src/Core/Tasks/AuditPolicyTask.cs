@@ -14,123 +14,122 @@ public class AuditPolicyTask : BaseTask
     /// Audit categories with their subcategories
     /// All should be set to log both success and failure
     /// </summary>
-    private static readonly Dictionary<string, string[]> AuditCategories =
-        new()
+    private static readonly Dictionary<string, string[]> AuditCategories = new()
+    {
         {
+            "Account Logon",
+            new[]
             {
-                "Account Logon",
-                new[]
-                {
-                    "Credential Validation",
-                    "Kerberos Authentication Service",
-                    "Kerberos Service Ticket Operations",
-                    "Other Account Logon Events",
-                }
-            },
+                "Credential Validation",
+                "Kerberos Authentication Service",
+                "Kerberos Service Ticket Operations",
+                "Other Account Logon Events",
+            }
+        },
+        {
+            "Account Management",
+            new[]
             {
-                "Account Management",
-                new[]
-                {
-                    "Application Group Management",
-                    "Computer Account Management",
-                    "Distribution Group Management",
-                    "Other Account Management Events",
-                    "Security Group Management",
-                    "User Account Management",
-                }
-            },
+                "Application Group Management",
+                "Computer Account Management",
+                "Distribution Group Management",
+                "Other Account Management Events",
+                "Security Group Management",
+                "User Account Management",
+            }
+        },
+        {
+            "Detailed Tracking",
+            new[]
             {
-                "Detailed Tracking",
-                new[]
-                {
-                    "DPAPI Activity",
-                    "PNP Activity",
-                    "Process Creation",
-                    "Process Termination",
-                    "RPC Events",
-                    "Token Right Adjusted Events",
-                }
-            },
+                "DPAPI Activity",
+                "PNP Activity",
+                "Process Creation",
+                "Process Termination",
+                "RPC Events",
+                "Token Right Adjusted Events",
+            }
+        },
+        {
+            "DS Access",
+            new[]
             {
-                "DS Access",
-                new[]
-                {
-                    "Detailed Directory Service Replication",
-                    "Directory Service Access",
-                    "Directory Service Changes",
-                    "Directory Service Replication",
-                }
-            },
+                "Detailed Directory Service Replication",
+                "Directory Service Access",
+                "Directory Service Changes",
+                "Directory Service Replication",
+            }
+        },
+        {
+            "Logon/Logoff",
+            new[]
             {
-                "Logon/Logoff",
-                new[]
-                {
-                    "Account Lockout",
-                    "User / Device Claims",
-                    "Group Membership",
-                    "IPsec Extended Mode",
-                    "IPsec Main Mode",
-                    "IPsec Quick Mode",
-                    "Logoff",
-                    "Logon",
-                    "Network Policy Server",
-                    "Other Logon/Logoff Events",
-                    "Special Logon",
-                }
-            },
+                "Account Lockout",
+                "User / Device Claims",
+                "Group Membership",
+                "IPsec Extended Mode",
+                "IPsec Main Mode",
+                "IPsec Quick Mode",
+                "Logoff",
+                "Logon",
+                "Network Policy Server",
+                "Other Logon/Logoff Events",
+                "Special Logon",
+            }
+        },
+        {
+            "Object Access",
+            new[]
             {
-                "Object Access",
-                new[]
-                {
-                    "Application Generated",
-                    "Certification Services",
-                    "Detailed File Share",
-                    "File Share",
-                    "File System",
-                    "Filtering Platform Connection",
-                    "Filtering Platform Packet Drop",
-                    "Handle Manipulation",
-                    "Kernel Object",
-                    "Other Object Access Events",
-                    "Registry",
-                    "Removable Storage",
-                    "SAM",
-                    "Central Policy Staging",
-                }
-            },
+                "Application Generated",
+                "Certification Services",
+                "Detailed File Share",
+                "File Share",
+                "File System",
+                "Filtering Platform Connection",
+                "Filtering Platform Packet Drop",
+                "Handle Manipulation",
+                "Kernel Object",
+                "Other Object Access Events",
+                "Registry",
+                "Removable Storage",
+                "SAM",
+                "Central Policy Staging",
+            }
+        },
+        {
+            "Policy Change",
+            new[]
             {
-                "Policy Change",
-                new[]
-                {
-                    "Audit Policy Change",
-                    "Authentication Policy Change",
-                    "Authorization Policy Change",
-                    "Filtering Platform Policy Change",
-                    "MPSSVC Rule-Level Policy Change",
-                    "Other Policy Change Events",
-                }
-            },
+                "Audit Policy Change",
+                "Authentication Policy Change",
+                "Authorization Policy Change",
+                "Filtering Platform Policy Change",
+                "MPSSVC Rule-Level Policy Change",
+                "Other Policy Change Events",
+            }
+        },
+        {
+            "Privilege Use",
+            new[]
             {
-                "Privilege Use",
-                new[]
-                {
-                    "Non Sensitive Privilege Use",
-                    "Other Privilege Use Events",
-                    "Sensitive Privilege Use",
-                }
-            },
+                "Non Sensitive Privilege Use",
+                "Other Privilege Use Events",
+                "Sensitive Privilege Use",
+            }
+        },
+        {
+            "System",
+            new[]
             {
-                "System",
-                new[]
-                {
-                    "IPsec Driver",
-                    "Other System Events",
-                    "Security State Change",
-                    "Security System Extension",
-                    "System Integrity",
-                }
-            },
-        };
+                "IPsec Driver",
+                "Other System Events",
+                "Security State Change",
+                "Security System Extension",
+                "System Integrity",
+            }
+        },
+    };
 
     /// <summary>
     /// Registry settings for security options
@@ -138,198 +137,192 @@ public class AuditPolicyTask : BaseTask
     private static readonly Dictionary<
         string,
         (string Path, string Name, int Value, string Description)
-    > SecuritySettings =
-        new()
+    > SecuritySettings = new()
+    {
+        // Auditing settings
         {
-            // Auditing settings
-            {
-                "AuditBaseObjects",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "auditbaseobjects",
-                    1,
-                    "Audit access of Global System Objects"
-                )
-            },
-            {
-                "FullPrivilegeAuditing",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "fullprivilegeauditing",
-                    1,
-                    "Audit Backup and Restore privilege"
-                )
-            },
-            {
-                "CrashOnAuditFail",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "crashonauditfail",
-                    0,
-                    "Crash on audit fail (disabled)"
-                )
-            },
-            // LSA Protection
-            {
-                "RunAsPPL",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "RunAsPPL",
-                    1,
-                    "Enable LSA protection"
-                )
-            },
-            {
-                "LsassAuditLevel",
-                (
-                    @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LSASS.exe",
-                    "AuditLevel",
-                    8,
-                    "LSASS audit level"
-                )
-            },
-            // Logon settings
-            {
-                "DontDisplayLastUsername",
-                (
-                    @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
-                    "dontdisplaylastusername",
-                    1,
-                    "Don't display last username"
-                )
-            },
-            {
+            "AuditBaseObjects",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "auditbaseobjects",
+                1,
+                "Audit access of Global System Objects"
+            )
+        },
+        {
+            "FullPrivilegeAuditing",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "fullprivilegeauditing",
+                1,
+                "Audit Backup and Restore privilege"
+            )
+        },
+        {
+            "CrashOnAuditFail",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "crashonauditfail",
+                0,
+                "Crash on audit fail (disabled)"
+            )
+        },
+        // LSA Protection
+        {
+            "RunAsPPL",
+            (@"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL", 1, "Enable LSA protection")
+        },
+        {
+            "LsassAuditLevel",
+            (
+                @"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LSASS.exe",
+                "AuditLevel",
+                8,
+                "LSASS audit level"
+            )
+        },
+        // Logon settings
+        {
+            "DontDisplayLastUsername",
+            (
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+                "dontdisplaylastusername",
+                1,
+                "Don't display last username"
+            )
+        },
+        {
+            "DisableCAD",
+            (
+                @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
                 "DisableCAD",
-                (
-                    @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
-                    "DisableCAD",
-                    0,
-                    "Require Ctrl+Alt+Del"
-                )
-            },
-            // Anonymous restrictions
-            {
-                "RestrictAnonymous",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "restrictanonymous",
-                    1,
-                    "Restrict anonymous enumeration of shares"
-                )
-            },
-            {
-                "RestrictAnonymousSAM",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "restrictanonymoussam",
-                    1,
-                    "Restrict anonymous enumeration of SAM"
-                )
-            },
-            {
-                "EveryoneIncludesAnonymous",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "everyoneincludesanonymous",
-                    0,
-                    "Anonymous not in Everyone group"
-                )
-            },
-            // Password/credential settings
-            {
+                0,
+                "Require Ctrl+Alt+Del"
+            )
+        },
+        // Anonymous restrictions
+        {
+            "RestrictAnonymous",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "restrictanonymous",
+                1,
+                "Restrict anonymous enumeration of shares"
+            )
+        },
+        {
+            "RestrictAnonymousSAM",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "restrictanonymoussam",
+                1,
+                "Restrict anonymous enumeration of SAM"
+            )
+        },
+        {
+            "EveryoneIncludesAnonymous",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "everyoneincludesanonymous",
+                0,
+                "Anonymous not in Everyone group"
+            )
+        },
+        // Password/credential settings
+        {
+            "LimitBlankPasswordUse",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
                 "LimitBlankPasswordUse",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "LimitBlankPasswordUse",
-                    1,
-                    "Limit blank password use"
-                )
-            },
-            {
-                "DisableDomainCreds",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
-                    "disabledomaincreds",
-                    1,
-                    "Don't store domain credentials"
-                )
-            },
-            // Network security
-            {
-                "RequireSecuritySignature",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
-                    "requiresecuritysignature",
-                    1,
-                    "Require SMB signing"
-                )
-            },
-            {
-                "EnableSecuritySignature",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
-                    "enablesecuritysignature",
-                    1,
-                    "Enable SMB signing"
-                )
-            },
-            {
+                1,
+                "Limit blank password use"
+            )
+        },
+        {
+            "DisableDomainCreds",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+                "disabledomaincreds",
+                1,
+                "Don't store domain credentials"
+            )
+        },
+        // Network security
+        {
+            "RequireSecuritySignature",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+                "requiresecuritysignature",
+                1,
+                "Require SMB signing"
+            )
+        },
+        {
+            "EnableSecuritySignature",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+                "enablesecuritysignature",
+                1,
+                "Enable SMB signing"
+            )
+        },
+        {
+            "NullSessionPipes",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
                 "NullSessionPipes",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
-                    "NullSessionPipes",
-                    0,
-                    "Clear null session pipes"
-                )
-            },
-            {
+                0,
+                "Clear null session pipes"
+            )
+        },
+        {
+            "NullSessionShares",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
                 "NullSessionShares",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
-                    "NullSessionShares",
-                    0,
-                    "Clear null session shares"
-                )
-            },
-            // Session settings
-            {
-                "AutoDisconnect",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
-                    "autodisconnect",
-                    15,
-                    "Auto disconnect idle sessions (15 min)"
-                )
-            },
-            {
+                0,
+                "Clear null session shares"
+            )
+        },
+        // Session settings
+        {
+            "AutoDisconnect",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+                "autodisconnect",
+                15,
+                "Auto disconnect idle sessions (15 min)"
+            )
+        },
+        {
+            "EnablePlainTextPassword",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
                 "EnablePlainTextPassword",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
-                    "EnablePlainTextPassword",
-                    0,
-                    "Disable plain text passwords"
-                )
-            },
-            // Crash/dump settings
-            {
+                0,
+                "Disable plain text passwords"
+            )
+        },
+        // Crash/dump settings
+        {
+            "ClearPageFileAtShutdown",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management",
                 "ClearPageFileAtShutdown",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management",
-                    "ClearPageFileAtShutdown",
-                    1,
-                    "Clear page file at shutdown"
-                )
-            },
-            {
+                1,
+                "Clear page file at shutdown"
+            )
+        },
+        {
+            "CrashDumpEnabled",
+            (
+                @"HKLM\SYSTEM\CurrentControlSet\Control\CrashControl",
                 "CrashDumpEnabled",
-                (
-                    @"HKLM\SYSTEM\CurrentControlSet\Control\CrashControl",
-                    "CrashDumpEnabled",
-                    0,
-                    "Disable crash dump"
-                )
-            },
-        };
+                0,
+                "Disable crash dump"
+            )
+        },
+    };
 
     public AuditPolicyTask()
     {

@@ -134,10 +134,8 @@ public class SharedFoldersAuditTask : BaseTask
             if (line.StartsWith("The command completed", StringComparison.OrdinalIgnoreCase))
                 break;
 
-            var name = line.Split(
-                (char[]?)null,
-                StringSplitOptions.RemoveEmptyEntries
-            ).FirstOrDefault();
+            var name = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)
+                .FirstOrDefault();
             if (!string.IsNullOrWhiteSpace(name))
                 shares.Add(name);
         }

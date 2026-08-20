@@ -19,6 +19,7 @@ namespace CyberPatriotAutomation.Core.Tasks;
 public class HostsFileAuditTask : BaseTask
 {
     private const string HostsFilePath = @"C:\Windows\System32\drivers\etc\hosts";
+
     /// <summary>
     /// Collapse runs of whitespace so entries compare on content, not formatting.
     /// </summary>

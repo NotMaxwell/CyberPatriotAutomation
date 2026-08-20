@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk">
-
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -18,20 +17,34 @@
          header and file name so a log ties back to the build that produced it. -->
     <Version>1.4.0</Version>
 
+    <!-- Self-contained single-file publish profile.
+         Gated on _IsPublishing so `dotnet build`/`dotnet test` stay
+         RID-agnostic: the test project references this one, and a global
+         RuntimeIdentifier would make the test assemblies win-x64 and therefore
+         unrunnable on the Linux/CI hosts the suite runs on. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+
     <!-- Code Analysis -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <AnalysisLevel>latest</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(_IsPublishing)' == 'true'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Spectre.Console" Version="0.47.0" />
     <PackageReference Include="System.CommandLine" Version="2.0.2" />
     <!-- Code Formatting -->
-    <PackageReference Include="CSharpier.MsBuild" Version="0.29.2">
+    <PackageReference Include="CSharpier.MsBuild" Version="1.2.6">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
     </PackageReference>
   </ItemGroup>
-
 </Project>

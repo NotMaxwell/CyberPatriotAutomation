@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool - Model Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.

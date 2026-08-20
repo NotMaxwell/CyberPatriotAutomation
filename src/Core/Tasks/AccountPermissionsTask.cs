@@ -67,7 +67,8 @@ public class AccountPermissionsTask : BaseTask
 
                 if (
                     _accounts.Any(a =>
-                        a.Username.Equals("Guest", StringComparison.OrdinalIgnoreCase) && a.IsEnabled
+                        a.Username.Equals("Guest", StringComparison.OrdinalIgnoreCase)
+                        && a.IsEnabled
                     )
                 )
                 {

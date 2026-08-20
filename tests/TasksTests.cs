@@ -1,11 +1,11 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool - Unit Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Tasks;
 using CyberPatriotAutomation.Core.Models;
+using CyberPatriotAutomation.Core.Tasks;
 using FluentAssertions;
 using Xunit;
 

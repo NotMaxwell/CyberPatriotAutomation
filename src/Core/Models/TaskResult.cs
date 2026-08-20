@@ -46,9 +46,7 @@ public class TaskResult
     /// populates <see cref="ItemsAttempted"/>, that was every task.
     /// </remarks>
     public double CompletionRate =>
-        ItemsAttempted > 0
-            ? (double)(ItemsSucceeded + ItemsSkipped) / ItemsAttempted * 100
-            : Success
-                ? 100
-                : 0;
+        ItemsAttempted > 0 ? (double)(ItemsSucceeded + ItemsSkipped) / ItemsAttempted * 100
+        : Success ? 100
+        : 0;
 }

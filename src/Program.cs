@@ -325,7 +325,10 @@ public class Program
                     if (!verified)
                     {
                         // Reduce confidence if verification fails
-                        lastResult.ConfidencePercent = Math.Max(50, lastResult.ConfidencePercent - 30);
+                        lastResult.ConfidencePercent = Math.Max(
+                            50,
+                            lastResult.ConfidencePercent - 30
+                        );
                     }
 
                     verifyTask.Value = 100;
@@ -420,8 +423,14 @@ public class Program
         {
             var status = result.Success ? "[green]✓ Success[/]" : "[red]✗ Failed[/]";
             var completionRate = result.CompletionRate;
-            var completionColor = completionRate >= 90 ? "green" : completionRate >= 70 ? "yellow" : "red";
-            var confidenceColor = result.ConfidencePercent >= 90 ? "green" : result.ConfidencePercent >= 70 ? "yellow" : "red";
+            var completionColor =
+                completionRate >= 90 ? "green"
+                : completionRate >= 70 ? "yellow"
+                : "red";
+            var confidenceColor =
+                result.ConfidencePercent >= 90 ? "green"
+                : result.ConfidencePercent >= 70 ? "yellow"
+                : "red";
 
             table.AddRow(
                 new Markup($"[bold]{result.TaskName}[/]"),
@@ -466,14 +475,17 @@ public class Program
         var totalItemsSkipped = results.Sum(r => r.ItemsSkipped);
 
         // Overall completion rate
-        var overallCompletionRate = totalItemsAttempted > 0
-            ? (double)(totalItemsSucceeded + totalItemsSkipped) / totalItemsAttempted * 100
-            : 100;
+        var overallCompletionRate =
+            totalItemsAttempted > 0
+                ? (double)(totalItemsSucceeded + totalItemsSkipped) / totalItemsAttempted * 100
+                : 100;
 
         // Overall confidence (weighted average based on items attempted)
-        var overallConfidence = totalItemsAttempted > 0
-            ? results.Sum(r => r.ConfidencePercent * r.ItemsAttempted) / (double)totalItemsAttempted
-            : results.Average(r => r.ConfidencePercent);
+        var overallConfidence =
+            totalItemsAttempted > 0
+                ? results.Sum(r => r.ConfidencePercent * r.ItemsAttempted)
+                    / (double)totalItemsAttempted
+                : results.Average(r => r.ConfidencePercent);
 
         // Adjust confidence based on verification status
         var verificationBonus = verifiedCount / (double)results.Count;
@@ -492,7 +504,9 @@ public class Program
         grid.AddRow(
             new Markup($"[bold]Tasks:[/] {successCount}/{results.Count} passed"),
             new Markup($"[bold]Verified:[/] {verifiedCount}/{results.Count}"),
-            new Markup($"[bold]Items:[/] {totalItemsSucceeded + totalItemsSkipped}/{totalItemsAttempted}"),
+            new Markup(
+                $"[bold]Items:[/] {totalItemsSucceeded + totalItemsSkipped}/{totalItemsAttempted}"
+            ),
             new Markup($"[bold]Skipped:[/] {totalItemsSkipped}")
         );
 
@@ -500,36 +514,58 @@ public class Program
         AnsiConsole.WriteLine();
 
         // Display completion rate bar chart
-        var completionColor = overallCompletionRate >= 90 ? Color.Green : overallCompletionRate >= 70 ? Color.Yellow : Color.Red;
-        AnsiConsole.Write(new BarChart()
-            .Width(60)
-            .Label("[bold]Completion Rate[/]")
-            .AddItem("Completed", overallCompletionRate, completionColor)
-            .AddItem("Remaining", 100 - overallCompletionRate, Color.Grey));
+        var completionColor =
+            overallCompletionRate >= 90 ? Color.Green
+            : overallCompletionRate >= 70 ? Color.Yellow
+            : Color.Red;
+        AnsiConsole.Write(
+            new BarChart()
+                .Width(60)
+                .Label("[bold]Completion Rate[/]")
+                .AddItem("Completed", overallCompletionRate, completionColor)
+                .AddItem("Remaining", 100 - overallCompletionRate, Color.Grey)
+        );
 
         AnsiConsole.WriteLine();
 
         // Display confidence bar chart
-        var confidenceColor = overallConfidence >= 90 ? Color.Green : overallConfidence >= 70 ? Color.Yellow : Color.Red;
-        AnsiConsole.Write(new BarChart()
-            .Width(60)
-            .Label("[bold]Confidence Level[/]")
-            .AddItem("Confident", overallConfidence, confidenceColor)
-            .AddItem("Uncertain", 100 - overallConfidence, Color.Grey));
+        var confidenceColor =
+            overallConfidence >= 90 ? Color.Green
+            : overallConfidence >= 70 ? Color.Yellow
+            : Color.Red;
+        AnsiConsole.Write(
+            new BarChart()
+                .Width(60)
+                .Label("[bold]Confidence Level[/]")
+                .AddItem("Confident", overallConfidence, confidenceColor)
+                .AddItem("Uncertain", 100 - overallConfidence, Color.Grey)
+        );
 
         AnsiConsole.WriteLine();
 
         // Display final summary message
-        var completionEmoji = overallCompletionRate >= 90 ? "🎉" : overallCompletionRate >= 70 ? "👍" : "⚠️";
-        var confidenceEmoji = overallConfidence >= 90 ? "✅" : overallConfidence >= 70 ? "🔶" : "❌";
+        var completionEmoji =
+            overallCompletionRate >= 90 ? "🎉"
+            : overallCompletionRate >= 70 ? "👍"
+            : "⚠️";
+        var confidenceEmoji =
+            overallConfidence >= 90 ? "✅"
+            : overallConfidence >= 70 ? "🔶"
+            : "❌";
 
-        AnsiConsole.MarkupLine($"{completionEmoji} [bold]Overall Completion Rate:[/] [{(overallCompletionRate >= 90 ? "green" : overallCompletionRate >= 70 ? "yellow" : "red")}]{overallCompletionRate:F1}%[/]");
-        AnsiConsole.MarkupLine($"{confidenceEmoji} [bold]Overall Confidence Level:[/] [{(overallConfidence >= 90 ? "green" : overallConfidence >= 70 ? "yellow" : "red")}]{overallConfidence:F1}%[/]");
+        AnsiConsole.MarkupLine(
+            $"{completionEmoji} [bold]Overall Completion Rate:[/] [{(overallCompletionRate >= 90 ? "green" : overallCompletionRate >= 70 ? "yellow" : "red")}]{overallCompletionRate:F1}%[/]"
+        );
+        AnsiConsole.MarkupLine(
+            $"{confidenceEmoji} [bold]Overall Confidence Level:[/] [{(overallConfidence >= 90 ? "green" : overallConfidence >= 70 ? "yellow" : "red")}]{overallConfidence:F1}%[/]"
+        );
 
         if (overallConfidence < 90)
         {
             AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("[dim italic]💡 Tip: Manual verification recommended for tasks with low confidence.[/]");
+            AnsiConsole.MarkupLine(
+                "[dim italic]💡 Tip: Manual verification recommended for tasks with low confidence.[/]"
+            );
         }
     }
 }

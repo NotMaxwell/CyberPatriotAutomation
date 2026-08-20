@@ -209,7 +209,11 @@ public class SoftwareManagementTask : BaseTask
     /// <summary>
     /// Runs a Windows Defender malware scan and returns the results
     /// </summary>
-    private async Task<(bool Success, int ThreatsFound, string Message)> RunWindowsDefenderScanAsync()
+    private async Task<(
+        bool Success,
+        int ThreatsFound,
+        string Message
+    )> RunWindowsDefenderScanAsync()
     {
         var scanType = UseQuickScan ? "QuickScan" : "FullScan";
         AnsiConsole.MarkupLine($"[blue]Running Windows Defender {scanType}...[/]");
@@ -253,7 +257,9 @@ public class SoftwareManagementTask : BaseTask
             threatsFound = threatOutput.Split("ThreatID").Length - 1;
             if (threatsFound > 0)
             {
-                AnsiConsole.MarkupLine($"[red]⚠ Windows Defender found {threatsFound} threat(s)[/]");
+                AnsiConsole.MarkupLine(
+                    $"[red]⚠ Windows Defender found {threatsFound} threat(s)[/]"
+                );
 
                 // Attempt to remove detected threats
                 var (removeSuccess, _, removeError) = await CommandExecutor.ExecuteAsync(
@@ -263,13 +269,19 @@ public class SoftwareManagementTask : BaseTask
                 if (removeSuccess)
                     AnsiConsole.MarkupLine("[green]✓ Attempted to remove detected threats[/]");
                 else
-                    AnsiConsole.MarkupLine($"[yellow]⚠ Could not auto-remove threats: {removeError}[/]");
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]⚠ Could not auto-remove threats: {removeError}[/]"
+                    );
             }
         }
 
         if (threatsFound == 0)
             AnsiConsole.MarkupLine("[green]✓ No threats detected by Windows Defender[/]");
 
-        return (true, threatsFound, $"Windows Defender {scanType}: {(threatsFound > 0 ? $"{threatsFound} threat(s) found" : "No threats detected")}");
+        return (
+            true,
+            threatsFound,
+            $"Windows Defender {scanType}: {(threatsFound > 0 ? $"{threatsFound} threat(s) found" : "No threats detected")}"
+        );
     }
 }

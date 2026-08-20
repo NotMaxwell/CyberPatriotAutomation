@@ -60,10 +60,13 @@ public static class AppConfig
     /// stamps this in its header and file name, so a log can always be tied back
     /// to the build that produced it.
     /// </remarks>
-    public static readonly string Version =
-        System.Reflection.Assembly.GetExecutingAssembly().GetName().Version is { } v
-            ? $"{v.Major}.{v.Minor}.{v.Build}"
-            : "0.0.0";
+    public static readonly string Version = System
+        .Reflection.Assembly.GetExecutingAssembly()
+        .GetName()
+        .Version
+        is { } v
+        ? $"{v.Major}.{v.Minor}.{v.Build}"
+        : "0.0.0";
 
     /// <summary>Version and build date as one display string.</summary>
     public static string VersionString

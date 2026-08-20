@@ -1,6 +1,11 @@
-# Ignore publish-win-x64 directory except the EXE in root
-publish-win-x64/
-# .gitignore for C# .NET projects
+﻿# .gitignore for C# .NET projects
+
+# Publish output. The shipping single-file EXE is committed at the repo root
+# instead, so the staging directories themselves stay out of the repo.
+publish/
+publish-*/
+!/CyberPatriotAutomation.exe
+
 # Build results
 bin/
 obj/

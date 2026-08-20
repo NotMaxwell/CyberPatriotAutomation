@@ -20,7 +20,8 @@ public class GroupPolicyTask : BaseTask
     public GroupPolicyTask()
     {
         Name = "Group Policy";
-        Description = "Configures Group Policy settings: Hide last user, require Ctrl+Alt+Del, disable ICS, and more.";
+        Description =
+            "Configures Group Policy settings: Hide last user, require Ctrl+Alt+Del, disable ICS, and more.";
     }
 
     public override async Task<SystemInfo> ReadSystemStateAsync()
@@ -43,7 +44,8 @@ public class GroupPolicyTask : BaseTask
             {
                 TaskName = Name,
                 Success = true,
-                Message = "DRY RUN: Would apply:\n✓ Don't display last user name set\n✓ Require Ctrl+Alt+Del set\n✓ ICS (Internet Connection Sharing) disabled\n✓ Restrict anonymous access set",
+                Message =
+                    "DRY RUN: Would apply:\n✓ Don't display last user name set\n✓ Require Ctrl+Alt+Del set\n✓ ICS (Internet Connection Sharing) disabled\n✓ Restrict anonymous access set",
             };
         }
 
@@ -55,7 +57,9 @@ public class GroupPolicyTask : BaseTask
             "reg",
             "add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v dontdisplaylastusername /t REG_DWORD /d 1 /f"
         );
-        details.Add(hideUserSuccess ? "✓ Don't display last user name set" : $"✗ Failed: {hideUserError}");
+        details.Add(
+            hideUserSuccess ? "✓ Don't display last user name set" : $"✗ Failed: {hideUserError}"
+        );
         allSuccess &= hideUserSuccess;
 
         // 2. Require Ctrl+Alt+Del
@@ -63,7 +67,9 @@ public class GroupPolicyTask : BaseTask
             "reg",
             "add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v DisableCAD /t REG_DWORD /d 0 /f"
         );
-        details.Add(ctrlAltDelSuccess ? "✓ Require Ctrl+Alt+Del set" : $"✗ Failed: {ctrlAltDelError}");
+        details.Add(
+            ctrlAltDelSuccess ? "✓ Require Ctrl+Alt+Del set" : $"✗ Failed: {ctrlAltDelError}"
+        );
         allSuccess &= ctrlAltDelSuccess;
 
         // 3. Disable ICS (Internet Connection Sharing)
@@ -71,7 +77,9 @@ public class GroupPolicyTask : BaseTask
             "sc",
             "config SharedAccess start= disabled"
         );
-        details.Add(icsSuccess ? "✓ ICS (Internet Connection Sharing) disabled" : $"✗ Failed: {icsError}");
+        details.Add(
+            icsSuccess ? "✓ ICS (Internet Connection Sharing) disabled" : $"✗ Failed: {icsError}"
+        );
         allSuccess &= icsSuccess;
 
         // 4. Additional local security policies (example: restrict anonymous access)
@@ -99,7 +107,9 @@ public class GroupPolicyTask : BaseTask
     /// </remarks>
     public static uint? ParseRegDword(string output, string name)
     {
-        foreach (var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+        foreach (
+            var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        )
         {
             var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
             if (
@@ -129,7 +139,10 @@ public class GroupPolicyTask : BaseTask
     /// <summary>Confirm a registry value is present *and* set to the expected value.</summary>
     private static async Task<bool> RegDwordEqualsAsync(string key, string name, uint expected)
     {
-        var (success, output, _) = await CommandExecutor.ExecuteAsync("reg", $"query {key} /v {name}");
+        var (success, output, _) = await CommandExecutor.ExecuteAsync(
+            "reg",
+            $"query {key} /v {name}"
+        );
         return success && ParseRegDword(output, name) == expected;
     }
 

@@ -31,7 +31,7 @@ public class UserManagementTask : BaseTask
         "W5!eR4@tT3#yU2$uI1%oP0^aS9&dF8gH7(jK6)L",
         "Q6!wE5@rT4#yU3$uI2%oP1^aS0&dF9gH8(jK7)L",
         "M7!nB6@vC5#xZ4$cV3%bN2^mL1&kJ0hG9(fD8)S",
-        "S8!dF7@gH6#jK5$lZ4%xC3^vB2&nM1bN0(mL9)K"
+        "S8!dF7@gH6#jK5$lZ4%xC3^vB2&nM1bN0(mL9)K",
     };
 
     public UserManagementTask()
@@ -521,7 +521,9 @@ public class UserManagementTask : BaseTask
                 }
                 else
                 {
-                    issues.Add($"Failed to remove {account.Username} from Administrators: {failure}");
+                    issues.Add(
+                        $"Failed to remove {account.Username} from Administrators: {failure}"
+                    );
                     AnsiConsole.MarkupLine(
                         $"[red]? Failed to remove {Markup.Escape(account.Username)} from Administrators[/]"
                     );
@@ -639,9 +641,7 @@ public class UserManagementTask : BaseTask
             }
             else
             {
-                issues.Add(
-                    $"Failed to enable password expiration for {account.Username}: {error}"
-                );
+                issues.Add($"Failed to enable password expiration for {account.Username}: {error}");
             }
         }
 
