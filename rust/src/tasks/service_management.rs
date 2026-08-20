@@ -1,6 +1,7 @@
 //! Manage Windows services based on README requirements and security best practices.
 
 use crate::command;
+use crate::service_ops;
 use crate::impl_task_meta;
 use crate::models::{ReadmeData, SystemInfo, TaskResult};
 use crate::tasks::Task;
@@ -294,10 +295,9 @@ impl ServiceManagementTask {
 
             ui::markup_line(&format!("[yellow]Starting critical service: {service}...[/]"));
             // A disabled service cannot be started until its start type is reset.
-            let _ = command::execute("sc", Some(&format!("config \"{service}\" start= auto"))).await;
-            let (start_success, _o, start_error) =
-                command::execute("net", Some(&format!("start \"{service}\""))).await;
-            if start_success {
+            let _ = service_ops::set_automatic(service).await;
+            let start_error = service_ops::start(service).await.err();
+            if start_error.is_none() {
                 fixes.push(format!("Started critical service: {service}"));
                 ui::markup_line(&format!("[green]? Started {service}[/]"));
             } else {
@@ -315,10 +315,9 @@ impl ServiceManagementTask {
         }
         for service in to_enable.iter() {
             ui::markup_line(&format!("[yellow]Enabling service: {service}...[/]"));
-            let (config_success, _o, config_error) =
-                command::execute("sc", Some(&format!("config \"{service}\" start= auto"))).await;
-            if !config_success {
-                issues.push(format!("Could not enable {}: {}", service, config_error.unwrap_or_default()));
+            let config_error = service_ops::set_automatic(service).await.err();
+            if let Some(config_error) = config_error {
+                issues.push(format!("Could not enable {service}: {config_error}"));
                 ui::markup_line(&format!("[red]? Could not enable {service}[/]"));
                 continue;
             }
@@ -326,14 +325,11 @@ impl ServiceManagementTask {
             // The C# original discarded this result and reported success purely
             // on `sc config`, so a service set to auto-start but failing to
             // start was still counted as enabled.
-            let (start_success, _o, start_error) =
-                command::execute("net", Some(&format!("start \"{service}\""))).await;
-            let already_running = start_error
-                .as_deref()
-                .map(|e| e.contains("already been started"))
-                .unwrap_or(false);
+            // service_ops::start treats "already running" as success, so the
+            // string match the shell path needed is gone.
+            let start_error = service_ops::start(service).await.err();
 
-            if start_success || already_running {
+            if start_error.is_none() {
                 fixes.push(format!("Enabled service: {service}"));
                 ui::markup_line(&format!("[green]? Enabled {service}[/]"));
             } else {
@@ -367,27 +363,31 @@ impl ServiceManagementTask {
                 continue;
             }
 
-            let (check_success, check_output, _e) = command::powershell_query(&format!(
-                "Get-Service -Name {} | Select-Object -ExpandProperty Status",
-                command::ps_quote(service)
-            ))
-            .await;
-
-            if !check_success || check_output.trim().is_empty() {
+            let state = service_ops::state(service).await;
+            if state == service_ops::ServiceState::Absent {
+                // Nothing installed to disable.
                 continue;
             }
 
-            let current_status = check_output.trim().to_string();
             let description = Self::service_description(service).unwrap_or("Unknown");
 
-            if current_status.eq_ignore_ascii_case("Running") {
-                let _ = command::execute("net", Some(&format!("stop \"{service}\""))).await;
+            if state == service_ops::ServiceState::Running {
+                // Not `net stop`: when a service has dependents it asks "Do you
+                // want to continue this operation? (Y/N)". Stdin is /dev/null
+                // here so the prompt reaches EOF and `net` aborts rather than
+                // hanging - but it aborts having stopped nothing, and the
+                // failure is silent. `Stop-Service -Force` stops the dependents
+                // too and never asks.
+                if let Err(stop_error) = service_ops::stop(service).await {
+                    // Not fatal: a service that will not stop can still be set to
+                    // disabled so it does not come back after a reboot.
+                    issues.push(format!("Could not stop {service}: {stop_error}"));
+                }
             }
 
-            let (disable_success, _o, disable_error) =
-                command::execute("sc", Some(&format!("config \"{service}\" start= disabled"))).await;
+            let disable_error = service_ops::disable(service).await.err();
 
-            if disable_success {
+            if disable_error.is_none() {
                 table.add_row([format!("[red]{service}[/]"), description.to_string(), "[green]Disabled[/]".to_string()]);
                 fixes.push(format!("Disabled service: {service}"));
                 disabled_count += 1;

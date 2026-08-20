@@ -40,9 +40,35 @@ impl SoftwareManagementTask {
         }
     }
 
+    /// Software treated as prohibited even when the README does not name it.
+    ///
+    /// Scoring images routinely include software that is not a hacking tool but
+    /// is not authorised either - a media player, a scripting runtime, a
+    /// registry cleaner. The CP19 exhibition answer key scored removing Jellyfin
+    /// Media Player and Python 3 as separate items and the README named neither,
+    /// so they are prohibited by default and only spared when the README
+    /// explicitly requires them.
+    pub const ALWAYS_PROHIBITED: [&str; 3] = ["Python", "CCleaner", "Jellyfin"];
+
     pub fn set_readme_data(&mut self, readme: &ReadmeData) {
-        self.prohibited_software = readme.prohibited_software.clone();
         self.required_software = readme.required_software.clone();
+
+        let mut prohibited = readme.prohibited_software.clone();
+        for candidate in Self::ALWAYS_PROHIBITED {
+            // A README that requires something wins over the default list: an
+            // image that legitimately needs Python must not have it removed.
+            let required = self
+                .required_software
+                .iter()
+                .any(|r| Self::contains_ci(&r.name, candidate));
+            let already_listed = prohibited
+                .iter()
+                .any(|p| p.eq_ignore_ascii_case(candidate));
+            if !required && !already_listed {
+                prohibited.push(candidate.to_string());
+            }
+        }
+        self.prohibited_software = prohibited;
     }
 
     fn contains_ci(haystack: &str, needle: &str) -> bool {

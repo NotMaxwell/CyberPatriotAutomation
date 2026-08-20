@@ -10,6 +10,44 @@ cyberpatriot-automation.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.11.0
+
+### Added
+
+- `-h`, `--help`, `-?` and `/?` print the flag table and exit. Security hardening
+  moved from `-h` to `-H`; `--security-hardening` is unchanged.
+- Microsoft network client **and** server: digitally sign communications
+  (always). Scored on the CP19 exhibition answer key and previously unhandled.
+  Both sides are set, since signing one leaves the other able to negotiate an
+  unsigned session.
+- Remote desktop sharing is turned off, via `fDenyTSConnections` and its policy
+  key. Also scored and previously unhandled; the policy key overrides the local
+  one, so setting only the local value leaves RDP listening.
+- Python, CCleaner and Jellyfin Media Player are prohibited by default, unless
+  the README explicitly requires them.
+
+### Changed
+
+- **Running every task now requires `--all`.** A bare invocation prints the help
+  and changes nothing. It used to mean "run every task", so double-clicking the
+  executable began a full destructive run against the machine.
+- An unrecognised argument is rejected with exit code 2 instead of being
+  ignored. Combined with the above, a typo - or `--help`, which was not a flag -
+  used to start that same destructive run.
+- Service control goes through the service control manager rather than `sc.exe`,
+  `net start` and `Stop-Service`; dependents are enumerated and stopped
+  explicitly, so nothing prompts.
+- Registry access goes through the Windows API rather than `reg.exe`, and asks
+  for the 64-bit view explicitly so a value is not silently redirected to
+  `Wow6432Node`.
+
+### Fixed
+
+- `net share <name> /delete` now passes `/y`. It asks "force them closed? (Y/N)"
+  when the share has open files, and aborted having deleted nothing.
+- `command::execute_for_exit_code` reports the real exit code, so callers can
+  tell a timeout from a failure.
+
 ## 1.10.0
 
 ### Changed

@@ -127,7 +127,11 @@ impl Task for SharedFoldersAuditTask {
 
         for share in &unauthorized {
             let (del_success, _out, del_err) =
-                command::execute("net", Some(&format!("share {share} /delete"))).await;
+                // /y answers the "There are open files ... force them closed?
+                // (Y/N)" prompt that `net share /delete` asks when the share is
+                // in use. Without it the command waits on a keypress it will
+                // never get, and aborts having deleted nothing.
+                command::execute("net", Some(&format!("share {share} /delete /y"))).await;
             if del_success {
                 removed.push(share.clone());
                 ui::markup_line(&format!("[green]✓ Removed share: {}[/]", ui::escape(share)));

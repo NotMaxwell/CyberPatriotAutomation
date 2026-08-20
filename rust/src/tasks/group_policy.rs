@@ -1,6 +1,8 @@
 //! Configures key Group Policy (gpedit) settings for security hardening.
 
 use crate::command;
+use crate::registry_ops;
+use crate::service_ops;
 use crate::impl_task_meta;
 use crate::models::{SystemInfo, TaskResult};
 use crate::tasks::Task;
@@ -31,34 +33,27 @@ impl Default for GroupPolicyTask {
     }
 }
 
-/// Read the REG_DWORD value named `name` out of `reg query` output.
-///
-/// `reg query <key> /v <name>` prints the value on its own indented line:
-///
-/// ```text
-/// HKEY_LOCAL_MACHINE\SOFTWARE\...\System
-///     dontdisplaylastusername    REG_DWORD    0x1
-/// ```
-fn parse_reg_dword(output: &str, name: &str) -> Option<u32> {
-    for line in output.lines() {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        if fields.len() >= 3
-            && fields[0].eq_ignore_ascii_case(name)
-            && fields[1].eq_ignore_ascii_case("REG_DWORD")
-        {
-            let raw = fields[2];
-            let hex = raw.trim_start_matches("0x").trim_start_matches("0X");
-            return u32::from_str_radix(hex, 16).ok().or_else(|| raw.parse().ok());
-        }
-    }
-    None
-}
+
+const POLICIES_SYSTEM: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+const LSA_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa";
+
+/// SMB client settings ("Microsoft network client" in gpedit).
+const LANMAN_WORKSTATION: &str =
+    r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters";
+
+/// SMB server settings ("Microsoft network server" in gpedit).
+const LANMAN_SERVER: &str = r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters";
+
+/// Where Remote Desktop's listener is switched on and off.
+const TERMINAL_SERVER: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
+
+/// The policy form of the same setting, which takes precedence.
+const TERMINAL_SERVICES_POLICY: &str =
+    r"HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services";
 
 /// Confirm a registry value is present *and* set to `expected`.
 async fn reg_dword_equals(key: &str, name: &str, expected: u32) -> bool {
-    let (success, output, _e) =
-        command::execute("reg", Some(&format!("query {key} /v {name}"))).await;
-    success && parse_reg_dword(&output, name) == Some(expected)
+    registry_ops::dword_equals(key, name, expected).await
 }
 
 
@@ -67,14 +62,20 @@ impl Task for GroupPolicyTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let (_success, output, error) = command::execute(
-            "reg",
-            Some(r"query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"),
-        )
-        .await;
+        let hide_last_user = registry_ops::get_dword(POLICIES_SYSTEM, "dontdisplaylastusername").await;
+        let disable_cad = registry_ops::get_dword(POLICIES_SYSTEM, "DisableCAD").await;
+        let restrict_anonymous = registry_ops::get_dword(LSA_KEY, "restrictanonymous").await;
+
+        let describe = |v: Option<u32>| v.map_or("(not set)".to_string(), |n| n.to_string());
+        let raw = format!(
+            "dontdisplaylastusername = {}\nDisableCAD = {}\nrestrictanonymous = {}",
+            describe(hide_last_user),
+            describe(disable_cad),
+            describe(restrict_anonymous)
+        );
         SystemInfo {
-            raw_output: Some(output),
-            error_output: error,
+            raw_output: Some(raw),
+            error_output: None,
             ..Default::default()
         }
     }
@@ -93,50 +94,79 @@ impl Task for GroupPolicyTask {
         let mut details: Vec<String> = Vec::new();
         let mut all_success = true;
 
-        let (hide_user_success, _o, hide_user_error) = command::execute(
-            "reg",
-            Some(r"add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v dontdisplaylastusername /t REG_DWORD /d 1 /f"),
-        )
-        .await;
-        details.push(if hide_user_success {
-            "✓ Don't display last user name set".to_string()
-        } else {
-            format!("✗ Failed: {}", hide_user_error.unwrap_or_default())
+        let hide_user_error = registry_ops::set_dword(POLICIES_SYSTEM, "dontdisplaylastusername", 1)
+            .await
+            .err();
+        details.push(match &hide_user_error {
+            None => "✓ Don't display last user name set".to_string(),
+            Some(e) => format!("✗ Failed: {e}"),
         });
-        all_success &= hide_user_success;
+        all_success &= hide_user_error.is_none();
 
-        let (cad_success, _o, cad_error) = command::execute(
-            "reg",
-            Some(r"add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System /v DisableCAD /t REG_DWORD /d 0 /f"),
-        )
-        .await;
-        details.push(if cad_success {
-            "✓ Require Ctrl+Alt+Del set".to_string()
-        } else {
-            format!("✗ Failed: {}", cad_error.unwrap_or_default())
+        let cad_error = registry_ops::set_dword(POLICIES_SYSTEM, "DisableCAD", 0).await.err();
+        details.push(match &cad_error {
+            None => "✓ Require Ctrl+Alt+Del set".to_string(),
+            Some(e) => format!("✗ Failed: {e}"),
         });
-        all_success &= cad_success;
+        all_success &= cad_error.is_none();
 
-        let (ics_success, _o, ics_error) =
-            command::execute("sc", Some("config SharedAccess start= disabled")).await;
-        details.push(if ics_success {
-            "✓ ICS (Internet Connection Sharing) disabled".to_string()
-        } else {
-            format!("✗ Failed: {}", ics_error.unwrap_or_default())
+        let ics_error = service_ops::disable("SharedAccess").await.err();
+        details.push(match &ics_error {
+            None => "✓ ICS (Internet Connection Sharing) disabled".to_string(),
+            Some(e) => format!("✗ Failed: {e}"),
         });
-        all_success &= ics_success;
+        all_success &= ics_error.is_none();
 
-        let (anon_success, _o, anon_error) = command::execute(
-            "reg",
-            Some(r"add HKLM\SYSTEM\CurrentControlSet\Control\Lsa /v restrictanonymous /t REG_DWORD /d 1 /f"),
-        )
-        .await;
-        details.push(if anon_success {
-            "✓ Restrict anonymous access set".to_string()
-        } else {
-            format!("✗ Failed: {}", anon_error.unwrap_or_default())
+        let anon_error = registry_ops::set_dword(LSA_KEY, "restrictanonymous", 1)
+            .await
+            .err();
+        details.push(match &anon_error {
+            None => "✓ Restrict anonymous access set".to_string(),
+            Some(e) => format!("✗ Failed: {e}"),
         });
-        all_success &= anon_success;
+        all_success &= anon_error.is_none();
+
+        // Microsoft network client: digitally sign communications (always).
+        //
+        // Without it an SMB session can be tampered with in transit, which is
+        // what makes SMB relay attacks work. The server-side setting goes with
+        // it: they are a pair in every hardening benchmark, and signing only one
+        // side leaves the other able to negotiate an unsigned session.
+        for (key, label) in [
+            (LANMAN_WORKSTATION, "client"),
+            (LANMAN_SERVER, "server"),
+        ] {
+            let error = registry_ops::set_dword(key, "RequireSecuritySignature", 1)
+                .await
+                .err();
+            details.push(match &error {
+                None => format!(
+                    "✓ Microsoft network {label}: digitally sign communications (always)"
+                ),
+                Some(e) => format!("✗ Failed: {e}"),
+            });
+            all_success &= error.is_none();
+        }
+
+        // Remote desktop sharing off.
+        //
+        // fDenyTSConnections is the switch the Settings UI toggles. The policy
+        // key is set too: a policy value overrides the local one, so an image
+        // with the policy set to "allow" would otherwise keep RDP listening no
+        // matter what the local setting said.
+        for (key, label) in [
+            (TERMINAL_SERVER, "Remote desktop sharing turned off"),
+            (TERMINAL_SERVICES_POLICY, "Remote desktop sharing denied by policy"),
+        ] {
+            let error = registry_ops::set_dword(key, "fDenyTSConnections", 1)
+                .await
+                .err();
+            details.push(match &error {
+                None => format!("✓ {label}"),
+                Some(e) => format!("✗ Failed: {e}"),
+            });
+            all_success &= error.is_none();
+        }
 
         TaskResult {
             task_name: self.name.clone(),
@@ -180,7 +210,30 @@ impl Task for GroupPolicyTask {
             ui::markup_line("[red]? Internet Connection Sharing is not disabled[/]");
         }
 
-        hide_user_ok && cad_ok && anon_ok && ics_ok
+        let client_signing_ok =
+            reg_dword_equals(LANMAN_WORKSTATION, "RequireSecuritySignature", 1).await;
+        let server_signing_ok =
+            reg_dword_equals(LANMAN_SERVER, "RequireSecuritySignature", 1).await;
+        // fDenyTSConnections = 1 means Remote Desktop is refused.
+        let rdp_ok = reg_dword_equals(TERMINAL_SERVER, "fDenyTSConnections", 1).await;
+
+        if !client_signing_ok {
+            ui::markup_line("[red]? Microsoft network client does not require SMB signing[/]");
+        }
+        if !server_signing_ok {
+            ui::markup_line("[red]? Microsoft network server does not require SMB signing[/]");
+        }
+        if !rdp_ok {
+            ui::markup_line("[red]? Remote desktop sharing is not turned off[/]");
+        }
+
+        hide_user_ok
+            && cad_ok
+            && anon_ok
+            && ics_ok
+            && client_signing_ok
+            && server_signing_ok
+            && rdp_ok
     }
 }
 
@@ -196,24 +249,24 @@ HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Syst
 
     #[test]
     fn parse_reg_dword_reads_the_named_value() {
-        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "dontdisplaylastusername"), Some(1));
-        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(0));
+        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "dontdisplaylastusername"), Some(1));
+        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(0));
     }
 
     #[test]
     fn parse_reg_dword_is_case_insensitive_on_the_value_name() {
-        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "DONTDISPLAYLASTUSERNAME"), Some(1));
+        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DONTDISPLAYLASTUSERNAME"), Some(1));
     }
 
     #[test]
     fn parse_reg_dword_returns_none_when_absent() {
-        assert_eq!(parse_reg_dword(REG_QUERY_OUTPUT, "restrictanonymous"), None);
+        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "restrictanonymous"), None);
     }
 
     #[test]
     fn a_present_but_wrong_value_is_distinguishable() {
         // The old verify only checked that `reg query` exited 0, so a value
         // present with the wrong contents passed verification.
-        assert_ne!(parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(1));
+        assert_ne!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(1));
     }
 }

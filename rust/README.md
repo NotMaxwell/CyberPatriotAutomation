@@ -148,17 +148,30 @@ wrong file — pass `--readme` explicitly.
 | `-s`, `--service-management` | Services (uses README critical/prohibited lists) |
 | `-t`, `--audit-policy` | Audit policy and security registry settings |
 | `-f`, `--firewall` | Firewall profiles, ports and rules |
-| `-h`, `--security-hardening` | Registry hardening and Windows features |
+| `-H`, `--security-hardening` | Registry hardening and Windows features |
 | `-m`, `--media-scan` | Prohibited media and hacking-tool scan |
 | `--software-updates` | Check installed apps against latest versions and update |
 | `--log <path>` | Write the run log here instead of the default desktop path |
 | `-V`, `--version` | Print version and build date, then exit |
 
-> [!WARNING]
-> **`-h` means `--security-hardening`, not help.** There is no help flag, and
-> unrecognised arguments are ignored. Because "no task flag given" is treated as
-> "run everything", `--help`, `-?` or **no arguments at all** begin a full
-> destructive run. Pass `--dry-run` first.
+Add `-h`, `--help`, `-?` or `/?` to print this table and exit.
+
+> [!IMPORTANT]
+> **Running everything must be asked for: pass `--all`.** A bare invocation now
+> prints this help and changes nothing. It used to mean "run every task", so
+> double-clicking the executable — or running it to see what it did — began a
+> full destructive run against the machine.
+>
+> An *unrecognised* argument is likewise rejected, with exit code 2, and changes
+> nothing. It used to be ignored, and because "no task flag given" meant "run
+> everything", a typo — or `--help`, which was not a flag — started that same
+> destructive run.
+>
+> Pass `--dry-run` first on an unfamiliar image.
+
+> [!NOTE]
+> `-h` is **help**. Security hardening moved to `-H` when the help flag was
+> added; `--security-hardening` is unchanged.
 
 > [!NOTE]
 > Five tasks have no individual flag and run **only** under `--all`: software

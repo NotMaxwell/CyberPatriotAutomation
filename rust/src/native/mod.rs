@@ -23,6 +23,10 @@ pub mod audit_policy;
 pub mod firewall;
 #[cfg(windows)]
 pub mod installed_software;
+#[cfg(windows)]
+pub mod registry;
+#[cfg(windows)]
+pub mod services;
 
 /// Encode a Rust string as a null-terminated UTF-16 buffer for the Win32 `W`
 /// entry points.

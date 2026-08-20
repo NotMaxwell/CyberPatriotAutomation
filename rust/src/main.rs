@@ -37,6 +37,89 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
     args.iter().any(|a| flags.contains(&a.as_str()))
 }
 
+/// Every accepted flag, with the description shown by `--help`.
+///
+/// This is the single source of truth for both the help text and the
+/// unrecognised-argument check, so a new flag cannot be accepted without also
+/// being documented.
+const FLAGS: &[(&str, &str, &str)] = &[
+    ("--help", "-h", "Show this help and exit"),
+    ("--version", "-V", "Print the version and build date, then exit"),
+    ("--readme <path>", "-r", "Read the competition README at <path>"),
+    ("--auto-readme", "-R", "Find the README automatically"),
+    ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
+    ("--dry-run", "-d", "Report what would change without changing it"),
+    ("--all", "", "Run every task (the default when no task is named)"),
+    ("--password-policy", "-p", "Password and lockout policy"),
+    ("--account-permissions", "-a", "Account permissions and group membership"),
+    ("--user-management", "-u", "Create, remove and correct user accounts"),
+    ("--service-management", "-s", "Enable required and disable insecure services"),
+    ("--audit-policy", "-t", "Audit policy and security event logging"),
+    ("--firewall", "-f", "Windows Firewall profiles and rules"),
+    ("--security-hardening", "-H", "General security hardening"),
+    ("--media-scan", "-m", "Find and remove prohibited media"),
+    ("--software-updates", "", "Update installed software"),
+    ("--log <path>", "", "Write the run log to <path>"),
+];
+
+/// Flags that consume the following argument as their value.
+const VALUE_FLAGS: &[&str] = &["--readme", "-r", "--log"];
+
+/// The first argument that is not a flag this tool accepts, if any.
+fn first_unknown_argument(args: &[String]) -> Option<String> {
+    let mut known: Vec<&str> = Vec::new();
+    for (long, short, _) in FLAGS {
+        // The table spells value-taking flags as "--readme <path>".
+        known.push(long.split(' ').next().unwrap_or(long));
+        if !short.is_empty() {
+            known.push(short);
+        }
+    }
+    // Accepted as help but deliberately absent from the table, which lists one
+    // spelling per flag.
+    known.extend_from_slice(&["-?", "/?"]);
+
+    let mut skip_next = false;
+    for arg in args {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if VALUE_FLAGS.contains(&arg.as_str()) {
+            skip_next = true;
+            continue;
+        }
+        if !known.contains(&arg.as_str()) {
+            return Some(arg.clone());
+        }
+    }
+    None
+}
+
+fn print_help() {
+    println!(
+        "CyberPatriot Automation Tool {}\n",
+        app_config::version_string()
+    );
+    println!("USAGE:");
+    println!("    cyberpatriot-automation [OPTIONS]\n");
+    println!("Run as Administrator. With no task named, every task runs.");
+    println!("Pass --dry-run first to see what would change.\n");
+    println!("OPTIONS:");
+    for (long, short, description) in FLAGS {
+        let flag = if short.is_empty() {
+            format!("    {long}")
+        } else {
+            format!("    {short}, {long}")
+        };
+        println!("{flag:<34}{description}");
+    }
+    println!("\nEXAMPLES:");
+    println!("    cyberpatriot-automation --auto-readme --parse-readme   # read-only");
+    println!("    cyberpatriot-automation --auto-readme --dry-run        # preview");
+    println!("    cyberpatriot-automation --auto-readme --all            # apply");
+}
+
 async fn with_spinner<T, F: Future<Output = T>>(message: &str, fut: F) -> T {
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(100));
@@ -49,6 +132,26 @@ async fn with_spinner<T, F: Future<Output = T>>(message: &str, fut: F) -> T {
 
 async fn run_automation() {
     let cli_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Help before anything else, and before the run log opens.
+    if has_flag(&cli_args, &["--help", "-h", "-?", "/?"]) {
+        print_help();
+        return;
+    }
+
+    // Reject anything unrecognised rather than letting it fall through.
+    //
+    // Every flag used to be matched by name and anything else ignored, while
+    // "no task flag given" meant "run everything" - so a typo, or `--help`
+    // itself, silently began a full destructive run instead of doing nothing.
+    if let Some(unknown) = first_unknown_argument(&cli_args) {
+        ui::markup_line(&format!(
+            "[red]Unrecognised argument: {}[/]",
+            ui::escape(&unknown)
+        ));
+        ui::markup_line("[dim]Run with --help to see the available options.[/]");
+        std::process::exit(2);
+    }
 
     // Answer "which build is this?" without needing a log or a file listing.
     if has_flag(&cli_args, &["--version", "-V"]) {
@@ -72,7 +175,7 @@ async fn run_automation() {
     let run_service_management = has_flag(&cli_args, &["--service-management", "-s"]);
     let run_audit_policy = has_flag(&cli_args, &["--audit-policy", "-t"]);
     let run_firewall = has_flag(&cli_args, &["--firewall", "-f"]);
-    let run_security_hardening = has_flag(&cli_args, &["--security-hardening", "-h"]);
+    let run_security_hardening = has_flag(&cli_args, &["--security-hardening", "-H"]);
     let run_media_scan = has_flag(&cli_args, &["--media-scan", "-m"]);
     let run_software_updates = has_flag(&cli_args, &["--software-updates"]);
     let parse_readme_only = has_flag(&cli_args, &["--parse-readme"]);
@@ -82,17 +185,32 @@ async fn run_automation() {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(run_log::default_log_path);
 
-    let run_all = has_flag(&cli_args, &["--all"])
-        || (!run_password_policy
-            && !run_account_permissions
-            && !run_user_management
-            && !run_service_management
-            && !run_audit_policy
-            && !run_firewall
-            && !run_security_hardening
-            && !run_media_scan
-            && !run_software_updates
-            && !parse_readme_only);
+    let any_task_named = run_password_policy
+        || run_account_permissions
+        || run_user_management
+        || run_service_management
+        || run_audit_policy
+        || run_firewall
+        || run_security_hardening
+        || run_media_scan
+        || run_software_updates
+        || parse_readme_only;
+
+    // Running everything has to be asked for.
+    //
+    // "No task flag given" used to mean "run every task", so simply launching
+    // the executable - by double-clicking it, or to see what it does - began a
+    // full destructive run against the machine. Nothing about a bare invocation
+    // says "change this system", so it now prints the help and stops.
+    let run_all = has_flag(&cli_args, &["--all"]);
+    if !run_all && !any_task_named {
+        print_help();
+        ui::markup_line(
+            "\n[yellow]No task selected. Pass --all to run every task, or name individual tasks.[/]",
+        );
+        ui::markup_line("[dim]Pass --dry-run first to preview the changes.[/]");
+        return;
+    }
 
     // Auto-find the README if requested and none supplied.
     let mut discovery_attempts: Vec<String> = Vec::new();
@@ -590,5 +708,78 @@ fn bar_color(value: f64) -> BarColor {
         BarColor::Yellow
     } else {
         BarColor::Red
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn known_flags_are_accepted() {
+        for flag in ["--help", "-h", "-?", "/?", "--dry-run", "--all", "-H"] {
+            assert_eq!(
+                first_unknown_argument(&args(&[flag])),
+                None,
+                "{flag} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_flag_is_reported() {
+        assert_eq!(
+            first_unknown_argument(&args(&["--dry-run", "--oops"])),
+            Some("--oops".to_string())
+        );
+    }
+
+    #[test]
+    fn a_typo_of_a_known_flag_is_not_silently_ignored() {
+        // The dangerous case: this used to set no task flag, which meant "run
+        // everything" rather than "you mistyped --dry-run".
+        assert_eq!(
+            first_unknown_argument(&args(&["--dryrun"])),
+            Some("--dryrun".to_string())
+        );
+    }
+
+    #[test]
+    fn value_flags_consume_their_argument() {
+        // The path is a value, not an unrecognised flag.
+        assert_eq!(
+            first_unknown_argument(&args(&["--readme", "C:\\CyberPatriot\\README.url"])),
+            None
+        );
+        assert_eq!(first_unknown_argument(&args(&["--log", "run.txt", "--all"])), None);
+        assert_eq!(first_unknown_argument(&args(&["-r", "readme.html"])), None);
+    }
+
+    #[test]
+    fn security_hardening_no_longer_claims_the_help_flag() {
+        assert_eq!(first_unknown_argument(&args(&["-H"])), None);
+        assert_eq!(first_unknown_argument(&args(&["-h"])), None);
+    }
+
+    #[test]
+    fn no_arguments_is_not_an_error() {
+        assert_eq!(first_unknown_argument(&[]), None);
+    }
+
+    #[test]
+    fn every_documented_flag_is_accepted_by_the_validator() {
+        // The help text and the validator share FLAGS, so they cannot disagree -
+        // this pins that down.
+        for (long, short, _) in FLAGS {
+            let name = long.split(' ').next().unwrap();
+            assert_eq!(first_unknown_argument(&args(&[name])), None, "{name}");
+            if !short.is_empty() {
+                assert_eq!(first_unknown_argument(&args(&[short])), None, "{short}");
+            }
+        }
     }
 }

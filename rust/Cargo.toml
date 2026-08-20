@@ -7,7 +7,7 @@
 name = "cyberpatriot-automation"
 # Bump with every behavioural change and record it in CHANGELOG.md. The run log
 # stamps this value in its header and file name so a log ties back to its build.
-version = "1.10.0"
+version = "1.11.0"
 edition = "2021"
 build = "build.rs"
 authors = ["Maxwell McCormick"]
@@ -52,6 +52,8 @@ windows = { version = "0.59", features = [
     # Windows Firewall configuration, which is a COM object.
     "Win32_NetworkManagement_WindowsFirewall",
     "Win32_System_Com",
+    # Service control manager.
+    "Win32_System_Services",
     # Installed-software inventory from the uninstall keys.
     "Win32_System_Registry",
 ] }
@@ -59,7 +61,22 @@ windows = { version = "0.59", features = [
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
+# The shipping profile. Measured on the win-x64 cross build: 2.50 MB with cargo's
+# defaults for codegen-units and panic, 2.12 MB with the settings below.
 [profile.release]
+# Optimise across crate boundaries, not just within each crate.
 lto = true
-strip = true
+# One codegen unit lets LLVM see the whole crate at once. Slower to build and
+# worth roughly 8% of the binary.
+codegen-units = 1
+# Optimise for size rather than speed. The run is dominated by process spawns,
+# network fetches and Defender scans, so faster codegen buys nothing measurable
+# while `opt-level = 3` costs about 900 KB.
 opt-level = "z"
+# Abort instead of unwinding. Nothing here calls `catch_unwind`, no test uses
+# `#[should_panic]`, and the run log is flushed by an explicit `finish_log` call
+# rather than a `Drop` impl - so a panic loses the log either way and unwinding
+# buys nothing. Worth about 166 KB.
+panic = "abort"
+# Drop symbols; the binary ships to a competition image, not to a debugger.
+strip = true
