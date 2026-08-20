@@ -46,6 +46,14 @@ pub fn parse_csv_line(line: &str) -> Vec<String> {
 /// the surrounding prose - a user called "admin" matched the word
 /// "Administrators" in the header and was wrongly treated as an administrator.
 pub async fn local_group_members(group: &str) -> Vec<String> {
+    // netapi32 returns the members as data, so there is nothing to parse and
+    // nothing that depends on the console language. The parser below stays as
+    // the fallback for the rare case the call itself fails.
+    #[cfg(windows)]
+    if let Some(members) = crate::native::accounts::group_members(group) {
+        return members;
+    }
+
     let (success, output, _e) =
         command::execute("net", Some(&format!("localgroup \"{group}\""))).await;
     if !success {

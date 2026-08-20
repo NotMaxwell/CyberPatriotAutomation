@@ -92,11 +92,26 @@ pub async fn execute_with_timeout(
     arguments: Option<&str>,
     limit: Duration,
 ) -> CommandOutput {
+    let (code, output, error) = execute_for_exit_code(command, arguments, limit).await;
+    (code == Some(0), output, error)
+}
+
+/// Execute a command and report its exit code rather than just success.
+///
+/// Some tools use a non-zero exit code to mean "done, with a caveat" -
+/// Chocolatey returns 3010 and 1641 for "succeeded, reboot pending". Treating
+/// those as failure would report a completed install as failed and re-run it.
+/// `None` means the process never started or was killed at the timeout.
+pub async fn execute_for_exit_code(
+    command: &str,
+    arguments: Option<&str>,
+    limit: Duration,
+) -> (Option<i32>, String, Option<String>) {
     let mut cmd = build_command(command, arguments);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return (false, String::new(), Some(e.to_string())),
+        Err(e) => return (None, String::new(), Some(e.to_string())),
     };
 
     let stdout = child.stdout.take();
@@ -118,14 +133,14 @@ pub async fn execute_with_timeout(
             let output = String::from_utf8_lossy(&out).into_owned();
             let error = String::from_utf8_lossy(&err).into_owned();
             let error = if error.is_empty() { None } else { Some(error) };
-            (status.success(), output, error)
+            (status.code(), output, error)
         }
-        Ok(Err(e)) => (false, String::new(), Some(e.to_string())),
+        Ok(Err(e)) => (None, String::new(), Some(e.to_string())),
         Err(_) => {
             let _ = child.start_kill();
             let (out, _err) = reader.await.unwrap_or_default();
             (
-                false,
+                None,
                 String::from_utf8_lossy(&out).into_owned(),
                 Some("Process timed out".to_string()),
             )

@@ -19,9 +19,9 @@ use owo_colors::OwoColorize;
 pub fn init() {
     #[cfg(windows)]
     {
-        use windows_sys::Win32::System::Console::{
-            GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-            STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        use windows::Win32::System::Console::{
+            GetConsoleMode, GetStdHandle, SetConsoleMode, CONSOLE_MODE,
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
         };
 
         // SAFETY: these are simple console-handle queries. A failure at any step
@@ -29,13 +29,15 @@ pub fn init() {
         // output exactly as it would have been.
         unsafe {
             for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
-                let handle = GetStdHandle(which);
-                if handle.is_null() {
+                let Ok(handle) = GetStdHandle(which) else {
+                    continue;
+                };
+                if handle.is_invalid() {
                     continue;
                 }
-                let mut mode = 0u32;
-                if GetConsoleMode(handle, &mut mode) != 0 {
-                    SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+                let mut mode = CONSOLE_MODE::default();
+                if GetConsoleMode(handle, &mut mode).is_ok() {
+                    let _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
                 }
             }
         }

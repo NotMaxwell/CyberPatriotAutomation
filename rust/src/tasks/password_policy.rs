@@ -29,6 +29,22 @@ impl PasswordPolicyTask {
     async fn get_current_password_policy() -> PasswordPolicyInfo {
         let mut policy = PasswordPolicyInfo::default();
 
+        // Read the policy as data first. `net accounts` prints a localised
+        // table, and on a non-English image every line test below fails to
+        // match, leaving the policy at its zero defaults - which reads as
+        // "already compliant".
+        #[cfg(windows)]
+        if let Some(values) = crate::native::accounts::password_policy() {
+            policy.min_password_length = values.min_password_length as i32;
+            policy.max_password_age = values.max_password_age_days as i32;
+            policy.min_password_age = values.min_password_age_days as i32;
+            policy.password_history_count = values.password_history_length as i32;
+            policy.lockout_threshold = values.lockout_threshold as i32;
+            policy.lockout_duration = values.lockout_duration_minutes as i32;
+            policy.lockout_observation_window = values.lockout_observation_minutes as i32;
+            return policy;
+        }
+
         let (success, output, _) = command::execute("net", Some("accounts")).await;
         if success && !output.is_empty() {
             for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()) {

@@ -37,7 +37,7 @@ pub use service_management::ServiceManagementTask;
 pub use shared_folders_audit::SharedFoldersAuditTask;
 pub use software_management::SoftwareManagementTask;
 pub use software_update::{
-    parse_installed_software, parse_winget_upgrades, AvailableUpdate, InstalledApp,
+    parse_choco_outdated, parse_installed_software, AvailableUpdate, InstalledApp,
     SoftwareUpdateTask,
 };
 pub use suspicious_scheduled_tasks_audit::SuspiciousScheduledTasksAuditTask;

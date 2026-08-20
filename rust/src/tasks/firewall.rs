@@ -76,6 +76,28 @@ impl FirewallConfigurationTask {
 
     async fn enable_firewall_profiles(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Enabling firewall for all profiles...[/]");
+
+        // INetFwPolicy2 addresses the profiles by enum, so this works whatever
+        // the display language, reports a real HRESULT on failure, and avoids
+        // the PowerShell launch that dominated this task's runtime.
+        #[cfg(windows)]
+        match crate::native::firewall::enable_all_profiles() {
+            Ok(profiles) => {
+                fixes.push(format!(
+                    "Enabled firewall for {} profiles",
+                    profiles.join(", ")
+                ));
+                ui::markup_line("[green]? Firewall enabled for all profiles[/]");
+                return;
+            }
+            Err(reason) => {
+                ui::markup_line(&format!(
+                    "[yellow]! Firewall COM path unavailable ({}); falling back[/]",
+                    ui::escape(&reason)
+                ));
+            }
+        }
+
         let (success, _o, error) =
             command::powershell("Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True")
                 .await;

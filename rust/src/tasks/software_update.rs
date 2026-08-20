@@ -8,9 +8,17 @@
 //!   registry keys. This always works, offline, and covers everything that
 //!   registers itself - far more than `wmic product`, which only knows about MSI
 //!   packages and is slow enough to be disruptive.
-//! - *What is the latest version?* Requires a package catalogue. `winget` is the
-//!   one shipped by Microsoft, and `winget upgrade` reports the installed and
-//!   available versions side by side, which is exactly the comparison needed.
+//! - *What is the latest version?* Requires a package catalogue. Chocolatey is
+//!   used here: `choco outdated` reports the installed and available versions
+//!   side by side, which is exactly the comparison needed, and it is installable
+//!   on any image rather than shipping only with certain Windows SKUs.
+//!
+//! Chocolatey is preferred over winget for two practical reasons. It installs
+//! from a script on any supported Windows, including the LTSC images
+//! CyberPatriot uses, where winget's "App Installer" package is absent and
+//! awkward to add. And `--limit-output` emits pipe-delimited records, so the
+//! results need no fixed-width table parsing - which is what the winget path
+//! required and where it was most fragile.
 //!
 //! Operating-system patches are deliberately out of scope here: Windows Update
 //! is configured by the audit-policy task, which owns those settings.
@@ -22,14 +30,19 @@ use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
 use std::time::Duration;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Installing an update can involve a large download, so it needs far longer
 /// than the default two-minute command ceiling.
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// Listing the catalogue can be slow on a cold source index.
-const WINGET_QUERY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+const CHOCO_QUERY_TIMEOUT: Duration = Duration::from_secs(5 * 60);
+
+/// Bootstrapping Chocolatey downloads and runs its installer.
+const CHOCO_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// Exit codes Chocolatey uses for "succeeded, but a reboot is pending".
+const CHOCO_SUCCESS_CODES: [i32; 5] = [0, 1605, 1614, 1641, 3010];
 
 /// Enumerate installed software from all three uninstall locations: 64-bit,
 /// 32-bit-on-64-bit, and per-user. Entries without a `DisplayName` are stubs
@@ -56,7 +69,7 @@ pub struct InstalledApp {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AvailableUpdate {
     pub name: String,
-    /// winget package identifier, used to target the upgrade precisely.
+    /// Chocolatey package id, used to target the upgrade precisely.
     pub id: String,
     pub current_version: String,
     pub available_version: String,
@@ -69,7 +82,7 @@ pub struct SoftwareUpdateTask {
     readme_data: Option<ReadmeData>,
     installed: Vec<InstalledApp>,
     updates: Vec<AvailableUpdate>,
-    winget_available: bool,
+    choco_available: bool,
 }
 
 impl SoftwareUpdateTask {
@@ -83,7 +96,7 @@ impl SoftwareUpdateTask {
             readme_data: None,
             installed: Vec::new(),
             updates: Vec::new(),
-            winget_available: false,
+            choco_available: false,
         }
     }
 
@@ -91,102 +104,88 @@ impl SoftwareUpdateTask {
         self.readme_data = Some(data);
     }
 
-    /// Is `winget` present and runnable?
+    /// The Chocolatey executable, or `None` when it is not installed.
     ///
-    /// It ships with Windows 11 and recent Windows 10 builds, but *not* with
-    /// LTSC images - which CyberPatriot uses - so its absence has to be handled
-    /// as a normal outcome rather than an error.
-    async fn detect_winget() -> bool {
-        let (success, output, _e) = command::execute("winget", Some("--version")).await;
-        success && !output.trim().is_empty()
+    /// The bootstrap adds Chocolatey to the machine PATH, but a process that is
+    /// already running keeps the environment it started with, so `choco` stays
+    /// unresolvable in this process until it restarts. Falling back to the
+    /// standard install path is what makes an install usable in the same run.
+    async fn choco_path() -> Option<String> {
+        let (success, output, _e) = command::execute("choco", Some("--version")).await;
+        if success && !output.trim().is_empty() {
+            return Some("choco".to_string());
+        }
+
+        let program_data =
+            std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        let absolute = std::path::Path::new(&program_data)
+            .join("chocolatey")
+            .join("bin")
+            .join("choco.exe");
+        if !absolute.exists() {
+            return None;
+        }
+
+        let absolute = absolute.to_string_lossy().into_owned();
+        let (success, output, _e) = command::execute(&absolute, Some("--version")).await;
+        (success && !output.trim().is_empty()).then_some(absolute)
     }
 
-    /// Ensure `winget` is usable, installing it if it is missing.
+    /// Is Chocolatey present and runnable?
+    async fn detect_choco() -> bool {
+        Self::choco_path().await.is_some()
+    }
+
+    /// Ensure Chocolatey is usable, installing it if it is missing.
     ///
-    /// winget ships as the "App Installer" MSIX package. It is absent from LTSC
-    /// images and from some server SKUs, and is occasionally present but
-    /// unregistered for the current user - which is why re-registration is tried
-    /// first, being far cheaper than a download.
-    ///
-    /// The `aka.ms` links are Microsoft's own permanent redirects to the current
-    /// release, so no version is pinned here and the newest package is always
-    /// fetched.
-    async fn ensure_winget() -> bool {
-        if Self::detect_winget().await {
+    /// This is the documented bootstrap. TLS 1.2 is forced because Windows
+    /// PowerShell 5.1 still offers older protocols that the Chocolatey community
+    /// repository refuses, which otherwise fails the download with an error that
+    /// says nothing about TLS.
+    async fn ensure_choco() -> bool {
+        if Self::detect_choco().await {
             return true;
         }
 
-        ui::markup_line("[yellow]winget not available - attempting to install App Installer...[/]");
+        ui::markup_line("[yellow]Chocolatey not available - installing...[/]");
 
-        // Cheap path: the package is present but not registered for this user.
-        let (_ok, _o, _e) = command::powershell(
-            "Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
-        )
-        .await;
-        if Self::detect_winget().await {
-            ui::markup_line("[green]✓ winget re-registered for the current user[/]");
-            return true;
-        }
+        let script = "Set-ExecutionPolicy Bypass -Scope Process -Force; \
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))";
 
-        // Otherwise download the package and its runtime dependency. VCLibs must
-        // be installed first or the bundle is rejected for a missing dependency.
-        let temp = std::env::temp_dir();
-        let downloads = [
-            (
-                "https://aka.ms/Microsoft.VCLibs.x64.14.00.Desktop.appx",
-                temp.join("cpa_vclibs.appx"),
-                true, // a dependency; failure here is not necessarily fatal
-            ),
-            (
-                "https://aka.ms/getwinget",
-                temp.join("cpa_winget.msixbundle"),
-                false,
-            ),
-        ];
+        let (_ok, _o, error) =
+            command::powershell_with_timeout(script, CHOCO_BOOTSTRAP_TIMEOUT).await;
 
-        for (url, dest, optional) in &downloads {
-            ui::markup_line(&format!("[cyan]Downloading {}[/]", ui::escape(url)));
-            if let Err(reason) = command::download_file(url, dest).await {
-                ui::markup_line(&format!(
-                    "[yellow]⚠ Could not download {}: {}[/]",
-                    ui::escape(url),
-                    ui::escape(&reason)
-                ));
-                if !optional {
-                    ui::markup_line("[red]✗ Cannot install winget without the package[/]");
-                    return false;
-                }
-                continue;
-            }
-
-            let (ok, _o, error) = command::powershell(&format!(
-                "Add-AppxPackage -Path {}",
-                command::ps_quote(&dest.to_string_lossy())
-            ))
-            .await;
-            if ok {
-                ui::markup_line(&format!("[green]✓ Installed {}[/]", ui::escape(&dest.to_string_lossy())));
-            } else if !optional {
-                ui::markup_line(&format!(
-                    "[red]✗ Failed to install App Installer: {}[/]",
-                    ui::escape(&error.unwrap_or_default())
-                ));
-            }
-            let _ = std::fs::remove_file(dest);
-        }
-
-        if Self::detect_winget().await {
-            ui::markup_line("[green]✓ winget installed[/]");
+        // Re-detect regardless of the reported status: the installer can exit
+        // non-zero having produced a working install, and the new binary is only
+        // reachable by absolute path in this process.
+        if Self::detect_choco().await {
+            ui::markup_line("[green]✓ Chocolatey installed[/]");
             true
         } else {
-            ui::markup_line(
-                "[yellow]⚠ winget is still unavailable. Install 'App Installer' from the Microsoft Store to enable update checking.[/]",
-            );
+            ui::markup_line(&format!(
+                "[yellow]⚠ Chocolatey could not be installed: {}[/]",
+                ui::escape(&error.unwrap_or_else(|| "no reason reported".to_string()))
+            ));
             false
         }
     }
 
     async fn read_installed_software() -> Vec<InstalledApp> {
+        // Read the uninstall keys directly. The PowerShell query below asks for
+        // the same data, but pays a process launch and a CSV round-trip for it.
+        #[cfg(windows)]
+        if let Some(programs) = crate::native::installed_software::enumerate() {
+            return programs
+                .into_iter()
+                .map(|p| InstalledApp {
+                    name: p.name,
+                    version: p.version.unwrap_or_default(),
+                    publisher: p.publisher.unwrap_or_default(),
+                })
+                .collect();
+        }
+
         let (success, output, _e) =
             command::powershell_query(INSTALLED_SOFTWARE_QUERY).await;
         if !success {
@@ -196,19 +195,26 @@ impl SoftwareUpdateTask {
     }
 
     async fn read_available_updates() -> Vec<AvailableUpdate> {
-        // `--include-unknown` also lists packages whose installed version winget
-        // cannot determine; without it those are silently skipped and quietly
-        // stay out of date.
-        let (success, output, _e) = command::execute_with_timeout(
-            "winget",
-            Some("upgrade --include-unknown --accept-source-agreements"),
-            WINGET_QUERY_TIMEOUT,
+        let Some(choco) = Self::choco_path().await else {
+            return Vec::new();
+        };
+
+        // `--limit-output` drops the banner and summary and prints one
+        // pipe-delimited record per package, so nothing here parses a table or
+        // depends on the console language.
+        let (code, output, _e) = command::execute_for_exit_code(
+            &choco,
+            Some("outdated --limit-output --ignore-pinned"),
+            CHOCO_QUERY_TIMEOUT,
         )
         .await;
-        if !success {
-            return Vec::new();
+
+        // `choco outdated` exits 2 when it found outdated packages, which is the
+        // case this function exists to handle - so success alone is not the test.
+        match code {
+            Some(c) if CHOCO_SUCCESS_CODES.contains(&c) || c == 2 => parse_choco_outdated(&output),
+            _ => Vec::new(),
         }
-        parse_winget_upgrades(&output)
     }
 
     /// Names the README explicitly requires to be at the latest version.
@@ -301,27 +307,37 @@ impl SoftwareUpdateTask {
 
     /// Apply one update, returning the outcome message on failure.
     async fn apply_update(update: &AvailableUpdate) -> Result<(), String> {
-        // `--exact` on the id avoids matching a different package with a
-        // similar name; the agreement flags and `--disable-interactivity` keep
-        // winget from blocking on a prompt no one is there to answer.
+        let Some(choco) = Self::choco_path().await else {
+            return Err("Chocolatey is not installed".to_string());
+        };
+
+        // `-y` answers the confirmation prompt, and `--no-progress` keeps the
+        // download percentage out of the captured output.
         let args = format!(
-            "upgrade --id {} --exact --silent --accept-package-agreements --accept-source-agreements --disable-interactivity",
+            "upgrade {} -y --no-progress --limit-output",
             update.id
         );
-        let (success, output, error) =
-            command::execute_with_timeout("winget", Some(&args), UPDATE_TIMEOUT).await;
+        let (code, output, error) =
+            command::execute_for_exit_code(&choco, Some(&args), UPDATE_TIMEOUT).await;
 
-        if success {
-            return Ok(());
+        match code {
+            Some(c) if CHOCO_SUCCESS_CODES.contains(&c) => Ok(()),
+            _ => {
+                // Chocolatey puts the useful detail on stdout, not stderr.
+                let detail = error
+                    .filter(|e| !e.trim().is_empty())
+                    .or_else(|| {
+                        let trimmed = output.trim();
+                        (!trimmed.is_empty())
+                            .then(|| trimmed.lines().last().unwrap_or("").to_string())
+                    })
+                    .unwrap_or_else(|| match code {
+                        Some(c) => format!("Chocolatey exited with code {c}"),
+                        None => "Chocolatey did not complete".to_string(),
+                    });
+                Err(detail)
+            }
         }
-        let detail = error
-            .filter(|e| !e.trim().is_empty())
-            .or_else(|| {
-                let trimmed = output.trim();
-                (!trimmed.is_empty()).then(|| trimmed.lines().last().unwrap_or("").to_string())
-            })
-            .unwrap_or_else(|| "winget reported a failure".to_string());
-        Err(detail)
     }
 }
 
@@ -353,115 +369,50 @@ pub fn parse_installed_software(csv: &str) -> Vec<InstalledApp> {
     apps
 }
 
-/// Parse the table `winget upgrade` prints.
+/// Parse the records `choco outdated --limit-output` prints.
 ///
-/// winget emits a fixed-width table rather than anything machine-readable, and
-/// application names contain spaces, so columns cannot be recovered by
-/// splitting on whitespace. The header row locates where each column begins and
-/// every row is cut at those positions.
-///
-/// Positions are measured in **terminal display width**, not characters or
-/// bytes. winget pads its columns so they line up visually, and a CJK package
-/// name occupies two columns per character - so counting characters drifts off
-/// the column boundary exactly when the name is non-Latin, and counting bytes
-/// would additionally panic mid-character.
-pub fn parse_winget_upgrades(output: &str) -> Vec<AvailableUpdate> {
-    let lines = normalize_winget_lines(output);
-
-    let Some(header_idx) = lines.iter().position(|l| is_upgrade_header(l)) else {
-        return Vec::new();
-    };
-    let header = &lines[header_idx];
-
-    let Some(id_at) = column_start(header, "Id") else {
-        return Vec::new();
-    };
-    let Some(version_at) = column_start(header, "Version") else {
-        return Vec::new();
-    };
-    let Some(available_at) = column_start(header, "Available") else {
-        return Vec::new();
-    };
-    // "Source" is optional - it is absent when every entry came from one source.
-    let source_at = column_start(header, "Source").unwrap_or(usize::MAX);
-
-    let mut updates = Vec::new();
-    for line in lines.iter().skip(header_idx + 1) {
-        let trimmed = line.trim();
-        // The dashed rule under the header, and the blank line before the
-        // trailing "N upgrades available." summary, bound the data rows.
-        if trimmed.is_empty() {
-            if updates.is_empty() {
-                continue;
-            }
-            break;
-        }
-        if trimmed.chars().all(|c| c == '-') {
-            continue;
-        }
-
-        let name = slice_by_width(line, 0, id_at);
-        let id = slice_by_width(line, id_at, version_at);
-        let current_version = slice_by_width(line, version_at, available_at);
-        let available_version = slice_by_width(line, available_at, source_at);
-
-        // The summary line ("2 upgrades available.") has no id column content.
-        if name.is_empty() || id.is_empty() || available_version.is_empty() {
-            continue;
-        }
-
-        updates.push(AvailableUpdate {
-            name,
-            id,
-            current_version,
-            available_version,
-        });
-    }
-    updates
-}
-
-/// Strip progress-spinner artefacts and split into display lines.
-///
-/// winget animates progress by rewriting the current line with `\r`, so a naive
-/// split leaves spinner fragments interleaved with the table. Keeping only the
-/// text after the final `\r` on each line discards them.
-fn normalize_winget_lines(output: &str) -> Vec<String> {
+/// Each line is `name|current|available|pinned`. This replaced a fixed-width
+/// table parser written against `winget upgrade`, which had to locate columns by
+/// header offset and measure text by terminal display width so that a CJK
+/// package name - two columns wide per character but one `char` - did not shift
+/// every following field. None of that applies to a delimited format.
+pub fn parse_choco_outdated(output: &str) -> Vec<AvailableUpdate> {
     output
-        .split('\n')
-        .map(|line| line.rsplit('\r').next().unwrap_or(line).trim_end().to_string())
-        .filter(|line| !line.chars().all(|c| matches!(c, '-' | '\\' | '|' | '/' | ' ')) || line.is_empty())
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+
+            let fields: Vec<&str> = line.split('|').collect();
+            if fields.len() < 3 {
+                return None;
+            }
+
+            let name = fields[0].trim();
+            let current = fields[1].trim();
+            let available = fields[2].trim();
+            if name.is_empty() || available.is_empty() {
+                return None;
+            }
+
+            // A package already at the newest version is not an update. Chocolatey
+            // does not normally list these, but `--ignore-pinned` changes what is
+            // included, so the check is cheap insurance.
+            if current == available {
+                return None;
+            }
+
+            Some(AvailableUpdate {
+                // Chocolatey has one id, used both to identify and to display.
+                name: name.to_string(),
+                id: name.to_string(),
+                current_version: current.to_string(),
+                available_version: available.to_string(),
+            })
+        })
         .collect()
-}
-
-fn is_upgrade_header(line: &str) -> bool {
-    line.contains("Name") && line.contains("Id") && line.contains("Version") && line.contains("Available")
-}
-
-/// Display-width position at which a header column begins.
-fn column_start(header: &str, label: &str) -> Option<usize> {
-    let byte_idx = header.find(label)?;
-    Some(header[..byte_idx].width())
-}
-
-/// Take the part of `line` lying between two display-width positions.
-///
-/// Characters are consumed until `from` is reached and collected until `to`.
-/// A wide character straddling a boundary is assigned to the column it starts
-/// in, which matches how the padding was generated.
-fn slice_by_width(line: &str, from: usize, to: usize) -> String {
-    let mut column = 0usize;
-    let mut out = String::new();
-    for ch in line.chars() {
-        let w = ch.width().unwrap_or(0);
-        if column >= to {
-            break;
-        }
-        if column >= from {
-            out.push(ch);
-        }
-        column += w;
-    }
-    out.trim().to_string()
 }
 
 #[async_trait]
@@ -485,10 +436,10 @@ impl Task for SoftwareUpdateTask {
         // Detect only. Reading system state must observe, not change the
         // machine - installing a package here would also mean `--dry-run`
         // installed software before reaching the dry-run check.
-        self.winget_available = Self::detect_winget().await;
-        if !self.winget_available {
+        self.choco_available = Self::detect_choco().await;
+        if !self.choco_available {
             ui::markup_line(
-                "[yellow]⚠ winget is not available - cannot determine latest versions[/]",
+                "[yellow]⚠ Chocolatey is not available - cannot determine latest versions[/]",
             );
             return system_info;
         }
@@ -510,30 +461,30 @@ impl Task for SoftwareUpdateTask {
 
         if self.installed.is_empty() && self.updates.is_empty() {
             self.installed = Self::read_installed_software().await;
-            self.winget_available = Self::detect_winget().await;
+            self.choco_available = Self::detect_choco().await;
         }
 
         // Installing the package manager is itself a change to the machine, so
         // it belongs here rather than in the read phase, and never under
         // `--dry-run`.
-        if !self.winget_available && !self.dry_run {
-            self.winget_available = Self::ensure_winget().await;
+        if !self.choco_available && !self.dry_run {
+            self.choco_available = Self::ensure_choco().await;
         }
-        if self.winget_available && self.updates.is_empty() {
+        if self.choco_available && self.updates.is_empty() {
             self.updates = Self::read_available_updates().await;
         }
 
         // Without a catalogue there is no "latest version" to compare against,
         // so the task cannot do its job. Say so plainly rather than reporting a
         // vacuous success.
-        if !self.winget_available {
+        if !self.choco_available {
             result.success = false;
             result.message = format!(
-                "Inventoried {} application(s) but could not check for updates: winget is not installed.",
+                "Inventoried {} application(s) but could not check for updates: Chocolatey is not installed.",
                 self.installed.len()
             );
             result.error_details = Some(
-                "winget (Windows Package Manager) is required to determine the latest available \
+                "Chocolatey is required to determine the latest available \
                  versions. Automatic installation of the App Installer package was attempted and \
                  did not succeed - most often because the image has no network access. Install \
                  'App Installer' from the Microsoft Store, or update the listed applications \
@@ -638,8 +589,8 @@ impl Task for SoftwareUpdateTask {
     }
 
     async fn verify(&mut self) -> bool {
-        if !self.winget_available {
-            ui::markup_line("[yellow]? Cannot verify update status without winget[/]");
+        if !self.choco_available {
+            ui::markup_line("[yellow]? Cannot verify update status without Chocolatey[/]");
             return false;
         }
 
@@ -665,67 +616,56 @@ impl Task for SoftwareUpdateTask {
 mod tests {
     use super::*;
 
-    const WINGET_UPGRADE_OUTPUT: &str = "\
-Name                             Id                            Version      Available    Source
--------------------------------------------------------------------------------------------------
-Microsoft Edge                   Microsoft.Edge                120.0.2210   121.0.2277   winget
-7-Zip 22.01 (x64)                7zip.7zip                     22.01        23.01        winget
-Mozilla Firefox (x64 en-US)      Mozilla.Firefox               115.0        122.0.1      winget
-
-3 upgrades available.
+    const CHOCO_OUTDATED_OUTPUT: &str = "\
+Microsoft Edge|120.0.2210|121.0.2277|false
+7zip|22.01|23.01|false
+firefox|115.0|122.0.1|false
 ";
 
     #[test]
-    fn winget_table_is_split_on_header_column_offsets() {
-        let updates = parse_winget_upgrades(WINGET_UPGRADE_OUTPUT);
+    fn choco_records_are_split_on_the_delimiter() {
+        let updates = parse_choco_outdated(CHOCO_OUTDATED_OUTPUT);
         assert_eq!(updates.len(), 3, "got {updates:#?}");
 
-        // Names contain spaces and parentheses, so whitespace splitting would
-        // mangle them; column offsets keep them intact.
-        assert_eq!(updates[1].name, "7-Zip 22.01 (x64)");
-        assert_eq!(updates[1].id, "7zip.7zip");
-        assert_eq!(updates[1].current_version, "22.01");
-        assert_eq!(updates[1].available_version, "23.01");
+        // A name containing spaces stays intact: only `|` separates fields.
+        assert_eq!(updates[0].name, "Microsoft Edge");
+        assert_eq!(updates[0].current_version, "120.0.2210");
+        assert_eq!(updates[0].available_version, "121.0.2277");
 
-        assert_eq!(updates[2].name, "Mozilla Firefox (x64 en-US)");
+        assert_eq!(updates[1].name, "7zip");
+        assert_eq!(updates[1].id, "7zip");
         assert_eq!(updates[2].available_version, "122.0.1");
     }
 
     #[test]
-    fn winget_summary_line_is_not_parsed_as_a_package() {
-        let updates = parse_winget_upgrades(WINGET_UPGRADE_OUTPUT);
-        assert!(
-            !updates.iter().any(|u| u.name.contains("upgrades available")),
-            "summary line leaked into results: {updates:#?}"
-        );
-    }
-
-    #[test]
-    fn winget_progress_spinner_artifacts_are_discarded() {
-        // winget rewrites the line with \r while it works; the table follows.
-        let noisy = format!("  -\r  \\\r  |\r  /\r{WINGET_UPGRADE_OUTPUT}");
-        let updates = parse_winget_upgrades(&noisy);
-        assert_eq!(updates.len(), 3, "got {updates:#?}");
-        assert_eq!(updates[0].name, "Microsoft Edge");
-    }
-
-    #[test]
     fn no_upgrades_yields_no_results() {
-        assert!(parse_winget_upgrades("No installed package found matching input criteria.").is_empty());
-        assert!(parse_winget_upgrades("").is_empty());
+        assert!(parse_choco_outdated("").is_empty());
+        assert!(parse_choco_outdated("\n  \n").is_empty());
     }
 
     #[test]
-    fn non_ascii_package_names_do_not_panic_and_keep_their_columns() {
-        // Byte-offset slicing would panic mid-character here.
-        let output = "\
-Name                    Id                  Version   Available  Source
-------------------------------------------------------------------------
-メモ帳                  Example.Notepad     1.0       2.0        winget
-";
-        let updates = parse_winget_upgrades(output);
+    fn malformed_records_are_skipped_rather_than_panicking() {
+        // Too few fields, and an empty available version.
+        let output = "brokenline\nonly|two\ngood|1.0|2.0|false\nempty|1.0||false\n";
+        let updates = parse_choco_outdated(output);
         assert_eq!(updates.len(), 1, "got {updates:#?}");
-        assert_eq!(updates[0].id, "Example.Notepad");
+        assert_eq!(updates[0].name, "good");
+    }
+
+    #[test]
+    fn packages_already_current_are_not_reported_as_updates() {
+        let updates = parse_choco_outdated("uptodate|2.0|2.0|false\nstale|1.0|2.0|false\n");
+        assert_eq!(updates.len(), 1, "got {updates:#?}");
+        assert_eq!(updates[0].name, "stale");
+    }
+
+    #[test]
+    fn non_ascii_package_names_survive_intact() {
+        // The old fixed-width parser had to measure display width to avoid
+        // slicing mid-character here; a delimiter has no such problem.
+        let updates = parse_choco_outdated("メモ帳|1.0|2.0|false\n");
+        assert_eq!(updates.len(), 1, "got {updates:#?}");
+        assert_eq!(updates[0].name, "メモ帳");
         assert_eq!(updates[0].available_version, "2.0");
     }
 

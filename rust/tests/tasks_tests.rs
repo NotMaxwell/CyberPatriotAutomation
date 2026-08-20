@@ -45,8 +45,8 @@ async fn software_update_task_dry_run_applies_nothing_and_installs_nothing() {
     // success.
     if !result.success {
         assert!(
-            result.message.to_lowercase().contains("winget"),
-            "expected the message to explain the winget dependency, got: {}",
+            result.message.to_lowercase().contains("chocolatey"),
+            "expected the message to explain the Chocolatey dependency, got: {}",
             result.message
         );
         assert!(result.error_details.is_some());

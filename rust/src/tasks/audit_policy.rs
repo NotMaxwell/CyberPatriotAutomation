@@ -196,6 +196,31 @@ impl AuditPolicyTask {
 
         for (category, _subs) in AUDIT_CATEGORIES {
             ui::markup_line(&format!("[cyan]Configuring {category}...[/]"));
+
+            // advapi32 addresses the category by GUID and sets every subcategory
+            // under it in one call, so this works whatever the display language.
+            #[cfg(windows)]
+            if let Some(guid) = crate::native::audit_policy::category_guid(category) {
+                match crate::native::audit_policy::enable_success_and_failure(&guid) {
+                    Ok(count) => {
+                        table.add_row([
+                            category.to_string(),
+                            format!("[green]? Success & Failure ({count} subcategories)[/]"),
+                        ]);
+                        fixes.push(format!(
+                            "Configured audit: {category} (Success & Failure, {count} subcategories)"
+                        ));
+                    }
+                    Err(reason) => {
+                        table.add_row([category.to_string(), "[red]? Failed[/]".to_string()]);
+                        issues.push(format!("Failed to configure {category}: {reason}"));
+                    }
+                }
+                continue;
+            }
+
+            // Fallback: auditpol.exe, whose /category: argument only matches on
+            // an English-language image.
             let (success_enable, _o, success_error) = command::execute(
                 "auditpol",
                 Some(&format!("/set /category:\"{category}\" /success:enable")),
@@ -424,6 +449,24 @@ impl Task for AuditPolicyTask {
         let mut all_good = true;
         let categories = ["Account Logon", "Account Management", "Logon/Logoff", "System"];
         for category in categories {
+            #[cfg(windows)]
+            if let Some(guid) = crate::native::audit_policy::category_guid(category) {
+                if let Some(states) = crate::native::audit_policy::query(&guid) {
+                    let unaudited = states.iter().filter(|s| s.is_unaudited()).count();
+                    if unaudited == 0 {
+                        ui::markup_line(&format!(
+                            "[green]? {category}: Success and Failure auditing enabled[/]"
+                        ));
+                    } else {
+                        ui::markup_line(&format!(
+                            "[red]? {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
+                        ));
+                        all_good = false;
+                    }
+                    continue;
+                }
+            }
+
             let (success, output, _e) =
                 command::execute("auditpol", Some(&format!("/get /category:\"{category}\""))).await;
             if success && !output.is_empty() {
