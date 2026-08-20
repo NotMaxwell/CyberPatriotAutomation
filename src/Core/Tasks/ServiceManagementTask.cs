@@ -467,13 +467,10 @@ public class ServiceManagementTask : BaseTask
             );
 
             // A disabled service cannot be started until its start type is reset.
-            await CommandExecutor.ExecuteAsync("sc", $"config \"{service}\" start= auto");
-            var (startSuccess, _, startError) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"start \"{service}\""
-            );
+            await ServiceOps.SetAutomaticAsync(service);
+            var startError = await ServiceOps.StartAsync(service);
 
-            if (startSuccess)
+            if (startError is null)
             {
                 fixes.Add($"Started critical service: {service}");
                 AnsiConsole.MarkupLine($"[green]? Started {Markup.Escape(service)}[/]");
@@ -505,18 +502,12 @@ public class ServiceManagementTask : BaseTask
             AnsiConsole.MarkupLine($"[yellow]Enabling service: {service}...[/]");
 
             // Set to automatic start
-            var (configSuccess, _, configError) = await CommandExecutor.ExecuteAsync(
-                "sc",
-                $"config \"{service}\" start= auto"
-            );
+            var configError = await ServiceOps.SetAutomaticAsync(service);
 
             // Start the service
-            var (startSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"start \"{service}\""
-            );
+            await ServiceOps.StartAsync(service);
 
-            if (configSuccess)
+            if (configError is null)
             {
                 fixes.Add($"Enabled service: {service}");
                 AnsiConsole.MarkupLine($"[green]? Enabled {service}[/]");
@@ -555,39 +546,39 @@ public class ServiceManagementTask : BaseTask
                 continue;
             }
 
-            // Check if service exists
-            var (checkSuccess, checkOutput, _) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"Get-Service -Name '{service}' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status\""
-            );
-
-            if (!checkSuccess || string.IsNullOrEmpty(checkOutput.Trim()))
+            var state = await ServiceOps.GetStateAsync(service);
+            if (state == ServiceState.Absent)
             {
-                // Service doesn't exist, skip
+                // Nothing installed to disable.
                 continue;
             }
 
-            var currentStatus = checkOutput.Trim();
             var description = ServicesToDisable.TryGetValue(service, out var desc)
                 ? desc
                 : "Unknown";
 
-            // Stop the service
-            if (currentStatus.Equals("Running", StringComparison.OrdinalIgnoreCase))
+            // Stop the service.
+            //
+            // Not `net stop`: when a service has dependents it asks "Do you want
+            // to continue this operation? (Y/N)" and waits. Stdout is redirected,
+            // so the question is captured rather than shown and the tool looks
+            // frozen. `Stop-Service -Force` stops the dependents too and never
+            // prompts - the same reason the account operations moved off `net`.
+            if (state == ServiceState.Running)
             {
-                var (stopSuccess, _, _) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"stop \"{service}\""
-                );
+                var stopError = await ServiceOps.StopAsync(service);
+                if (stopError is not null)
+                {
+                    // Not fatal: a service that will not stop can still be set to
+                    // disabled so it does not come back after a reboot.
+                    issues.Add($"Could not stop {service}: {stopError}");
+                }
             }
 
             // Disable the service
-            var (disableSuccess, _, disableError) = await CommandExecutor.ExecuteAsync(
-                "sc",
-                $"config \"{service}\" start= disabled"
-            );
+            var disableError = await ServiceOps.DisableAsync(service);
 
-            if (disableSuccess)
+            if (disableError is null)
             {
                 disableTable.AddRow($"[red]{service}[/]", description, "[green]Disabled[/]");
                 fixes.Add($"Disabled service: {service}");

@@ -20,7 +20,7 @@
     <Copyright>Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.</Copyright>
     <!-- Bump with every behavioural change. The run log stamps this value in its
          header and file name so a log ties back to the build that produced it. -->
-    <Version>1.5.0</Version>
+    <Version>1.6.0</Version>
 
     <!-- Self-contained single-file publish profile.
          Gated on _IsPublishing so `dotnet build`/`dotnet test` stay
@@ -45,6 +45,34 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <DebugType>none</DebugType>
+
+    <!-- Precompile IL to native code. The tool starts, does its work and exits,
+         so first-run JIT is a real share of its total runtime rather than a cost
+         amortised over a long-lived process. Measured at +3.8 MB (38.2 -> 42.0). -->
+    <PublishReadyToRun>true</PublishReadyToRun>
+
+    <!-- Ship only English resources from dependencies. -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+
+    <!-- Trimming is deliberately NOT enabled, despite being the single largest
+         size win available here: it takes the published exe from 38 MB to 12 MB
+         and currently produces no IL2xxx warnings.
+
+         The reason is that Spectre.Console 0.47 and System.CommandLine both
+         resolve types by reflection, and neither is fully trim-annotated - so an
+         absence of warnings is weak evidence rather than proof. A trimmed build
+         that loses Spectre's markup rendering fails at run time, during a scored
+         round, with no warning at build time.
+
+         Enable it once it has been exercised end to end on a real Windows host:
+           dotnet publish src/CyberPatriotAutomation.csproj -c Release \
+             -f net10.0-windows -p:PublishTrimmed=true -o publish-win-x64 -->
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Reproducible output: the same source produces the same bytes, so a
+         binary can be tied back to the commit that produced it. -->
+    <Deterministic>true</Deterministic>
   </PropertyGroup>
 
   <!-- Win32 P/Invoke, generated at compile time from NativeMethods.txt. -->

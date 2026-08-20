@@ -1,4 +1,4 @@
-﻿<Project>
+<Project>
   <PropertyGroup>
     <!-- Common properties for all projects -->
     <LangVersion>13.0</LangVersion>
@@ -15,14 +15,29 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
   </PropertyGroup>
 
-  <!-- Run tests after build (only for Release builds) -->
-  <Target Name="RunTestsAfterBuild" AfterTargets="Build" Condition="'$(Configuration)' == 'Release' AND '$(IsTestProject)' != 'true'">
-    <Message Text="" Importance="High" />
-    <Message Text="======================================" Importance="High" />
-    <Message Text="  Running Unit Tests...               " Importance="High" />
-    <Message Text="======================================" Importance="High" />
-    <Exec Command="dotnet test &quot;$(MSBuildThisFileDirectory)tests\CyberPatriotAutomation.Tests.csproj&quot; --no-build --configuration $(Configuration) -v n"
-          ContinueOnError="true"
-          IgnoreExitCode="false" />
+  <!-- Run the unit tests after a Release build.
+
+       Three things this target used to get wrong, each of which made every
+       Release build report MSB3073 and MSB4181:
+
+       - The `no-build` switch looked for test assemblies this build never
+         produced. The test project is separate and is not built as a dependency
+         of the app, so the run always failed before executing a single test.
+       - The path was separated with a backslash, which is an escape character
+         to the shell the Exec task uses on a non-Windows host.
+       - `AfterTargets="Build"` fires for the outer build *and* once per target
+         framework, so the suite was launched three times over.
+
+       It is also skipped during publish, so producing an artefact does not run
+       the whole suite first. -->
+  <Target Name="RunTestsAfterBuild"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release'
+                     AND '$(IsTestProject)' != 'true'
+                     AND '$(_IsPublishing)' != 'true'
+                     AND '$(TargetFramework)' == ''">
+    <Message Text="Running unit tests..." Importance="High" />
+    <Exec Command="dotnet test &quot;$(MSBuildThisFileDirectory)tests/CyberPatriotAutomation.Tests.csproj&quot; --configuration $(Configuration) --nologo -v minimal"
+          ContinueOnError="true" />
   </Target>
 </Project>

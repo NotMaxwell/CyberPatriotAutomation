@@ -57,9 +57,14 @@ public class SoftwareManagementTask : BaseTask
         ["Firefox"] = "firefox",
         ["Google Chrome"] = "googlechrome",
         ["Chrome"] = "googlechrome",
-        ["7-Zip"] = "7zip",
-        ["7Zip"] = "7zip",
-        ["Notepad++"] = "notepadplusplus",
+        // The `.install` packages run the vendor installer, which puts the
+        // program under Program Files. The bare ids are portable packages that
+        // unpack under ProgramData instead - and the CP19 answer key deducts
+        // points when 7-Zip, Notepad++, Chrome or Wireshark are "not installed
+        // at the default location".
+        ["7-Zip"] = "7zip.install",
+        ["7Zip"] = "7zip.install",
+        ["Notepad++"] = "notepadplusplus.install",
         ["VLC"] = "vlc",
         ["VLC media player"] = "vlc",
         ["Wireshark"] = "wireshark",
@@ -104,12 +109,42 @@ public class SoftwareManagementTask : BaseTask
             "Removes prohibited software and installs required software as specified in the README.";
     }
 
+    /// <summary>
+    /// Software treated as prohibited even when the README does not name it.
+    /// </summary>
+    /// <remarks>
+    /// Scoring images routinely include software that is not a hacking tool but
+    /// is not authorised either - a media player, a scripting runtime, a
+    /// registry cleaner. The answer key for the CP19 exhibition round scored
+    /// removing Jellyfin Media Player and Python 3 as separate items, and the
+    /// README named neither: they are prohibited by default, and only permitted
+    /// when the README explicitly lists them as required.
+    /// </remarks>
+    public static readonly string[] AlwaysProhibited = ["Python", "CCleaner", "Jellyfin"];
+
     public void SetReadmeData(ReadmeData? readme)
     {
         if (readme == null)
             return;
-        ProhibitedSoftware = readme.ProhibitedSoftware?.ToList() ?? new List<string>();
         RequiredSoftware = readme.RequiredSoftware?.ToList() ?? new List<SoftwareRequirement>();
+
+        var prohibited = readme.ProhibitedSoftware?.ToList() ?? new List<string>();
+
+        // A README that requires something wins over the default list: an image
+        // that legitimately needs Python must not have it uninstalled.
+        foreach (var candidate in AlwaysProhibited)
+        {
+            var required = RequiredSoftware.Any(r =>
+                r.Name.Contains(candidate, StringComparison.OrdinalIgnoreCase)
+            );
+            var alreadyListed = prohibited.Any(p =>
+                p.Equals(candidate, StringComparison.OrdinalIgnoreCase)
+            );
+            if (!required && !alreadyListed)
+                prohibited.Add(candidate);
+        }
+
+        ProhibitedSoftware = prohibited;
     }
 
     /// <summary>
@@ -301,27 +336,62 @@ public class SoftwareManagementTask : BaseTask
         if (installFailures.Count > 0)
             details.Add($"Failed to install: {string.Join("; ", installFailures)}");
 
-        // Bring already-present packages up to date. Out-of-date software is a
-        // scored finding in its own right, so this runs even when nothing was
-        // missing - but only when Chocolatey is already usable, since installing
-        // it purely to run an upgrade is not worth the download.
+        // Bring already-installed software up to date.
+        //
+        // `choco upgrade all` only touches packages Chocolatey itself installed,
+        // so software that came with the image - which is exactly what a
+        // competition asks you to update - is never considered. Upgrading each
+        // required package by name reaches it regardless of how it was
+        // installed, because `choco upgrade` runs the newer vendor installer
+        // over the top. The CP19 answer key scored "Notepad++ has been updated"
+        // and "Google Chrome has been updated" as separate items, and both were
+        // pre-installed.
+        var updateFailures = new List<string>();
+        var updatedNow = new List<string>();
         if (UpdateInstalledSoftware && await Chocolatey.IsAvailableAsync())
         {
-            AnsiConsole.MarkupLine("[cyan]Updating installed packages...[/]");
+            // Anything the README requires, plus whatever is installed and has a
+            // package id we recognise: an image can ship outdated software the
+            // README never mentions.
+            var toUpdate = RequiredSoftware
+                .Select(PackageIdFor)
+                .Concat(
+                    installed
+                        .Where(name => PackageIds.ContainsKey(name.Trim()))
+                        .Select(name => PackageIds[name.Trim()])
+                )
+                .Where(id => id.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            foreach (var package in toUpdate)
+            {
+                AnsiConsole.MarkupLine($"[cyan]Updating {Markup.Escape(package)}...[/]");
+                var failure = await Chocolatey.UpgradeAsync(package);
+                if (failure is null)
+                {
+                    updatedNow.Add(package);
+                    AnsiConsole.MarkupLine($"[green]✓ Up to date: {Markup.Escape(package)}[/]");
+                }
+                else
+                {
+                    updateFailures.Add($"{package}: {failure}");
+                    AnsiConsole.MarkupLine(
+                        $"[yellow]! Could not update {Markup.Escape(package)}: {Markup.Escape(failure)}[/]"
+                    );
+                }
+            }
+
+            // Then anything else Chocolatey manages, which the loop above misses.
             var upgradeError = await Chocolatey.UpgradeAllAsync();
-            if (upgradeError is null)
-            {
-                details.Add("Updated installed packages via Chocolatey");
-                AnsiConsole.MarkupLine("[green]✓ Packages updated[/]");
-            }
-            else
-            {
-                details.Add($"Package update reported: {upgradeError}");
-                AnsiConsole.MarkupLine(
-                    $"[yellow]! Package update reported: {Markup.Escape(upgradeError)}[/]"
-                );
-            }
+            if (upgradeError is not null)
+                details.Add($"choco upgrade all reported: {upgradeError}");
         }
+
+        if (updatedNow.Count > 0)
+            details.Add($"Updated: {string.Join(", ", updatedNow)}");
+        if (updateFailures.Count > 0)
+            details.Add($"Could not update: {string.Join("; ", updateFailures)}");
 
         // Run Windows Defender malware scan
         var malwareScanSuccess = true;

@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using CyberPatriotAutomation.Core;
 using CyberPatriotAutomation.Core.Models;
 using CyberPatriotAutomation.Core.Tasks;
@@ -16,6 +16,33 @@ public class Program
     {
         // Parse command line arguments
         var cliArgs = Environment.GetCommandLineArgs().Skip(1).ToArray();
+
+        // Help before anything else, and before the run log opens.
+        if (
+            cliArgs.Contains("--help")
+            || cliArgs.Contains("-h")
+            || cliArgs.Contains("-?")
+            || cliArgs.Contains("/?")
+        )
+        {
+            PrintHelp();
+            return;
+        }
+
+        // Reject anything unrecognised rather than letting it fall through.
+        //
+        // Every flag used to be matched by name and anything else ignored, while
+        // "no task flag given" meant "run everything" - so a typo, or --help
+        // itself, silently began a full destructive run instead of doing nothing.
+        var unknown = FirstUnknownArgument(cliArgs);
+        if (unknown is not null)
+        {
+            AnsiConsole.MarkupLine($"[red]Unrecognised argument: {Markup.Escape(unknown)}[/]");
+            AnsiConsole.MarkupLine("[dim]Run with --help to see the available options.[/]");
+            Environment.ExitCode = 2;
+            return;
+        }
+
         var readmeFile = ExtractArgument(cliArgs, "--readme", "-r");
         var autoFindReadme = cliArgs.Contains("--auto-readme") || cliArgs.Contains("-R");
         var dryRun = cliArgs.Contains("--dry-run") || cliArgs.Contains("-d");
@@ -28,22 +55,37 @@ public class Program
         var runAuditPolicy = cliArgs.Contains("--audit-policy") || cliArgs.Contains("-t");
         var runFirewall = cliArgs.Contains("--firewall") || cliArgs.Contains("-f");
         var runSecurityHardening =
-            cliArgs.Contains("--security-hardening") || cliArgs.Contains("-h");
+            cliArgs.Contains("--security-hardening") || cliArgs.Contains("-H");
         var runMediaScan = cliArgs.Contains("--media-scan") || cliArgs.Contains("-m");
         var parseReadmeOnly = cliArgs.Contains("--parse-readme");
-        var runAll =
-            cliArgs.Contains("--all")
-            || (
-                !runPasswordPolicy
-                && !runAccountPermissions
-                && !runUserManagement
-                && !runServiceManagement
-                && !runAuditPolicy
-                && !runFirewall
-                && !runSecurityHardening
-                && !runMediaScan
-                && !parseReadmeOnly
+        var anyTaskNamed =
+            runPasswordPolicy
+            || runAccountPermissions
+            || runUserManagement
+            || runServiceManagement
+            || runAuditPolicy
+            || runFirewall
+            || runSecurityHardening
+            || runMediaScan
+            || parseReadmeOnly;
+
+        // Running everything has to be asked for.
+        //
+        // "No task flag given" used to mean "run every task", so simply
+        // launching the executable - by double-clicking it, or to see what it
+        // does - began a full destructive run against the machine. Nothing about
+        // a bare invocation says "change this system", so it now prints the help
+        // and stops.
+        var runAll = cliArgs.Contains("--all");
+        if (!runAll && !anyTaskNamed)
+        {
+            PrintHelp();
+            AnsiConsole.MarkupLine(
+                "\n[yellow]No task selected. Pass --all to run every task, or name individual tasks.[/]"
             );
+            AnsiConsole.MarkupLine("[dim]Pass --dry-run first to preview the changes.[/]");
+            return;
+        }
 
         if (cliArgs.Contains("--version") || cliArgs.Contains("-V"))
         {
@@ -373,6 +415,99 @@ public class Program
                     + $"{Markup.Escape(ex.Message)}[/]"
             );
         }
+    }
+
+    /// <summary>
+    /// Every accepted flag, with the description shown by <c>--help</c>.
+    /// </summary>
+    /// <remarks>
+    /// The single source of truth for both the help text and the
+    /// unrecognised-argument check, so a flag cannot be accepted without also
+    /// being documented.
+    /// </remarks>
+    private static readonly (string Long, string Short, string Description)[] Flags =
+    [
+        ("--help", "-h", "Show this help and exit"),
+        ("--version", "-V", "Print the version and build date, then exit"),
+        ("--readme <path>", "-r", "Read the competition README at <path>"),
+        ("--auto-readme", "-R", "Find the README automatically"),
+        ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
+        ("--dry-run", "-d", "Report what would change without changing it"),
+        ("--all", "", "Run every task (the default when no task is named)"),
+        ("--password-policy", "-p", "Password and lockout policy"),
+        ("--account-permissions", "-a", "Account permissions and group membership"),
+        ("--user-management", "-u", "Create, remove and correct user accounts"),
+        ("--service-management", "-s", "Enable required and disable insecure services"),
+        ("--audit-policy", "-t", "Audit policy and security event logging"),
+        ("--firewall", "-f", "Windows Firewall profiles and rules"),
+        ("--security-hardening", "-H", "General security hardening"),
+        ("--media-scan", "-m", "Find and remove prohibited media"),
+        ("--log <path>", "", "Write the run log to <path>"),
+    ];
+
+    /// <summary>Flags that consume the following argument as their value.</summary>
+    private static readonly string[] ValueFlags = ["--readme", "-r", "--log"];
+
+    /// <summary>The first argument that is not a flag this tool accepts, if any.</summary>
+    public static string? FirstUnknownArgument(string[] args)
+    {
+        var known = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (longName, shortName, _) in Flags)
+        {
+            // The table spells value-taking flags as "--readme <path>".
+            known.Add(longName.Split(' ')[0]);
+            if (shortName.Length > 0)
+                known.Add(shortName);
+        }
+        // Accepted as help but deliberately absent from the table, which lists
+        // one spelling per flag.
+        known.Add("-?");
+        known.Add("/?");
+
+        var skipNext = false;
+        foreach (var arg in args)
+        {
+            if (skipNext)
+            {
+                skipNext = false;
+                continue;
+            }
+            if (ValueFlags.Contains(arg))
+            {
+                skipNext = true;
+                continue;
+            }
+            if (!known.Contains(arg))
+                return arg;
+        }
+        return null;
+    }
+
+    private static void PrintHelp()
+    {
+        Console.WriteLine($"CyberPatriot Automation Tool {AppConfig.VersionString}");
+        Console.WriteLine();
+        Console.WriteLine("USAGE:");
+        Console.WriteLine("    CyberPatriotAutomation.exe [OPTIONS]");
+        Console.WriteLine();
+        Console.WriteLine("Run as Administrator. With no task named, every task runs.");
+        Console.WriteLine("Pass --dry-run first to see what would change.");
+        Console.WriteLine();
+        Console.WriteLine("OPTIONS:");
+        foreach (var (longName, shortName, description) in Flags)
+        {
+            var flag = shortName.Length > 0 ? $"    {shortName}, {longName}" : $"    {longName}";
+            Console.WriteLine($"{flag, -34}{description}");
+        }
+        Console.WriteLine();
+        Console.WriteLine("EXAMPLES:");
+        Console.WriteLine(
+            "    CyberPatriotAutomation.exe --auto-readme --parse-readme   # read-only"
+        );
+        Console.WriteLine(
+            "    CyberPatriotAutomation.exe --auto-readme --dry-run        # preview"
+        );
+        Console.WriteLine("    CyberPatriotAutomation.exe --auto-readme --all            # apply");
     }
 
     // Helper functions

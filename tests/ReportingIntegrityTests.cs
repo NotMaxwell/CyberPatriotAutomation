@@ -4,6 +4,7 @@
 
 using CyberPatriotAutomation.Core.Models;
 using CyberPatriotAutomation.Core.Tasks;
+using CyberPatriotAutomation.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
@@ -97,20 +98,20 @@ public class ReportingIntegrityTests
     [Fact]
     public void ParseRegDword_ShouldReadTheNamedValue()
     {
-        GroupPolicyTask.ParseRegDword(RegQueryOutput, "dontdisplaylastusername").Should().Be(1u);
-        GroupPolicyTask.ParseRegDword(RegQueryOutput, "DisableCAD").Should().Be(0u);
+        RegistryOps.ParseRegDword(RegQueryOutput, "dontdisplaylastusername").Should().Be(1u);
+        RegistryOps.ParseRegDword(RegQueryOutput, "DisableCAD").Should().Be(0u);
     }
 
     [Fact]
     public void ParseRegDword_ShouldBeCaseInsensitiveOnTheValueName()
     {
-        GroupPolicyTask.ParseRegDword(RegQueryOutput, "DONTDISPLAYLASTUSERNAME").Should().Be(1u);
+        RegistryOps.ParseRegDword(RegQueryOutput, "DONTDISPLAYLASTUSERNAME").Should().Be(1u);
     }
 
     [Fact]
     public void ParseRegDword_ShouldReturnNullWhenAbsent()
     {
-        GroupPolicyTask.ParseRegDword(RegQueryOutput, "restrictanonymous").Should().BeNull();
+        RegistryOps.ParseRegDword(RegQueryOutput, "restrictanonymous").Should().BeNull();
     }
 
     [Fact]
@@ -118,6 +119,6 @@ public class ReportingIntegrityTests
     {
         // The old verify only checked that `reg query` exited 0, so a value
         // present with the wrong contents passed verification.
-        GroupPolicyTask.ParseRegDword(RegQueryOutput, "DisableCAD").Should().NotBe(1u);
+        RegistryOps.ParseRegDword(RegQueryOutput, "DisableCAD").Should().NotBe(1u);
     }
 }

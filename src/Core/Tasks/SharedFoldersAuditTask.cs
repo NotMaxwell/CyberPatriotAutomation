@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool - Shared Folders Audit Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -64,7 +64,10 @@ public class SharedFoldersAuditTask : BaseTask
         {
             var (delSuccess, _, delErr) = await CommandExecutor.ExecuteAsync(
                 "net",
-                $"share {share} /delete"
+                // /y answers the "There are open files ... force them closed?
+                // (Y/N)" prompt that `net share /delete` asks when the share is
+                // in use. Without it the command waits on a keypress.
+                $"share {share} /delete /y"
             );
             if (delSuccess)
             {

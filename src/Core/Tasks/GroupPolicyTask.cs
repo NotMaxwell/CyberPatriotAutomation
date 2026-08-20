@@ -1,4 +1,4 @@
-﻿// =============================================================================
+// =============================================================================
 // CyberPatriot Automation Tool - Group Policy Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
@@ -21,16 +21,50 @@ public class GroupPolicyTask : BaseTask
     {
         Name = "Group Policy";
         Description =
-            "Configures Group Policy settings: Hide last user, require Ctrl+Alt+Del, disable ICS, and more.";
+            "Configures Group Policy settings: hide last user, require Ctrl+Alt+Del, "
+            + "disable ICS, require SMB signing, and turn off remote desktop sharing.";
     }
+
+    private const string PoliciesSystemKey =
+        @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+
+    private const string LsaKey = @"HKLM\SYSTEM\CurrentControlSet\Control\Lsa";
+
+    /// <summary>SMB client settings ("Microsoft network client" in gpedit).</summary>
+    private const string LanmanWorkstationKey =
+        @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters";
+
+    /// <summary>SMB server settings ("Microsoft network server" in gpedit).</summary>
+    private const string LanmanServerKey =
+        @"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters";
+
+    /// <summary>Where Remote Desktop's listener is switched on and off.</summary>
+    private const string TerminalServerKey =
+        @"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
+
+    /// <summary>The policy form of the same setting, which takes precedence.</summary>
+    private const string TerminalServicesPolicyKey =
+        @"HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services";
+
+    /// <summary>Render a possibly-absent registry value for the state report.</summary>
+    private static string Describe(int? value) => value?.ToString() ?? "(not set)";
 
     public override async Task<SystemInfo> ReadSystemStateAsync()
     {
-        var (success, output, error) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System"
+        var hideLastUser = await RegistryOps.GetDwordAsync(
+            PoliciesSystemKey,
+            "dontdisplaylastusername"
         );
-        return new SystemInfo { RawOutput = output, ErrorOutput = error };
+        var disableCad = await RegistryOps.GetDwordAsync(PoliciesSystemKey, "DisableCAD");
+        var restrictAnonymous = await RegistryOps.GetDwordAsync(LsaKey, "restrictanonymous");
+
+        var state = string.Join(
+            Environment.NewLine,
+            $"dontdisplaylastusername = {Describe(hideLastUser)}",
+            $"DisableCAD = {Describe(disableCad)}",
+            $"restrictanonymous = {Describe(restrictAnonymous)}"
+        );
+        return new SystemInfo { RawOutput = state, ErrorOutput = string.Empty };
     }
 
     public override async Task<TaskResult> ExecuteAsync()
@@ -53,24 +87,24 @@ public class GroupPolicyTask : BaseTask
         bool allSuccess = true;
 
         // 1. Don't display last user name
-        var (hideUserSuccess, _, hideUserError) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v dontdisplaylastusername /t REG_DWORD /d 1 /f"
+        var hideUserError = await RegistryOps.SetDwordAsync(
+            PoliciesSystemKey,
+            "dontdisplaylastusername",
+            1
         );
         details.Add(
-            hideUserSuccess ? "✓ Don't display last user name set" : $"✗ Failed: {hideUserError}"
+            hideUserError is null
+                ? "✓ Don't display last user name set"
+                : $"✗ Failed: {hideUserError}"
         );
-        allSuccess &= hideUserSuccess;
+        allSuccess &= hideUserError is null;
 
         // 2. Require Ctrl+Alt+Del
-        var (ctrlAltDelSuccess, _, ctrlAltDelError) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "add HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System /v DisableCAD /t REG_DWORD /d 0 /f"
-        );
+        var ctrlAltDelError = await RegistryOps.SetDwordAsync(PoliciesSystemKey, "DisableCAD", 0);
         details.Add(
-            ctrlAltDelSuccess ? "✓ Require Ctrl+Alt+Del set" : $"✗ Failed: {ctrlAltDelError}"
+            ctrlAltDelError is null ? "✓ Require Ctrl+Alt+Del set" : $"✗ Failed: {ctrlAltDelError}"
         );
-        allSuccess &= ctrlAltDelSuccess;
+        allSuccess &= ctrlAltDelError is null;
 
         // 3. Disable ICS (Internet Connection Sharing)
         var (icsSuccess, _, icsError) = await CommandExecutor.ExecuteAsync(
@@ -83,12 +117,65 @@ public class GroupPolicyTask : BaseTask
         allSuccess &= icsSuccess;
 
         // 4. Additional local security policies (example: restrict anonymous access)
-        var (anonSuccess, _, anonError) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            "add HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa /v restrictanonymous /t REG_DWORD /d 1 /f"
+        var anonError = await RegistryOps.SetDwordAsync(LsaKey, "restrictanonymous", 1);
+        details.Add(
+            anonError is null ? "✓ Restrict anonymous access set" : $"✗ Failed: {anonError}"
         );
-        details.Add(anonSuccess ? "✓ Restrict anonymous access set" : $"✗ Failed: {anonError}");
-        allSuccess &= anonSuccess;
+        allSuccess &= anonError is null;
+
+        // Microsoft network client: digitally sign communications (always).
+        //
+        // Without it an SMB session can be tampered with in transit, which is
+        // what makes SMB relay attacks work. The server-side setting is applied
+        // with it: they are a pair in every hardening benchmark, and signing
+        // only one side leaves the other able to negotiate an unsigned session.
+        var clientSigningError = await RegistryOps.SetDwordAsync(
+            LanmanWorkstationKey,
+            "RequireSecuritySignature",
+            1
+        );
+        details.Add(
+            clientSigningError is null
+                ? "✓ Microsoft network client: digitally sign communications (always)"
+                : $"✗ Failed: {clientSigningError}"
+        );
+        allSuccess &= clientSigningError is null;
+
+        var serverSigningError = await RegistryOps.SetDwordAsync(
+            LanmanServerKey,
+            "RequireSecuritySignature",
+            1
+        );
+        details.Add(
+            serverSigningError is null
+                ? "✓ Microsoft network server: digitally sign communications (always)"
+                : $"✗ Failed: {serverSigningError}"
+        );
+        allSuccess &= serverSigningError is null;
+
+        // Remote desktop sharing off.
+        //
+        // fDenyTSConnections is the switch the Settings UI toggles. The policy
+        // key is set too: a policy value overrides the local one, so an image
+        // with the policy set to "allow" would otherwise keep RDP listening no
+        // matter what the local setting said.
+        var rdpError = await RegistryOps.SetDwordAsync(TerminalServerKey, "fDenyTSConnections", 1);
+        details.Add(
+            rdpError is null ? "✓ Remote desktop sharing turned off" : $"✗ Failed: {rdpError}"
+        );
+        allSuccess &= rdpError is null;
+
+        var rdpPolicyError = await RegistryOps.SetDwordAsync(
+            TerminalServicesPolicyKey,
+            "fDenyTSConnections",
+            1
+        );
+        details.Add(
+            rdpPolicyError is null
+                ? "✓ Remote desktop sharing denied by policy"
+                : $"✗ Failed: {rdpPolicyError}"
+        );
+        allSuccess &= rdpPolicyError is null;
 
         return new TaskResult
         {
@@ -98,52 +185,10 @@ public class GroupPolicyTask : BaseTask
         };
     }
 
-    /// <summary>
-    /// Read a REG_DWORD value out of <c>reg query</c> output.
-    /// </summary>
-    /// <remarks>
-    /// The value appears on its own indented line, e.g.
-    /// <c>    dontdisplaylastusername    REG_DWORD    0x1</c>.
-    /// </remarks>
-    public static uint? ParseRegDword(string output, string name)
-    {
-        foreach (
-            var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-        )
-        {
-            var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (
-                fields.Length >= 3
-                && fields[0].Equals(name, StringComparison.OrdinalIgnoreCase)
-                && fields[1].Equals("REG_DWORD", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                var raw = fields[2];
-                if (
-                    raw.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                    && uint.TryParse(
-                        raw[2..],
-                        System.Globalization.NumberStyles.HexNumber,
-                        System.Globalization.CultureInfo.InvariantCulture,
-                        out var hex
-                    )
-                )
-                    return hex;
-                if (uint.TryParse(raw, out var dec))
-                    return dec;
-            }
-        }
-        return null;
-    }
-
     /// <summary>Confirm a registry value is present *and* set to the expected value.</summary>
-    private static async Task<bool> RegDwordEqualsAsync(string key, string name, uint expected)
+    private static async Task<bool> RegDwordEqualsAsync(string key, string name, int expected)
     {
-        var (success, output, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            $"query {key} /v {name}"
-        );
-        return success && ParseRegDword(output, name) == expected;
+        return await RegistryOps.GetDwordAsync(key, name) == expected;
     }
 
     public override async Task<bool> VerifyAsync()
@@ -159,6 +204,18 @@ public class GroupPolicyTask : BaseTask
         // DisableCAD = 0 means Ctrl+Alt+Del *is* required.
         var ctrlAltDelOk = await RegDwordEqualsAsync(policies, "DisableCAD", 0);
         var anonOk = await RegDwordEqualsAsync(lsa, "restrictanonymous", 1);
+        var clientSigningOk = await RegDwordEqualsAsync(
+            LanmanWorkstationKey,
+            "RequireSecuritySignature",
+            1
+        );
+        var serverSigningOk = await RegDwordEqualsAsync(
+            LanmanServerKey,
+            "RequireSecuritySignature",
+            1
+        );
+        // fDenyTSConnections = 1 means Remote Desktop is refused.
+        var rdpOk = await RegDwordEqualsAsync(TerminalServerKey, "fDenyTSConnections", 1);
 
         var (scSuccess, scOutput, _) = await CommandExecutor.ExecuteAsync("sc", "qc SharedAccess");
         // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
@@ -179,7 +236,23 @@ public class GroupPolicyTask : BaseTask
             AnsiConsole.MarkupLine("[red]? Anonymous access is not restricted[/]");
         if (!icsOk)
             AnsiConsole.MarkupLine("[red]? Internet Connection Sharing is not disabled[/]");
+        if (!clientSigningOk)
+            AnsiConsole.MarkupLine(
+                "[red]? Microsoft network client does not require SMB signing[/]"
+            );
+        if (!serverSigningOk)
+            AnsiConsole.MarkupLine(
+                "[red]? Microsoft network server does not require SMB signing[/]"
+            );
+        if (!rdpOk)
+            AnsiConsole.MarkupLine("[red]? Remote desktop sharing is not turned off[/]");
 
-        return hideUserOk && ctrlAltDelOk && anonOk && icsOk;
+        return hideUserOk
+            && ctrlAltDelOk
+            && anonOk
+            && icsOk
+            && clientSigningOk
+            && serverSigningOk
+            && rdpOk;
     }
 }

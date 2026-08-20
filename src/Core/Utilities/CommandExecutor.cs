@@ -64,6 +64,15 @@ public class CommandExecutor
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
+                // Redirected and closed immediately below. Without this the child
+                // inherits the console, and any tool that asks a question waits
+                // for a human forever: `net stop` prompts when a service has
+                // dependents ("Do you want to continue this operation? (Y/N)"),
+                // and because stdout is redirected the prompt is captured rather
+                // than shown, so the tool simply appears to freeze. Closing the
+                // handle makes the prompt read EOF and the command abort, which
+                // is what the Rust port has always done with Stdio::null().
+                RedirectStandardInput = true,
                 CreateNoWindow = true,
             };
 
@@ -71,32 +80,54 @@ public class CommandExecutor
             if (process == null)
                 return (null, string.Empty, "Failed to start process");
 
+            // Signal end-of-input at once; nothing here ever feeds a child.
+            try
+            {
+                process.StandardInput.Close();
+            }
+            catch (IOException)
+            {
+                // The child may have exited already; nothing to close.
+            }
+
             // Read both output streams concurrently to avoid deadlocks when one stream
             // fills its buffer while the other is being read.
             var outputTask = process.StandardOutput.ReadToEndAsync();
             var errorTask = process.StandardError.ReadToEndAsync();
 
-            // Wait for process exit with a timeout to avoid hanging indefinitely on
-            // commands that may prompt for input or never return.
-            using var cts = new CancellationTokenSource(timeout);
-            try
-            {
-                var waitTask = process.WaitForExitAsync(cts.Token);
-                await Task.WhenAll(outputTask, errorTask, waitTask);
-            }
-            catch (OperationCanceledException)
+            // Time out the wait for exit, and *only* that.
+            //
+            // The read tasks finish when the child's pipes close, which happens
+            // when it exits - so a child that never exits keeps them pending
+            // forever. Including them in the same wait (Task.WhenAll, which
+            // completes only when every task does) meant that cancelling the
+            // exit-wait left the whole await pending, the catch block never ran,
+            // and the timeout did nothing in precisely the case it exists for.
+            var waitTask = process.WaitForExitAsync();
+            if (await Task.WhenAny(waitTask, Task.Delay(timeout)) != waitTask)
             {
                 try
                 {
                     if (!process.HasExited)
-                        process.Kill(true);
+                        process.Kill(entireProcessTree: true);
                 }
-                catch { }
-                return (null, await SafeGetTaskResultAsync(outputTask), "Process timed out");
+                catch (InvalidOperationException)
+                {
+                    // Raced with the process exiting on its own.
+                }
+
+                // Killing closes the pipes, so the readers finish - but a
+                // grandchild that inherited the handle can still hold them, so
+                // this is bounded too rather than trading one hang for another.
+                return (
+                    null,
+                    await SafeGetTaskResultAsync(outputTask, TimeSpan.FromSeconds(5)),
+                    "Process timed out"
+                );
             }
 
-            var output = await SafeGetTaskResultAsync(outputTask);
-            var error = await SafeGetTaskResultAsync(errorTask);
+            var output = await SafeGetTaskResultAsync(outputTask, TimeSpan.FromSeconds(5));
+            var error = await SafeGetTaskResultAsync(errorTask, TimeSpan.FromSeconds(5));
 
             return (process.ExitCode, output, string.IsNullOrEmpty(error) ? null : error);
         }
@@ -275,11 +306,15 @@ public class CommandExecutor
         return string.IsNullOrWhiteSpace(reason) ? "no error reported" : reason.Trim();
     }
 
-    private static async Task<string> SafeGetTaskResultAsync(Task<string> task)
+    /// <summary>
+    /// Await a stream read, giving up after <paramref name="limit"/> rather than
+    /// waiting on a pipe a killed process's children may still be holding open.
+    /// </summary>
+    private static async Task<string> SafeGetTaskResultAsync(Task<string> task, TimeSpan limit)
     {
         try
         {
-            return await task;
+            return await Task.WhenAny(task, Task.Delay(limit)) == task ? await task : string.Empty;
         }
         catch
         {
