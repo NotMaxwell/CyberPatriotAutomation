@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"which cc gcc build-essential 2>&1; dpkg -l | grep -i build-essential; cat /etc/os-release | head -3\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"sudo -n true 2>&1 && echo SUDO_NOPASSWD || echo NEED_PASSWORD\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"which cc gcc 2>&1\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo build --message-format short 2>&1 | tail -n 60\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | tail -n 60\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | grep -E 'test result|running' | head -20; echo '--- CLIPPY ---'; ~/.cargo/bin/cargo clippy --all-targets 2>&1 | tail -n 30\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | grep -E '^error|^warning: unused|test result|FAILED|panicked|assertion' | head -40\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo build --message-format short 2>&1 | grep -E 'error|warning: unused' | head -20; echo DONE\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && head -c 120 src/tasks/password_policy.rs | od -c | head -8\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && touch src/tasks/password_policy.rs && ~/.cargo/bin/cargo build 2>&1 | tail -n 30\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | grep -E '^error|test result|FAILED|panicked' | head -20; echo '=== TEST DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo build 2>&1 | grep -E '^\\(error|warning\\)' -A8 | head -50; echo '=== DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo build 2>&1 | grep -E '^\\(error|warning\\)' -A10 | head -60; echo '=== DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | grep -E 'test result|Running \\(unittests|tests\\)' | head -20\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo clippy --all-targets 2>&1 | grep -E '^\\(error|warning\\)' -A10 | head -60; echo '=== CLIPPY DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && python3 '/mnt/c/Users/WILLIA~1/AppData/Local/Temp/claude/c--Users-WilliamMcCormick-Documents-GitHub-CyberPatriotAutomation/36f4f348-7cbb-47cf-ad37-4a53f141ee67/scratchpad/move_tests.py'\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo clippy --all-targets 2>&1 | grep -E '^\\(error|warning\\)' -A8 | head -40; echo '=== CLIPPY DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && grep -n 'Get-NetFirewallProfile' src/tasks/firewall.rs\")",
+      "PowerShell(cmd.exe /c \"C:\\\\Users\\\\WILLIA~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-WilliamMcCormick-Documents-GitHub-CyberPatriotAutomation\\\\36f4f348-7cbb-47cf-ad37-4a53f141ee67\\\\scratchpad\\\\verify_ps.cmd\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"rustup target add x86_64-pc-windows-gnu 2>&1 | tail -5; echo '--- installed now ---'; rustup target list --installed\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo check --target x86_64-pc-windows-gnu 2>&1 | tail -n 40\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && echo '=== windows target check ==='; ~/.cargo/bin/cargo check --target x86_64-pc-windows-gnu 2>&1 | grep -E '^\\(error|warning\\)' -A6 | head -20; echo '=== linux build+tests still ok ==='; ~/.cargo/bin/cargo test 2>&1 | grep -E '^\\(error|warning\\)|test result' | head -12; echo '=== DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"command -v x86_64-w64-mingw32-gcc && echo MINGW_READY || echo MINGW_MISSING\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo test 2>&1 | grep -E '^\\(error|warning\\)' -A8 | head -30; ~/.cargo/bin/cargo test 2>&1 | grep -cE 'test result: ok'; echo '=== DONE ==='\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation && grep -oiE '.{60}windows.{60}' ReferenceMaterial/README.html | head -20\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation && echo '--- size ---'; wc -c ReferenceMaterial/README.html; echo '--- case-insensitive hits for windows/ubuntu/linux ---'; grep -oiE 'windows|ubuntu|debian|linux|mint|fedora' ReferenceMaterial/README.html | sort | uniq -c; echo '--- first 40 lines ---'; head -40 ReferenceMaterial/README.html\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation && grep -in 'windows' ReferenceMaterial/README.html; echo '--- bytes around first Windows 10 ---'; grep -o 'Windows.\\\\{0,6\\\\}' ReferenceMaterial/README.html | head -8 | od -c | head -20\")",
+      "PowerShell(wsl.exe -d Ubuntu -- bash -lc \"cd /mnt/c/Users/WilliamMcCormick/Documents/GitHub/CyberPatriotAutomation/rust && ~/.cargo/bin/cargo run --quiet -- --readme ../ReferenceMaterial/README.html --parse-readme 2>&1 | head -60\")"
+    ]
+  }
+}
