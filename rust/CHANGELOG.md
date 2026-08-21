@@ -10,6 +10,96 @@ cyberpatriot-automation.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.13.0
+
+### Added
+
+- **Remediation ledger.** Every change now records what it wanted, what it did,
+  and the read-back that proves it. `remediation::apply` reads the state before
+  acting, skips the write when the machine is already right, performs the
+  change, then reads the state again — and that second read is what lands in the
+  log as `Proof`. The run log gains a `REMEDIATION LEDGER` section grouped by
+  task, and the console gains a `Changes and Proof` summary that names anything
+  it could not confirm.
+- Five outcomes replace the old pass/fail: `FIXED`, `ALREADY OK`, `FAILED`,
+  `UNVERIFIED` (the write reported success and the machine disagrees, or could
+  not be read back) and `SKIPPED`. `UNVERIFIED` is the case the ledger exists
+  for — it was previously indistinguishable from success.
+- `registry_ops`, `service_ops`, `account_ops` and `policy_ops` route every
+  write through the ledger, so coverage does not depend on each task
+  remembering to log. The shared-folder, scheduled-task and hosts-file changes,
+  which write outside those modules, are wired individually.
+- Fixes are attributed with a `tokio` task-local rather than a global, so the
+  independent audits that run concurrently are grouped under the task that
+  actually made each change.
+
+### Changed
+
+- The 42 hardening registry settings go through `registry_ops` instead of
+  shelling out to `reg add`, so they use the Windows API where available and
+  each one is proved. A non-DWORD entry added to the table now fails loudly
+  rather than being written as a number.
+- `SecurityHardeningTask` read the registry with `output.contains("0x1")`, which
+  also matched `0x10` and `0x1a`, so a setting could read as correct whatever it
+  held. It now compares the value exactly through `registry_ops::dword_equals`.
+- The `net accounts` parser moved onto `PasswordPolicyInfo`, so the task and the
+  ledger's evidence read the output through one parser rather than two that
+  could disagree.
+- Registry-write failures in the hardening task are recorded in the task's
+  issues; they were counted for the on-screen tally but never surfaced.
+
+### Fixed
+
+- 219 status glyphs across both ports rendered as a literal `?` — `✓`, `✗` and
+  `⚠` had been flattened by an encoding round-trip. Since the run log mirrors
+  console output, these were in the log too.
+## 1.12.0
+
+### Changed
+
+- The `windows`-crate conversion now covers every task. The areas that still
+  shelled out have moved to the API, each keeping its shell path as a fallback
+  behind `#[cfg(windows)]`:
+  - **Local accounts.** Enumeration, deletion, password changes and the
+    `UF_ACCOUNTDISABLE` / `UF_PASSWD_NOTREQD` / `UF_DONT_EXPIRE_PASSWD` flags go
+    through netapi32 rather than `net user` and the `*-LocalUser` cmdlets. The
+    new `account_ops` module makes the choice once, mirroring `LocalAccounts` in
+    the C# port.
+  - **Local groups.** Membership changes, group creation, existence checks and
+    the per-account group list are `NetLocalGroup*` and `NetUserGetLocalGroups`
+    calls instead of `net localgroup` and one `Get-LocalGroup` per account.
+  - **Shared folders.** `NetShareEnum` and `NetShareDel` replace `net share`.
+  - **Password and lockout policy.** Writes go through `NetUserModalsSet`, in
+    the new `policy_ops` module; the reads were already native.
+  - **Services.** `EnumServicesStatusExW` replaces the bulk
+    `Get-Service | ConvertTo-Csv`, and `QueryServiceConfigW` replaces reading a
+    start type out of `sc qc`.
+  - **DNS.** `GetAdaptersAddresses` replaces `netsh interface ip show dns`,
+    matching what the C# port already did with `NetworkInterface`.
+  - **Installed software.** The software-management task now reads the uninstall
+    keys, as the software-update task already did, and falls back to `wmic`.
+  - **Registry.** `registry_ops` gained `create_key`, `delete_value` and
+    `key_exists`, so the last `reg.exe` calls in the audit-policy and
+    security-hardening tasks are gone.
+
+### Fixed
+
+- A read that fails is no longer reported as a clean machine. The share, service,
+  software and DNS audits now separate "nothing found" from "could not look", and
+  `verify` returns false for the latter instead of true.
+- Accounts flagged as not requiring a password are now actually fixed. There is
+  no `net user` or `Set-LocalUser` equivalent for `UF_PASSWD_NOTREQD`, so the
+  step used to do nothing but print a note telling the competitor to do it by
+  hand.
+- `native::registry::delete_value` no longer creates the key it was asked to
+  delete a value from. It opened the key for writing with `RegCreateKeyExW`,
+  which creates one when it is missing.
+- Internet Connection Sharing is verified by its start-type number rather than by
+  looking for the word "DISABLED" in `sc qc` output, and group existence by a
+  status code rather than by looking for "does not exist" - both of which are
+  localised, so on a non-English image the checks silently passed.
+- The command-line process-creation audit value records a fix only when the write
+  succeeds.
 ## 1.11.0
 
 ### Added

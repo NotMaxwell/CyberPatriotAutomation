@@ -149,10 +149,71 @@ dotnet test --filter "ClassName"      # Run specific test class
 - Log all changes made
 
 ### Windows-Specific
-- Use PowerShell or cmd for system commands
-- Registry changes via `reg add`
-- Service management via `sc` or `net`
-- User management via `net user`
+
+Prefer the Windows API over shelling out. `net`, `sc`, `auditpol` and `netsh`
+print localised, human-formatted tables: a parser written against the English
+output returns nothing on a non-English image, and "nothing" reads to the caller
+as *"the group is empty"* or *"the policy is already compliant"* rather than as a
+failure — so the tool reports success having done nothing.
+
+The bindings are generated at compile time by **CsWin32** from
+`src/NativeMethods.txt`, and live under `Core/Native`. They only compile for the
+`net10.0-windows` target framework. The Rust port mirrors this with the
+[`windows` crate][windows-crate] under `rust/src/native`.
+
+Do not call `Core/Native` from a task. The `Core/Utilities` wrappers pick the
+native path or the shell fallback once, behind `#if WINDOWS`:
+
+| Utility | Covers | Fallback |
+| --- | --- | --- |
+| `LocalAccounts` | accounts and local groups | `net`, the `*-LocalUser` cmdlets |
+| `PolicyOps` | password and lockout policy | `net accounts` |
+| `RegistryOps` | registry reads and writes | `reg.exe` |
+| `ServiceOps` | service state and control | `sc.exe`, `net start` |
+
+Each native call returns `null`/`None` on failure rather than an empty result, so
+"nothing found" and "could not look" stay distinguishable — `VerifyAsync` must
+report false for the latter, not true.
+
+When adding an API, add its name to `src/NativeMethods.txt` and mirror the change
+in `rust/Cargo.toml`'s `windows` feature list.
+
+[windows-crate]: https://crates.io/crates/windows
+
+## Every Change Must Prove Itself
+
+A write that returns success is not evidence that the machine changed. A value
+written to the wrong key, a service reconfigured but still running, a policy
+Windows silently normalised — all of them return success. Reporting those as
+fixed is the failure mode the run log exists to prevent.
+
+So the utilities above do not expose a bare write. Each mutating call goes
+through `Remediation.ApplyAsync` (`remediation::apply` in Rust), which:
+
+1. reads the current state, and returns early if it is already right —
+   "already compliant" and "fixed" are different facts,
+2. performs the write,
+3. **reads the state again**, and records that second read as the proof.
+
+The result is one `FixRecord` per change, carrying `Target`, `Intent`, `Before`,
+`Action`, `Outcome` and `Evidence`. `RunLog.AppendLedger` renders them grouped by
+task. Outcomes are `Fixed`, `AlreadyCompliant`, `Failed`, `Unverified` and
+`Skipped`; `Unverified` means the write reported success and the machine
+disagrees, or could not be read back.
+
+**When you add a remediation, route it through `Remediation` rather than calling
+the API directly.** If the result genuinely cannot be read back — setting a
+password, which Windows will not hand back — use `ApplyUnprovableAsync` and say
+why, rather than claiming a proof that was never taken. Audit-only tasks use
+`RecordFinding` so their conclusions land in the same ledger.
+
+Two rules for the `readState` callback:
+
+- Return `null`/`None` **only** when the state could not be read. "Absent" is a
+  readable state and must be spelled as one, or a failed read will be recorded
+  as a successful removal.
+- Read through the same code path the task's own verify step uses. Two parsers
+  that disagree make a change look unapplied when it was not.
 
 ## Common Patterns
 

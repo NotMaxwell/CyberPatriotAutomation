@@ -49,6 +49,81 @@ public class PasswordPolicyInfo
     /// Whether reversible encryption is disabled (should be disabled)
     /// </summary>
     public bool ReversibleEncryptionDisabled { get; set; }
+
+    /// <summary>
+    /// Read the table <c>net accounts</c> prints.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Matches an English-language console only, which is why it is the fallback
+    /// for the netapi32 read rather than the primary path. It lives on the model
+    /// so the task and the run log's evidence read the output the same way; two
+    /// parsers that disagreed would make a change look unapplied when it was not.
+    /// </para>
+    /// <para>
+    /// <see cref="ComplexityEnabled"/> is not set here: it is not in this
+    /// output, and only <c>secedit</c> reports it.
+    /// </para>
+    /// </remarks>
+    public static PasswordPolicyInfo ParseNetAccounts(string output)
+    {
+        var policy = new PasswordPolicyInfo();
+
+        foreach (
+            var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        )
+        {
+            if (line.Contains("Minimum password length"))
+                policy.MinPasswordLength = ExtractNumericValue(line);
+            else if (line.Contains("Maximum password age"))
+            {
+                var value = ExtractNumericValue(line);
+                // -1 is "Never"; the rest of the tool spells that 0.
+                policy.MaxPasswordAge = value == -1 ? 0 : value;
+            }
+            else if (line.Contains("Minimum password age"))
+                policy.MinPasswordAge = ExtractNumericValue(line);
+            else if (line.Contains("Length of password history"))
+                policy.PasswordHistoryCount = ExtractNumericValue(line);
+            else if (line.Contains("Lockout threshold"))
+            {
+                var value = ExtractNumericValue(line);
+                policy.LockoutThreshold = value == -1 ? 0 : value;
+            }
+            else if (line.Contains("Lockout duration"))
+                policy.LockoutDuration = ExtractNumericValue(line);
+            else if (line.Contains("Lockout observation window"))
+                policy.LockoutObservationWindow = ExtractNumericValue(line);
+        }
+
+        return policy;
+    }
+
+    /// <summary>
+    /// The number on the right of a <c>net accounts</c> row, with its words for
+    /// "no limit" mapped to numbers.
+    /// </summary>
+    public static int ExtractNumericValue(string line)
+    {
+        var parts = line.Split(':');
+        if (parts.Length <= 1)
+            return 0;
+
+        var value = parts[1].Trim();
+
+        if (
+            value.Contains("Never", StringComparison.OrdinalIgnoreCase)
+            || value.Contains("Unlimited", StringComparison.OrdinalIgnoreCase)
+        )
+            return -1;
+
+        if (value.Contains("None", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        // The sign is kept: some locales print "-1" where English prints "Never".
+        var digits = new string(value.TakeWhile(c => char.IsDigit(c) || c == '-').ToArray());
+        return int.TryParse(digits, out var parsed) ? parsed : 0;
+    }
 }
 
 /// <summary>

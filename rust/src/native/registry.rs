@@ -11,10 +11,9 @@ use super::{from_wide, to_wide};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW,
-    RegSetValueExW, HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS,
-    KEY_READ, KEY_WOW64_64KEY, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ,
-    REG_VALUE_TYPE,
+    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
+    HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_READ,
+    KEY_WOW64_64KEY, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE,
 };
 
 /// Split `HKLM\Path\To\Key` into its hive and remainder, accepting the long and
@@ -52,7 +51,8 @@ fn open_read(path: &str) -> Option<(HKEY, HKEY)> {
 
 /// Open a key for writing, creating it and any missing parents.
 fn open_write(path: &str) -> Result<HKEY, String> {
-    let (hive, rest) = split(path).ok_or_else(|| format!("unrecognised registry hive in '{path}'"))?;
+    let (hive, rest) =
+        split(path).ok_or_else(|| format!("unrecognised registry hive in '{path}'"))?;
     let wide = to_wide(&rest);
     let mut key = HKEY::default();
 
@@ -73,10 +73,58 @@ fn open_write(path: &str) -> Result<HKEY, String> {
     if status == ERROR_SUCCESS {
         Ok(key)
     } else if status.0 == 5 {
-        Err(format!("access denied writing {path} (run as Administrator)"))
+        Err(format!(
+            "access denied writing {path} (run as Administrator)"
+        ))
     } else {
-        Err(format!("could not open or create {path} (Win32 {})", status.0))
+        Err(format!(
+            "could not open or create {path} (Win32 {})",
+            status.0
+        ))
     }
+}
+
+/// Open an existing key for writing, in the 64-bit view.
+///
+/// Unlike [`open_write`] this never creates anything, so a delete against a key
+/// that is not there cannot bring the key into existence as a side effect.
+fn open_write_existing(path: &str) -> Option<HKEY> {
+    let (hive, rest) = split(path)?;
+    let wide = to_wide(&rest);
+    let mut key = HKEY::default();
+    unsafe {
+        RegOpenKeyExW(
+            hive,
+            PCWSTR(wide.as_ptr()),
+            Some(0),
+            KEY_WRITE | KEY_WOW64_64KEY,
+            &mut key,
+        )
+        .is_ok()
+        .then_some(key)
+    }
+}
+
+/// Does a key exist?
+pub fn key_exists(path: &str) -> bool {
+    match open_read(path) {
+        Some((_hive, key)) => {
+            unsafe {
+                let _ = RegCloseKey(key);
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// Create a key, with no values under it.
+pub fn create_key(path: &str) -> Result<(), String> {
+    let key = open_write(path)?;
+    unsafe {
+        let _ = RegCloseKey(key);
+    }
+    Ok(())
 }
 
 fn set_raw(path: &str, name: &str, kind: REG_VALUE_TYPE, data: &[u8]) -> Result<(), String> {
@@ -178,7 +226,10 @@ pub fn get_string(path: &str, name: &str) -> Option<String> {
 /// Delete a value. A value that is already absent is the desired end state, not
 /// a failure.
 pub fn delete_value(path: &str, name: &str) -> Result<(), String> {
-    let Ok(key) = open_write(path) else {
+    // A key that does not exist holds no value to delete. Opening rather than
+    // creating matters here: `open_write` would create the key on the way to
+    // deleting nothing out of it.
+    let Some(key) = open_write_existing(path) else {
         return Ok(());
     };
     let name_wide = to_wide(name);

@@ -186,8 +186,7 @@ Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://com
                 .collect();
         }
 
-        let (success, output, _e) =
-            command::powershell_query(INSTALLED_SOFTWARE_QUERY).await;
+        let (success, output, _e) = command::powershell_query(INSTALLED_SOFTWARE_QUERY).await;
         if !success {
             return Vec::new();
         }
@@ -252,7 +251,11 @@ Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://com
 
         let mut table = ui::TableBuilder::new()
             .title("[bold]Installed Software (first 20)[/]")
-            .columns(&["[bold]Application[/]", "[bold]Version[/]", "[bold]Publisher[/]"]);
+            .columns(&[
+                "[bold]Application[/]",
+                "[bold]Version[/]",
+                "[bold]Publisher[/]",
+            ]);
         for app in self.installed.iter().take(20) {
             table.add_row([
                 ui::escape(&app.name),
@@ -313,10 +316,7 @@ Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://com
 
         // `-y` answers the confirmation prompt, and `--no-progress` keeps the
         // download percentage out of the captured output.
-        let args = format!(
-            "upgrade {} -y --no-progress --limit-output",
-            update.id
-        );
+        let args = format!("upgrade {} -y --no-progress --limit-output", update.id);
         let (code, output, error) =
             command::execute_for_exit_code(&choco, Some(&args), UPDATE_TIMEOUT).await;
 
@@ -350,7 +350,11 @@ impl Default for SoftwareUpdateTask {
 /// Parse the `ConvertTo-Csv` inventory into applications.
 pub fn parse_installed_software(csv: &str) -> Vec<InstalledApp> {
     let mut apps = Vec::new();
-    for line in csv.split(['\r', '\n']).filter(|l| !l.trim().is_empty()).skip(1) {
+    for line in csv
+        .split(['\r', '\n'])
+        .filter(|l| !l.trim().is_empty())
+        .skip(1)
+    {
         let fields = crate::tasks::parse_csv_line(line);
         if fields.is_empty() {
             continue;
@@ -519,7 +523,10 @@ impl Task for SoftwareUpdateTask {
                 ));
             }
             result.items_skipped = self.updates.len() as i32;
-            result.message = format!("DRY RUN: {} update(s) would be applied.", self.updates.len());
+            result.message = format!(
+                "DRY RUN: {} update(s) would be applied.",
+                self.updates.len()
+            );
             return result;
         }
 
@@ -572,7 +579,10 @@ impl Task for SoftwareUpdateTask {
         result.items_succeeded = updated.len() as i32;
         result.success = failed.is_empty();
         result.message = if failed.is_empty() {
-            format!("Updated {} application(s) to the latest version.", updated.len())
+            format!(
+                "Updated {} application(s) to the latest version.",
+                updated.len()
+            )
         } else {
             format!(
                 "Updated {} of {} application(s); {} could not be updated.",
@@ -590,19 +600,19 @@ impl Task for SoftwareUpdateTask {
 
     async fn verify(&mut self) -> bool {
         if !self.choco_available {
-            ui::markup_line("[yellow]? Cannot verify update status without Chocolatey[/]");
+            ui::markup_line("[yellow]⚠ Cannot verify update status without Chocolatey[/]");
             return false;
         }
 
         let remaining = Self::read_available_updates().await;
         if remaining.is_empty() {
-            ui::markup_line("[green]? All applications are at the latest available version[/]");
+            ui::markup_line("[green]✓ All applications are at the latest available version[/]");
             return true;
         }
 
         for update in &remaining {
             ui::markup_line(&format!(
-                "[red]? {} is still at {} (latest {})[/]",
+                "[red]✗ {} is still at {} (latest {})[/]",
                 ui::escape(&update.name),
                 ui::escape(&update.current_version),
                 ui::escape(&update.available_version)

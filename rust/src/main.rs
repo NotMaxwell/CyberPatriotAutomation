@@ -8,7 +8,7 @@ use std::future::Future;
 use std::time::Duration;
 
 use cyberpatriot_automation::app_config;
-use cyberpatriot_automation::models::{ReadmeData, TaskResult};
+use cyberpatriot_automation::models::{FixOutcome, ReadmeData, TaskResult};
 use cyberpatriot_automation::readme_parser;
 use cyberpatriot_automation::run_log;
 use cyberpatriot_automation::tasks::*;
@@ -44,17 +44,53 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
 /// being documented.
 const FLAGS: &[(&str, &str, &str)] = &[
     ("--help", "-h", "Show this help and exit"),
-    ("--version", "-V", "Print the version and build date, then exit"),
-    ("--readme <path>", "-r", "Read the competition README at <path>"),
+    (
+        "--version",
+        "-V",
+        "Print the version and build date, then exit",
+    ),
+    (
+        "--readme <path>",
+        "-r",
+        "Read the competition README at <path>",
+    ),
     ("--auto-readme", "-R", "Find the README automatically"),
-    ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
-    ("--dry-run", "-d", "Report what would change without changing it"),
-    ("--all", "", "Run every task (the default when no task is named)"),
+    (
+        "--parse-readme",
+        "",
+        "Show what the parser extracted, then exit (read-only)",
+    ),
+    (
+        "--dry-run",
+        "-d",
+        "Report what would change without changing it",
+    ),
+    (
+        "--all",
+        "",
+        "Run every task (the default when no task is named)",
+    ),
     ("--password-policy", "-p", "Password and lockout policy"),
-    ("--account-permissions", "-a", "Account permissions and group membership"),
-    ("--user-management", "-u", "Create, remove and correct user accounts"),
-    ("--service-management", "-s", "Enable required and disable insecure services"),
-    ("--audit-policy", "-t", "Audit policy and security event logging"),
+    (
+        "--account-permissions",
+        "-a",
+        "Account permissions and group membership",
+    ),
+    (
+        "--user-management",
+        "-u",
+        "Create, remove and correct user accounts",
+    ),
+    (
+        "--service-management",
+        "-s",
+        "Enable required and disable insecure services",
+    ),
+    (
+        "--audit-policy",
+        "-t",
+        "Audit policy and security event logging",
+    ),
     ("--firewall", "-f", "Windows Firewall profiles and rules"),
     ("--security-hardening", "-H", "General security hardening"),
     ("--media-scan", "-m", "Find and remove prohibited media"),
@@ -238,7 +274,10 @@ async fn run_automation() {
                     // shortcut resolving to the wrong target is invisible: the
                     // run just reports an empty README with nothing to point at.
                     if resolved == *file {
-                        ui::markup_line(&format!("[dim]Using README: {}[/]", ui::escape(&resolved)));
+                        ui::markup_line(&format!(
+                            "[dim]Using README: {}[/]",
+                            ui::escape(&resolved)
+                        ));
                     } else {
                         ui::markup_line(&format!(
                             "[dim]Using README: {} (resolved from {})[/]",
@@ -287,7 +326,9 @@ async fn run_automation() {
         if let Some(data) = &readme_data {
             readme_parser::display_parsed_data(data);
         } else {
-            ui::markup_line("[yellow]No README file specified. Use --readme <file> to parse one.[/]");
+            ui::markup_line(
+                "[yellow]No README file specified. Use --readme <file> to parse one.[/]",
+            );
         }
         // `--parse-readme` is a report, not a run. Combining it with task flags
         // silently did nothing, which reads as the tasks having been skipped for
@@ -392,6 +433,10 @@ async fn run_automation() {
         task.set_dry_run(dry_run);
     }
 
+    // The `*_ops` modules record every change against whichever task is running,
+    // and hold back from writing anything at all during a dry run.
+    run_log::set_dry_run(dry_run);
+
     let mut results: Vec<TaskResult> = Vec::new();
 
     // Start the independent audits now so their external commands overlap the
@@ -425,17 +470,29 @@ async fn run_automation() {
         }
     }
 
+    run_log::begin_task("(summary)");
     display_summary(&results);
+    display_ledger_summary();
     ui::write_line();
     ui::rule("[bold green]✓ Automation Complete[/]");
     ui::write_line();
 
+    run_log::append_ledger();
     append_result_details(&results);
     finish_log(&log_path);
 }
 
 /// Read state, remediate, then verify - the pipeline every task follows.
+///
+/// The whole pipeline is scoped to the task's name so every change the `*_ops`
+/// modules record underneath it is attributed correctly, including for the
+/// audits that run concurrently.
 async fn run_task(task: &mut Box<dyn Task>) -> TaskResult {
+    let name = task.name().to_string();
+    run_log::in_task(&name, run_task_inner(task)).await
+}
+
+async fn run_task_inner(task: &mut Box<dyn Task>) -> TaskResult {
     ui::write_line();
     ui::rule(&format!("[bold blue]{}[/]", ui::escape(task.name())));
     ui::write_line();
@@ -589,6 +646,94 @@ fn display_summary(results: &[TaskResult]) {
     display_overall_statistics(results);
 }
 
+/// Show what the run actually changed, and how much of it was confirmed.
+///
+/// The task summary above answers "did each task run"; this answers "what is
+/// different about this machine now, and how do we know". The two disagree more
+/// often than is comfortable - a task that reports success while every change it
+/// made reads back unverified is exactly the case worth surfacing before the
+/// round ends, so anything not confirmed is listed by name.
+fn display_ledger_summary() {
+    let fixes = run_log::fixes();
+    if fixes.is_empty() {
+        return;
+    }
+
+    ui::write_line();
+    ui::rule("[bold blue]Changes and Proof[/]");
+    ui::write_line();
+
+    let count = |outcome: FixOutcome| {
+        fixes
+            .iter()
+            .filter(|f| f.outcome == outcome)
+            .count()
+            .to_string()
+    };
+
+    let mut table = ui::TableBuilder::new().columns(&[
+        "[bold]Outcome[/]",
+        "[bold]Count[/]",
+        "[bold]Meaning[/]",
+    ]);
+
+    for (label, outcome, meaning) in [
+        (
+            "[green]Fixed[/]",
+            FixOutcome::Fixed,
+            "changed, and reading it back confirms it",
+        ),
+        (
+            "[green]Already OK[/]",
+            FixOutcome::AlreadyCompliant,
+            "nothing to do; the machine was already right",
+        ),
+        (
+            "[red]Failed[/]",
+            FixOutcome::Failed,
+            "attempted and did not take",
+        ),
+        (
+            "[yellow]Unverified[/]",
+            FixOutcome::Unverified,
+            "the write reported success but could not be confirmed",
+        ),
+        ("[dim]Skipped[/]", FixOutcome::Skipped, "not attempted"),
+    ] {
+        table.add_row([
+            label.to_string(),
+            count(outcome),
+            format!("[dim]{meaning}[/]"),
+        ]);
+    }
+
+    table.print();
+
+    let needs_attention: Vec<_> = fixes
+        .iter()
+        .filter(|f| matches!(f.outcome, FixOutcome::Failed | FixOutcome::Unverified))
+        .collect();
+
+    if !needs_attention.is_empty() {
+        ui::write_line();
+        ui::markup_line("[yellow]Not confirmed - check these by hand:[/]");
+        for fix in needs_attention {
+            ui::markup_line(&format!(
+                "  [dim]{:<10}[/] {} [dim]- {}[/]",
+                fix.outcome.tag(),
+                ui::escape(&fix.target),
+                ui::escape(&fix.evidence)
+            ));
+        }
+    }
+
+    ui::write_line();
+    ui::markup_line(
+        "[dim]Every change, with what it wanted and the read-back that proves it, \
+         is in the run log.[/]",
+    );
+}
+
 fn display_overall_statistics(results: &[TaskResult]) {
     if results.is_empty() {
         return;
@@ -642,8 +787,16 @@ fn display_overall_statistics(results: &[TaskResult]) {
     ui::bar_chart(
         "[bold]Completion Rate[/]",
         &[
-            ("Completed".to_string(), overall_completion_rate, completion_color),
-            ("Remaining".to_string(), 100.0 - overall_completion_rate, BarColor::Grey),
+            (
+                "Completed".to_string(),
+                overall_completion_rate,
+                completion_color,
+            ),
+            (
+                "Remaining".to_string(),
+                100.0 - overall_completion_rate,
+                BarColor::Grey,
+            ),
         ],
     );
     ui::write_line();
@@ -652,8 +805,16 @@ fn display_overall_statistics(results: &[TaskResult]) {
     ui::bar_chart(
         "[bold]Confidence Level[/]",
         &[
-            ("Confident".to_string(), overall_confidence, confidence_color),
-            ("Uncertain".to_string(), 100.0 - overall_confidence, BarColor::Grey),
+            (
+                "Confident".to_string(),
+                overall_confidence,
+                confidence_color,
+            ),
+            (
+                "Uncertain".to_string(),
+                100.0 - overall_confidence,
+                BarColor::Grey,
+            ),
         ],
     );
     ui::write_line();
@@ -697,7 +858,9 @@ fn display_overall_statistics(results: &[TaskResult]) {
 
     if overall_confidence < 90.0 {
         ui::write_line();
-        ui::markup_line("[dim italic]💡 Tip: Manual verification recommended for tasks with low confidence.[/]");
+        ui::markup_line(
+            "[dim italic]💡 Tip: Manual verification recommended for tasks with low confidence.[/]",
+        );
     }
 }
 
@@ -755,7 +918,10 @@ mod tests {
             first_unknown_argument(&args(&["--readme", "C:\\CyberPatriot\\README.url"])),
             None
         );
-        assert_eq!(first_unknown_argument(&args(&["--log", "run.txt", "--all"])), None);
+        assert_eq!(
+            first_unknown_argument(&args(&["--log", "run.txt", "--all"])),
+            None
+        );
         assert_eq!(first_unknown_argument(&args(&["-r", "readme.html"])), None);
     }
 

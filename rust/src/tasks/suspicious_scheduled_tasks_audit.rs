@@ -62,16 +62,17 @@ fn parse_scheduled_tasks(output: &str) -> Vec<ScheduledTask> {
     let mut name: Option<String> = None;
     let mut command = String::new();
 
-    let flush = |name: &mut Option<String>, command: &mut String, tasks: &mut Vec<ScheduledTask>| {
-        if let Some(n) = name.take() {
-            tasks.push(ScheduledTask {
-                name: n,
-                command: std::mem::take(command),
-            });
-        } else {
-            command.clear();
-        }
-    };
+    let flush =
+        |name: &mut Option<String>, command: &mut String, tasks: &mut Vec<ScheduledTask>| {
+            if let Some(n) = name.take() {
+                tasks.push(ScheduledTask {
+                    name: n,
+                    command: std::mem::take(command),
+                });
+            } else {
+                command.clear();
+            }
+        };
 
     for line in output.lines() {
         let trimmed = line.trim();
@@ -122,6 +123,32 @@ fn suspicious_tasks(output: &str) -> Vec<ScheduledTask> {
         .collect()
 }
 
+/// One task's "Scheduled Task State", or `None` when it could not be read.
+///
+/// This is the evidence for a disable: `schtasks /Change` reports only an exit
+/// code, and a task that is still enabled after a successful-looking change is
+/// exactly the case worth catching.
+async fn read_task_status(task_name: &str) -> Option<String> {
+    let (success, output, _e) = command::execute(
+        "schtasks",
+        Some(&format!("/query /tn \"{task_name}\" /fo LIST /v")),
+    )
+    .await;
+    if !success {
+        return None;
+    }
+
+    output
+        .split(['\r', '\n'])
+        .filter(|l| !l.is_empty())
+        // "Scheduled Task State:  Disabled" - the label is localised, but
+        // returning None on a miss keeps a wrong read from reading as a right
+        // one.
+        .find(|l| l.to_lowercase().contains("scheduled task state"))
+        .and_then(|l| l.split_once(':'))
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
 
 #[async_trait]
 impl Task for SuspiciousScheduledTasksAuditTask {
@@ -139,7 +166,9 @@ impl Task for SuspiciousScheduledTasksAuditTask {
 
     async fn execute(&mut self) -> TaskResult {
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing scheduled tasks audit (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing scheduled tasks audit (no changes will be made)[/]",
+            );
             return TaskResult {
                 task_name: self.name.clone(),
                 success: true,
@@ -152,7 +181,10 @@ impl Task for SuspiciousScheduledTasksAuditTask {
             command::execute("schtasks", Some("/query /fo LIST /v")).await;
         let mut details: Vec<String> = Vec::new();
         if !success {
-            details.push(format!("Failed to query scheduled tasks: {}", error.clone().unwrap_or_default()));
+            details.push(format!(
+                "Failed to query scheduled tasks: {}",
+                error.clone().unwrap_or_default()
+            ));
             ui::markup_line(&format!(
                 "[red]✗ Failed to query scheduled tasks: {}[/]",
                 ui::escape(&error.unwrap_or_default())
@@ -169,7 +201,10 @@ impl Task for SuspiciousScheduledTasksAuditTask {
         details.push(format!("Total scheduled tasks found: {}", all_tasks.len()));
 
         let suspicious = suspicious_tasks(&output);
-        details.push(format!("Suspicious keywords checked: {}", SUSPICIOUS_KEYWORDS.join(", ")));
+        details.push(format!(
+            "Suspicious keywords checked: {}",
+            SUSPICIOUS_KEYWORDS.join(", ")
+        ));
         details.push("Built-in \\Microsoft\\ tasks are excluded from removal.".to_string());
 
         if suspicious.is_empty() {
@@ -187,25 +222,43 @@ impl Task for SuspiciousScheduledTasksAuditTask {
         let mut disabled_tasks: Vec<String> = Vec::new();
         let mut failed_to_disable: Vec<String> = Vec::new();
         for task in &suspicious {
-            let (disable_success, _out, disable_error) = command::execute(
-                "schtasks",
-                Some(&format!("/Change /TN \"{}\" /Disable", task.name)),
+            let outcome = crate::remediation::apply(
+                &format!("Scheduled task {}", task.name),
+                "disabled - it runs from a path a scheduled task should not",
+                || read_task_status(&task.name),
+                |s| s.eq_ignore_ascii_case("Disabled"),
+                "ran schtasks /Change /Disable",
+                || async {
+                    let (ok, _out, error) = command::execute(
+                        "schtasks",
+                        Some(&format!("/Change /TN \"{}\" /Disable", task.name)),
+                    )
+                    .await;
+                    if ok {
+                        Ok(())
+                    } else {
+                        Err(error.unwrap_or_else(|| "schtasks /Change failed".to_string()))
+                    }
+                },
             )
             .await;
-            if disable_success {
-                ui::markup_line(&format!(
-                    "[yellow]Disabled suspicious task: {}[/]",
-                    ui::escape(&task.name)
-                ));
-                disabled_tasks.push(task.name.clone());
-            } else {
-                let e = disable_error.unwrap_or_default();
-                ui::markup_line(&format!(
-                    "[red]✗ Failed to disable task: {} ({})[/]",
-                    ui::escape(&task.name),
-                    ui::escape(&e)
-                ));
-                failed_to_disable.push(format!("{} ({})", task.name, e));
+
+            match outcome {
+                Ok(()) => {
+                    ui::markup_line(&format!(
+                        "[yellow]Disabled suspicious task: {}[/]",
+                        ui::escape(&task.name)
+                    ));
+                    disabled_tasks.push(task.name.clone());
+                }
+                Err(e) => {
+                    ui::markup_line(&format!(
+                        "[red]✗ Failed to disable task: {} ({})[/]",
+                        ui::escape(&task.name),
+                        ui::escape(&e)
+                    ));
+                    failed_to_disable.push(format!("{} ({})", task.name, e));
+                }
             }
         }
         details.push(format!(
@@ -217,7 +270,10 @@ impl Task for SuspiciousScheduledTasksAuditTask {
             }
         ));
         if !failed_to_disable.is_empty() {
-            details.push(format!("Failed to disable: {}", failed_to_disable.join(", ")));
+            details.push(format!(
+                "Failed to disable: {}",
+                failed_to_disable.join(", ")
+            ));
         }
 
         TaskResult {

@@ -119,6 +119,27 @@ public static class NativeRegistry
         }
     }
 
+    /// <summary>Does a key exist?</summary>
+    public static bool KeyExists(string keyPath)
+    {
+        if (Split(keyPath) is not var (hive, path))
+            return false;
+
+        try
+        {
+            using (hive)
+            using (var key = hive.OpenSubKey(path))
+            {
+                return key is not null;
+            }
+        }
+        catch (Exception ex)
+            when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>Write a REG_DWORD. Returns null on success.</summary>
     public static string? SetDword(string keyPath, string name, int value) =>
         SetValue(keyPath, name, value, RegistryValueKind.DWord);

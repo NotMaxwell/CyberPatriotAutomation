@@ -58,10 +58,25 @@ fn secure_passwords_should_be_unique() {
 #[test]
 fn secure_passwords_should_meet_complexity_requirements() {
     for password in app_config::SECURE_PASSWORDS {
-        assert!(password.chars().count() >= 12, "password too short: {password}");
-        assert!(password.chars().any(|c| c.is_ascii_uppercase()), "no uppercase: {password}");
-        assert!(password.chars().any(|c| c.is_ascii_lowercase()), "no lowercase: {password}");
-        assert!(password.chars().any(|c| c.is_ascii_digit()), "no digit: {password}");
-        assert!(password.chars().any(|c| !c.is_ascii_alphanumeric()), "no special: {password}");
+        assert!(
+            password.chars().count() >= 12,
+            "password too short: {password}"
+        );
+        assert!(
+            password.chars().any(|c| c.is_ascii_uppercase()),
+            "no uppercase: {password}"
+        );
+        assert!(
+            password.chars().any(|c| c.is_ascii_lowercase()),
+            "no lowercase: {password}"
+        );
+        assert!(
+            password.chars().any(|c| c.is_ascii_digit()),
+            "no digit: {password}"
+        );
+        assert!(
+            password.chars().any(|c| !c.is_ascii_alphanumeric()),
+            "no special: {password}"
+        );
     }
 }

@@ -198,11 +198,11 @@ public class FirewallConfigurationTask : BaseTask
                 success && output.Trim().Equals("True", StringComparison.OrdinalIgnoreCase);
             if (enabled)
             {
-                AnsiConsole.MarkupLine($"[green]? {profile} firewall profile is enabled[/]");
+                AnsiConsole.MarkupLine($"[green]✓ {profile} firewall profile is enabled[/]");
             }
             else
             {
-                AnsiConsole.MarkupLine($"[red]? {profile} firewall profile is disabled[/]");
+                AnsiConsole.MarkupLine($"[red]✗ {profile} firewall profile is disabled[/]");
                 allGood = false;
             }
         }
@@ -224,7 +224,7 @@ public class FirewallConfigurationTask : BaseTask
         if (enabled is not null)
         {
             fixes.Add($"Enabled firewall for {string.Join(", ", enabled)} profiles");
-            AnsiConsole.MarkupLine("[green]? Firewall enabled for all profiles[/]");
+            AnsiConsole.MarkupLine("[green]✓ Firewall enabled for all profiles[/]");
             return;
         }
         AnsiConsole.MarkupLine(
@@ -240,12 +240,12 @@ public class FirewallConfigurationTask : BaseTask
         if (success)
         {
             fixes.Add("Enabled firewall for Domain, Public, and Private profiles");
-            AnsiConsole.MarkupLine("[green]? Firewall enabled for all profiles[/]");
+            AnsiConsole.MarkupLine("[green]✓ Firewall enabled for all profiles[/]");
         }
         else
         {
             issues.Add($"Failed to enable firewall profiles: {error}");
-            AnsiConsole.MarkupLine("[red]? Failed to enable firewall profiles[/]");
+            AnsiConsole.MarkupLine("[red]✗ Failed to enable firewall profiles[/]");
         }
     }
 
@@ -262,7 +262,7 @@ public class FirewallConfigurationTask : BaseTask
         if (success)
         {
             fixes.Add("Configured default firewall actions (Block inbound, Allow outbound)");
-            AnsiConsole.MarkupLine("[green]? Default actions configured[/]");
+            AnsiConsole.MarkupLine("[green]✓ Default actions configured[/]");
         }
         else
         {
@@ -278,7 +278,7 @@ public class FirewallConfigurationTask : BaseTask
         if (profileSuccess)
         {
             fixes.Add("Set network profile to Public");
-            AnsiConsole.MarkupLine("[green]? Network profile set to Public[/]");
+            AnsiConsole.MarkupLine("[green]✓ Network profile set to Public[/]");
         }
     }
 
@@ -337,7 +337,7 @@ public class FirewallConfigurationTask : BaseTask
             if (success)
             {
                 fixes.Add($"Disabled rule: {rule}");
-                AnsiConsole.MarkupLine($"[green]? Disabled: {rule}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Disabled: {rule}[/]");
             }
         }
 
@@ -352,7 +352,7 @@ public class FirewallConfigurationTask : BaseTask
             if (success)
             {
                 fixes.Add($"Disabled rule group: {group}");
-                AnsiConsole.MarkupLine($"[green]? Disabled group: {group}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Disabled group: {group}[/]");
             }
         }
 
@@ -383,7 +383,7 @@ public class FirewallConfigurationTask : BaseTask
         if (success)
         {
             fixes.Add("Configured firewall logging");
-            AnsiConsole.MarkupLine("[green]? Firewall logging configured[/]");
+            AnsiConsole.MarkupLine("[green]✓ Firewall logging configured[/]");
         }
         else
         {
@@ -402,7 +402,7 @@ public class FirewallConfigurationTask : BaseTask
             );
 
             fixes.Add("Configured firewall logging (via netsh)");
-            AnsiConsole.MarkupLine("[green]? Firewall logging configured via netsh[/]");
+            AnsiConsole.MarkupLine("[green]✓ Firewall logging configured via netsh[/]");
         }
     }
 

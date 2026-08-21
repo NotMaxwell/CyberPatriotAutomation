@@ -3,6 +3,7 @@
 use crate::command;
 use crate::impl_task_meta;
 use crate::models::{SystemInfo, TaskResult};
+use crate::registry_ops;
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
@@ -118,26 +119,186 @@ const AUDIT_CATEGORIES: &[(&str, &[&str])] = &[
 /// Registry settings for security options: (key, (path, name, value, description)).
 #[allow(clippy::type_complexity)]
 const SECURITY_SETTINGS: &[(&str, (&str, &str, i32, &str))] = &[
-    ("AuditBaseObjects", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "auditbaseobjects", 1, "Audit access of Global System Objects")),
-    ("FullPrivilegeAuditing", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "fullprivilegeauditing", 1, "Audit Backup and Restore privilege")),
-    ("CrashOnAuditFail", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "crashonauditfail", 0, "Crash on audit fail (disabled)")),
-    ("RunAsPPL", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "RunAsPPL", 1, "Enable LSA protection")),
-    ("LsassAuditLevel", (r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LSASS.exe", "AuditLevel", 8, "LSASS audit level")),
-    ("DontDisplayLastUsername", (r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "dontdisplaylastusername", 1, "Don't display last username")),
-    ("DisableCAD", (r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System", "DisableCAD", 0, "Require Ctrl+Alt+Del")),
-    ("RestrictAnonymous", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "restrictanonymous", 1, "Restrict anonymous enumeration of shares")),
-    ("RestrictAnonymousSAM", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "restrictanonymoussam", 1, "Restrict anonymous enumeration of SAM")),
-    ("EveryoneIncludesAnonymous", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "everyoneincludesanonymous", 0, "Anonymous not in Everyone group")),
-    ("LimitBlankPasswordUse", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "LimitBlankPasswordUse", 1, "Limit blank password use")),
-    ("DisableDomainCreds", (r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa", "disabledomaincreds", 1, "Don't store domain credentials")),
-    ("RequireSecuritySignature", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "requiresecuritysignature", 1, "Require SMB signing")),
-    ("EnableSecuritySignature", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "enablesecuritysignature", 1, "Enable SMB signing")),
-    ("NullSessionPipes", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "NullSessionPipes", 0, "Clear null session pipes")),
-    ("NullSessionShares", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "NullSessionShares", 0, "Clear null session shares")),
-    ("AutoDisconnect", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters", "autodisconnect", 15, "Auto disconnect idle sessions (15 min)")),
-    ("EnablePlainTextPassword", (r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters", "EnablePlainTextPassword", 0, "Disable plain text passwords")),
-    ("ClearPageFileAtShutdown", (r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management", "ClearPageFileAtShutdown", 1, "Clear page file at shutdown")),
-    ("CrashDumpEnabled", (r"HKLM\SYSTEM\CurrentControlSet\Control\CrashControl", "CrashDumpEnabled", 0, "Disable crash dump")),
+    (
+        "AuditBaseObjects",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "auditbaseobjects",
+            1,
+            "Audit access of Global System Objects",
+        ),
+    ),
+    (
+        "FullPrivilegeAuditing",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "fullprivilegeauditing",
+            1,
+            "Audit Backup and Restore privilege",
+        ),
+    ),
+    (
+        "CrashOnAuditFail",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "crashonauditfail",
+            0,
+            "Crash on audit fail (disabled)",
+        ),
+    ),
+    (
+        "RunAsPPL",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "RunAsPPL",
+            1,
+            "Enable LSA protection",
+        ),
+    ),
+    (
+        "LsassAuditLevel",
+        (
+            r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\LSASS.exe",
+            "AuditLevel",
+            8,
+            "LSASS audit level",
+        ),
+    ),
+    (
+        "DontDisplayLastUsername",
+        (
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            "dontdisplaylastusername",
+            1,
+            "Don't display last username",
+        ),
+    ),
+    (
+        "DisableCAD",
+        (
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+            "DisableCAD",
+            0,
+            "Require Ctrl+Alt+Del",
+        ),
+    ),
+    (
+        "RestrictAnonymous",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "restrictanonymous",
+            1,
+            "Restrict anonymous enumeration of shares",
+        ),
+    ),
+    (
+        "RestrictAnonymousSAM",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "restrictanonymoussam",
+            1,
+            "Restrict anonymous enumeration of SAM",
+        ),
+    ),
+    (
+        "EveryoneIncludesAnonymous",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "everyoneincludesanonymous",
+            0,
+            "Anonymous not in Everyone group",
+        ),
+    ),
+    (
+        "LimitBlankPasswordUse",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "LimitBlankPasswordUse",
+            1,
+            "Limit blank password use",
+        ),
+    ),
+    (
+        "DisableDomainCreds",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa",
+            "disabledomaincreds",
+            1,
+            "Don't store domain credentials",
+        ),
+    ),
+    (
+        "RequireSecuritySignature",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "requiresecuritysignature",
+            1,
+            "Require SMB signing",
+        ),
+    ),
+    (
+        "EnableSecuritySignature",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "enablesecuritysignature",
+            1,
+            "Enable SMB signing",
+        ),
+    ),
+    (
+        "NullSessionPipes",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "NullSessionPipes",
+            0,
+            "Clear null session pipes",
+        ),
+    ),
+    (
+        "NullSessionShares",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "NullSessionShares",
+            0,
+            "Clear null session shares",
+        ),
+    ),
+    (
+        "AutoDisconnect",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+            "autodisconnect",
+            15,
+            "Auto disconnect idle sessions (15 min)",
+        ),
+    ),
+    (
+        "EnablePlainTextPassword",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Services\LanmanWorkstation\Parameters",
+            "EnablePlainTextPassword",
+            0,
+            "Disable plain text passwords",
+        ),
+    ),
+    (
+        "ClearPageFileAtShutdown",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management",
+            "ClearPageFileAtShutdown",
+            1,
+            "Clear page file at shutdown",
+        ),
+    ),
+    (
+        "CrashDumpEnabled",
+        (
+            r"HKLM\SYSTEM\CurrentControlSet\Control\CrashControl",
+            "CrashDumpEnabled",
+            0,
+            "Disable crash dump",
+        ),
+    ),
 ];
 
 pub struct AuditPolicyTask {
@@ -164,7 +325,8 @@ impl AuditPolicyTask {
 
         let mut count = 0;
         for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()) {
-            if line.contains("Success") || line.contains("Failure") || line.contains("No Auditing") {
+            if line.contains("Success") || line.contains("Failure") || line.contains("No Auditing")
+            {
                 let parts: Vec<&str> = line.split("  ").filter(|p| !p.is_empty()).collect();
                 if parts.len() >= 2 {
                     let category = parts[0].trim();
@@ -191,8 +353,7 @@ impl AuditPolicyTask {
     }
 
     async fn configure_audit_categories(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
-        let mut table = ui::TableBuilder::new()
-            .columns(&["[bold]Category[/]", "[bold]Status[/]"]);
+        let mut table = ui::TableBuilder::new().columns(&["[bold]Category[/]", "[bold]Status[/]"]);
 
         for (category, _subs) in AUDIT_CATEGORIES {
             ui::markup_line(&format!("[cyan]Configuring {category}...[/]"));
@@ -205,14 +366,14 @@ impl AuditPolicyTask {
                     Ok(count) => {
                         table.add_row([
                             category.to_string(),
-                            format!("[green]? Success & Failure ({count} subcategories)[/]"),
+                            format!("[green]✓ Success & Failure ({count} subcategories)[/]"),
                         ]);
                         fixes.push(format!(
                             "Configured audit: {category} (Success & Failure, {count} subcategories)"
                         ));
                     }
                     Err(reason) => {
-                        table.add_row([category.to_string(), "[red]? Failed[/]".to_string()]);
+                        table.add_row([category.to_string(), "[red]✗ Failed[/]".to_string()]);
                         issues.push(format!("Failed to configure {category}: {reason}"));
                     }
                 }
@@ -233,10 +394,13 @@ impl AuditPolicyTask {
             .await;
 
             if success_enable && failure_enable {
-                table.add_row([category.to_string(), "[green]? Success & Failure[/]".to_string()]);
+                table.add_row([
+                    category.to_string(),
+                    "[green]✓ Success & Failure[/]".to_string(),
+                ]);
                 fixes.push(format!("Configured audit: {category} (Success & Failure)"));
             } else {
-                table.add_row([category.to_string(), "[red]? Failed[/]".to_string()]);
+                table.add_row([category.to_string(), "[red]✗ Failed[/]".to_string()]);
                 issues.push(format!(
                     "Failed to configure {}: {}",
                     category,
@@ -256,12 +420,16 @@ impl AuditPolicyTask {
             for subcategory in *subcategories {
                 let (success_enable, _o, _e) = command::execute(
                     "auditpol",
-                    Some(&format!("/set /subcategory:\"{subcategory}\" /success:enable")),
+                    Some(&format!(
+                        "/set /subcategory:\"{subcategory}\" /success:enable"
+                    )),
                 )
                 .await;
                 let (failure_enable, _o, _e) = command::execute(
                     "auditpol",
-                    Some(&format!("/set /subcategory:\"{subcategory}\" /failure:enable")),
+                    Some(&format!(
+                        "/set /subcategory:\"{subcategory}\" /failure:enable"
+                    )),
                 )
                 .await;
                 if success_enable && failure_enable {
@@ -276,7 +444,9 @@ impl AuditPolicyTask {
         // nothing still reported "Configured 0 audit subcategories" as a success.
         if configured_count > 0 {
             fixes.push(format!("Configured {configured_count} audit subcategories"));
-            ui::markup_line(&format!("[green]? Configured {configured_count} audit subcategories[/]"));
+            ui::markup_line(&format!(
+                "[green]✓ Configured {configured_count} audit subcategories[/]"
+            ));
         }
         if !failed.is_empty() {
             issues.push(format!(
@@ -285,37 +455,53 @@ impl AuditPolicyTask {
                 failed.join(", ")
             ));
             ui::markup_line(&format!(
-                "[yellow]? Could not configure {} audit subcategories[/]",
+                "[yellow]⚠ Could not configure {} audit subcategories[/]",
                 failed.len()
             ));
         }
 
-        let additional = ["Logon", "Process Creation", "Special Logon", "Security State Change"];
+        let additional = [
+            "Logon",
+            "Process Creation",
+            "Special Logon",
+            "Security State Change",
+        ];
         for subcategory in additional {
             let _ = command::execute(
                 "auditpol",
-                Some(&format!("/set /subcategory:\"{subcategory}\" /success:enable /failure:enable")),
+                Some(&format!(
+                    "/set /subcategory:\"{subcategory}\" /success:enable /failure:enable"
+                )),
             )
             .await;
         }
     }
 
     async fn configure_security_registry(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
-        let mut table = ui::TableBuilder::new()
-            .columns(&["[bold]Setting[/]", "[bold]Description[/]", "[bold]Status[/]"]);
+        let mut table = ui::TableBuilder::new().columns(&[
+            "[bold]Setting[/]",
+            "[bold]Description[/]",
+            "[bold]Status[/]",
+        ]);
 
         for (key, (path, name, value, description)) in SECURITY_SETTINGS {
-            let (success, _o, error) = command::execute(
-                "reg",
-                Some(&format!("add \"{path}\" /v {name} /t REG_DWORD /d {value} /f")),
-            )
-            .await;
-            if success {
-                table.add_row([key.to_string(), description.to_string(), "[green]? Set[/]".to_string()]);
-                fixes.push(format!("Set registry: {name}"));
-            } else {
-                table.add_row([key.to_string(), description.to_string(), "[red]? Failed[/]".to_string()]);
-                issues.push(format!("Failed to set {}: {}", name, error.unwrap_or_default()));
+            match registry_ops::set_dword(path, name, *value as u32).await {
+                Ok(()) => {
+                    table.add_row([
+                        key.to_string(),
+                        description.to_string(),
+                        "[green]✓ Set[/]".to_string(),
+                    ]);
+                    fixes.push(format!("Set registry: {name}"));
+                }
+                Err(error) => {
+                    table.add_row([
+                        key.to_string(),
+                        description.to_string(),
+                        "[red]✗ Failed[/]".to_string(),
+                    ]);
+                    issues.push(format!("Failed to set {name}: {error}"));
+                }
             }
         }
         table.print();
@@ -324,7 +510,11 @@ impl AuditPolicyTask {
     async fn configure_event_log_settings(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line("[cyan]Configuring event log settings...[/]");
 
-        let log_settings = [("Security", 196608), ("Application", 32768), ("System", 32768)];
+        let log_settings = [
+            ("Security", 196608),
+            ("Application", 32768),
+            ("System", 32768),
+        ];
         for (log_name, max_size) in log_settings {
             let (success, _o, _e) = command::powershell(&format!(
                 "Limit-EventLog -LogName {} -MaximumSize {max_size}KB -OverflowAction OverwriteAsNeeded",
@@ -332,48 +522,64 @@ impl AuditPolicyTask {
             ))
             .await;
             if success {
-                fixes.push(format!("Configured {log_name} log: {}MB max size", max_size / 1024));
-                ui::markup_line(&format!("[green]? Configured {log_name} log: {}MB max size[/]", max_size / 1024));
+                fixes.push(format!(
+                    "Configured {log_name} log: {}MB max size",
+                    max_size / 1024
+                ));
+                ui::markup_line(&format!(
+                    "[green]✓ Configured {log_name} log: {}MB max size[/]",
+                    max_size / 1024
+                ));
             } else {
-                ui::markup_line(&format!("[yellow]? Could not configure {log_name} log[/]"));
+                ui::markup_line(&format!("[yellow]⚠ Could not configure {log_name} log[/]"));
             }
         }
 
         ui::markup_line("[cyan]Enabling PowerShell logging...[/]");
         let ps_logging_keys = [
-            (r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging", "EnableScriptBlockLogging", 1),
-            (r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging", "EnableModuleLogging", 1),
-            (r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription", "EnableTranscripting", 1),
+            (
+                r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ScriptBlockLogging",
+                "EnableScriptBlockLogging",
+                1,
+            ),
+            (
+                r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\ModuleLogging",
+                "EnableModuleLogging",
+                1,
+            ),
+            (
+                r"HKLM\SOFTWARE\Policies\Microsoft\Windows\PowerShell\Transcription",
+                "EnableTranscripting",
+                1,
+            ),
         ];
         for (path, name, value) in ps_logging_keys {
-            let _ = command::execute("reg", Some(&format!("add \"{path}\" /f"))).await;
-            let (success, _o, _e) = command::execute(
-                "reg",
-                Some(&format!("add \"{path}\" /v {name} /t REG_DWORD /d {value} /f")),
-            )
-            .await;
-            if success {
+            // The key has to exist before the value can be written; `set_dword`
+            // creates it, so the separate create is only here for the policy
+            // keys that are meant to exist even with no values under them.
+            let _ = registry_ops::create_key(path).await;
+            if registry_ops::set_dword(path, name, value).await.is_ok() {
                 fixes.push(format!("Enabled PowerShell {name}"));
             }
         }
-        ui::markup_line("[green]? Configured PowerShell logging[/]");
+        ui::markup_line("[green]✓ Configured PowerShell logging[/]");
 
         // Previously the result was discarded and the fix recorded regardless.
-        let (cmdline_success, _o, cmdline_error) = command::execute(
-            "reg",
-            Some(r#"add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f"#),
+        let cmdline_result = registry_ops::set_dword(
+            r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit",
+            "ProcessCreationIncludeCmdLine_Enabled",
+            1,
         )
         .await;
 
-        if cmdline_success {
-            fixes.push("Enabled command line in process creation audit".to_string());
-            ui::markup_line("[green]? Enabled command line in process creation audit[/]");
-        } else {
+        if let Err(cmdline_error) = cmdline_result {
             issues.push(format!(
-                "Failed to enable command line in process creation audit: {}",
-                cmdline_error.unwrap_or_default()
+                "Failed to enable command line in process creation audit: {cmdline_error}"
             ));
-            ui::markup_line("[red]? Failed to enable command line in process creation audit[/]");
+            ui::markup_line("[red]✗ Failed to enable command line in process creation audit[/]");
+        } else {
+            fixes.push("Enabled command line in process creation audit".to_string());
+            ui::markup_line("[green]✓ Enabled command line in process creation audit[/]");
         }
     }
 }
@@ -410,11 +616,21 @@ impl Task for AuditPolicyTask {
         let mut issues: Vec<String> = Vec::new();
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing audit policy changes (no changes will be made)[/]");
-            ui::markup_line(&format!("[cyan]Would configure {} audit categories[/]", AUDIT_CATEGORIES.len()));
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing audit policy changes (no changes will be made)[/]",
+            );
+            ui::markup_line(&format!(
+                "[cyan]Would configure {} audit categories[/]",
+                AUDIT_CATEGORIES.len()
+            ));
             let total_subcategories: usize = AUDIT_CATEGORIES.iter().map(|(_, s)| s.len()).sum();
-            ui::markup_line(&format!("[cyan]Would configure {total_subcategories} advanced subcategories[/]"));
-            ui::markup_line(&format!("[cyan]Would configure {} security registry settings[/]", SECURITY_SETTINGS.len()));
+            ui::markup_line(&format!(
+                "[cyan]Would configure {total_subcategories} advanced subcategories[/]"
+            ));
+            ui::markup_line(&format!(
+                "[cyan]Would configure {} security registry settings[/]",
+                SECURITY_SETTINGS.len()
+            ));
             result.message = "DRY RUN: Audit policy changes previewed.".to_string();
             return result;
         }
@@ -436,10 +652,24 @@ impl Task for AuditPolicyTask {
         Self::configure_event_log_settings(&mut fixes, &mut issues).await;
 
         if !issues.is_empty() {
-            result.message = format!("Applied {} audit settings. {} issues encountered.", fixes.len(), issues.len());
-            result.error_details = Some(issues.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+            result.message = format!(
+                "Applied {} audit settings. {} issues encountered.",
+                fixes.len(),
+                issues.len()
+            );
+            result.error_details = Some(
+                issues
+                    .iter()
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         } else {
-            result.message = format!("Successfully configured {} audit policy settings.", fixes.len());
+            result.message = format!(
+                "Successfully configured {} audit policy settings.",
+                fixes.len()
+            );
         }
 
         result
@@ -447,7 +677,12 @@ impl Task for AuditPolicyTask {
 
     async fn verify(&mut self) -> bool {
         let mut all_good = true;
-        let categories = ["Account Logon", "Account Management", "Logon/Logoff", "System"];
+        let categories = [
+            "Account Logon",
+            "Account Management",
+            "Logon/Logoff",
+            "System",
+        ];
         for category in categories {
             #[cfg(windows)]
             if let Some(guid) = crate::native::audit_policy::category_guid(category) {
@@ -455,11 +690,11 @@ impl Task for AuditPolicyTask {
                     let unaudited = states.iter().filter(|s| s.is_unaudited()).count();
                     if unaudited == 0 {
                         ui::markup_line(&format!(
-                            "[green]? {category}: Success and Failure auditing enabled[/]"
+                            "[green]✓ {category}: Success and Failure auditing enabled[/]"
                         ));
                     } else {
                         ui::markup_line(&format!(
-                            "[red]? {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
+                            "[red]✗ {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
                         ));
                         all_good = false;
                     }
@@ -481,10 +716,12 @@ impl Task for AuditPolicyTask {
                     .filter(|l| l.contains("No Auditing"))
                     .collect();
                 if unaudited.is_empty() {
-                    ui::markup_line(&format!("[green]? {category}: Success and Failure auditing enabled[/]"));
+                    ui::markup_line(&format!(
+                        "[green]✓ {category}: Success and Failure auditing enabled[/]"
+                    ));
                 } else {
                     ui::markup_line(&format!(
-                        "[red]? {category}: {} subcategory(ies) still set to No Auditing[/]",
+                        "[red]✗ {category}: {} subcategory(ies) still set to No Auditing[/]",
                         unaudited.len()
                     ));
                     all_good = false;

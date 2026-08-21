@@ -325,13 +325,13 @@ public class ProhibitedMediaTask : BaseTask
 
         if (_foundFiles.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No prohibited files found after cleanup[/]");
+            AnsiConsole.MarkupLine("[green]✓ No prohibited files found after cleanup[/]");
             return true;
         }
         else
         {
             AnsiConsole.MarkupLine(
-                $"[yellow]? {_foundFiles.Count} prohibited files still remain[/]"
+                $"[yellow]⚠ {_foundFiles.Count} prohibited files still remain[/]"
             );
             return false;
         }
@@ -495,7 +495,7 @@ public class ProhibitedMediaTask : BaseTask
     {
         if (_foundFiles.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No prohibited files found[/]");
+            AnsiConsole.MarkupLine("[green]✓ No prohibited files found[/]");
             return;
         }
 

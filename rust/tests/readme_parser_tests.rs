@@ -66,7 +66,10 @@ async fn parse_inline() -> cyberpatriot_automation::models::ReadmeData {
 
 fn uuid_like() -> u128 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
 }
 
 #[tokio::test]
@@ -117,7 +120,10 @@ async fn parse_inline_extracts_critical_services_including_ccs() {
 async fn parse_inline_extracts_scenario_and_guidelines() {
     let data = parse_inline().await;
     assert_eq!(data.scenario, "Secure the workstation.");
-    assert!(data.guidelines.iter().any(|g| g.contains("Read the README carefully")));
+    assert!(data
+        .guidelines
+        .iter()
+        .any(|g| g.contains("Read the README carefully")));
 }
 
 // OS detection has to survive however the author typed the name: markup in the
@@ -128,7 +134,10 @@ async fn parse_inline_extracts_scenario_and_guidelines() {
 async fn os_detected_through_markup_and_nbsp() {
     let split_by_tag = r#"<html><head><title>Round 1</title></head><body>
 <h1>Training Round <b>Windows 10</b> README</h1></body></html>"#;
-    assert_eq!(parse_str(split_by_tag, "os1").await.operating_system, "Windows 10");
+    assert_eq!(
+        parse_str(split_by_tag, "os1").await.operating_system,
+        "Windows 10"
+    );
 
     let nbsp = "<html><body><h1>Windows&nbsp;11 Image</h1></body></html>";
     assert_eq!(parse_str(nbsp, "os2").await.operating_system, "Windows 11");
@@ -238,21 +247,41 @@ const SOFTWARE_README: &str = r#"<html><body>
 #[tokio::test]
 async fn software_parsing_rejects_prose_and_scopes_latest() {
     let data = parse_str(SOFTWARE_README, "sw").await;
-    let names: Vec<&str> = data.required_software.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = data
+        .required_software
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
 
     assert!(names.contains(&"Firefox"), "expected Firefox in {names:?}");
     assert!(
-        !names.iter().any(|n| n.eq_ignore_ascii_case("administrative tools")),
+        !names
+            .iter()
+            .any(|n| n.eq_ignore_ascii_case("administrative tools")),
         "prose became a software requirement: {names:?}"
     );
 
-    let firefox = data.required_software.iter().find(|s| s.name == "Firefox").unwrap();
-    assert!(firefox.should_be_latest, "Firefox is described as latest stable");
+    let firefox = data
+        .required_software
+        .iter()
+        .find(|s| s.name == "Firefox")
+        .unwrap();
+    assert!(
+        firefox.should_be_latest,
+        "Firefox is described as latest stable"
+    );
 
     // "Thunderbird" is not described as latest; the document merely contains the
     // word elsewhere, which used to be enough to flag it.
-    if let Some(tb) = data.required_software.iter().find(|s| s.name == "Thunderbird") {
-        assert!(!tb.should_be_latest, "'latest' must not leak across requirements");
+    if let Some(tb) = data
+        .required_software
+        .iter()
+        .find(|s| s.name == "Thunderbird")
+    {
+        assert!(
+            !tb.should_be_latest,
+            "'latest' must not leak across requirements"
+        );
     }
 }
 
@@ -273,11 +302,19 @@ async fn parse_br_separated_user_list_extracts_users() {
     let data = readme_parser::parse_html_readme_async(&path.to_string_lossy()).await;
     let _ = std::fs::remove_file(&path);
 
-    let admins: Vec<&str> = data.administrators.iter().map(|a| a.username.as_str()).collect();
+    let admins: Vec<&str> = data
+        .administrators
+        .iter()
+        .map(|a| a.username.as_str())
+        .collect();
     assert!(admins.contains(&"alice"), "expected alice in {admins:?}");
     assert!(admins.contains(&"bob"), "expected bob in {admins:?}");
 
-    let alice = data.administrators.iter().find(|a| a.username == "alice").unwrap();
+    let alice = data
+        .administrators
+        .iter()
+        .find(|a| a.username == "alice")
+        .unwrap();
     assert_eq!(alice.password.as_deref(), Some("Alice#Pass1"));
     assert!(alice.is_primary_user);
 

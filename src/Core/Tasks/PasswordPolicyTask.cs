@@ -103,7 +103,7 @@ public class PasswordPolicyTask : BaseTask
 
         if (verifiedPolicy.MinPasswordLength < PasswordPolicyStandards.MinPasswordLength)
         {
-            AnsiConsole.MarkupLine("[red]? Minimum password length not set correctly[/]");
+            AnsiConsole.MarkupLine("[red]✗ Minimum password length not set correctly[/]");
             allGood = false;
         }
 
@@ -112,13 +112,13 @@ public class PasswordPolicyTask : BaseTask
             || verifiedPolicy.MaxPasswordAge == 0
         )
         {
-            AnsiConsole.MarkupLine("[red]? Maximum password age not set correctly[/]");
+            AnsiConsole.MarkupLine("[red]✗ Maximum password age not set correctly[/]");
             allGood = false;
         }
 
         if (!verifiedPolicy.ComplexityEnabled)
         {
-            AnsiConsole.MarkupLine("[red]? Password complexity not enabled[/]");
+            AnsiConsole.MarkupLine("[red]✗ Password complexity not enabled[/]");
             allGood = false;
         }
 
@@ -127,13 +127,13 @@ public class PasswordPolicyTask : BaseTask
             || verifiedPolicy.LockoutThreshold > PasswordPolicyStandards.LockoutThreshold
         )
         {
-            AnsiConsole.MarkupLine("[red]? Account lockout threshold not set correctly[/]");
+            AnsiConsole.MarkupLine("[red]✗ Account lockout threshold not set correctly[/]");
             allGood = false;
         }
 
         if (allGood)
         {
-            AnsiConsole.MarkupLine("[green]? All password policy settings verified[/]");
+            AnsiConsole.MarkupLine("[green]✓ All password policy settings verified[/]");
         }
 
         return allGood;
@@ -163,49 +163,11 @@ public class PasswordPolicyTask : BaseTask
         {
             // Fallback: parse the table `net accounts` prints. Matches an
             // English-language console only, which is why it is the fallback.
+            // The parser lives on the model so PolicyOps reads its evidence the
+            // same way rather than through a second one that could disagree.
             var (success, output, _) = await CommandExecutor.ExecuteAsync("net", "accounts");
             if (success && !string.IsNullOrEmpty(output))
-            {
-                var lines = output.Split(
-                    new[] { '\r', '\n' },
-                    StringSplitOptions.RemoveEmptyEntries
-                );
-
-                foreach (var line in lines)
-                {
-                    if (line.Contains("Minimum password length"))
-                    {
-                        var value = ExtractNumericValue(line);
-                        policy.MinPasswordLength = value;
-                    }
-                    else if (line.Contains("Maximum password age"))
-                    {
-                        var value = ExtractNumericValue(line);
-                        policy.MaxPasswordAge = value == -1 ? 0 : value; // -1 means unlimited/never
-                    }
-                    else if (line.Contains("Minimum password age"))
-                    {
-                        policy.MinPasswordAge = ExtractNumericValue(line);
-                    }
-                    else if (line.Contains("Length of password history"))
-                    {
-                        policy.PasswordHistoryCount = ExtractNumericValue(line);
-                    }
-                    else if (line.Contains("Lockout threshold"))
-                    {
-                        var value = ExtractNumericValue(line);
-                        policy.LockoutThreshold = value == -1 ? 0 : value;
-                    }
-                    else if (line.Contains("Lockout duration"))
-                    {
-                        policy.LockoutDuration = ExtractNumericValue(line);
-                    }
-                    else if (line.Contains("Lockout observation window"))
-                    {
-                        policy.LockoutObservationWindow = ExtractNumericValue(line);
-                    }
-                }
-            }
+                policy = PasswordPolicyInfo.ParseNetAccounts(output);
         }
 
         // Check password complexity via secedit (requires admin)
@@ -306,7 +268,7 @@ public class PasswordPolicyTask : BaseTask
         bool isCompliant
     )
     {
-        var status = isCompliant ? "[green]? OK[/]" : "[red]? Fix[/]";
+        var status = isCompliant ? "[green]✓ OK[/]" : "[red]✗ Fix[/]";
         var currentFormatted = isCompliant ? $"[green]{current}[/]" : $"[yellow]{current}[/]";
         table.AddRow(setting, currentFormatted, recommended.ToString()!, status);
     }
@@ -340,12 +302,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting minimum password length to {PasswordPolicyStandards.MinPasswordLength}...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /minpwlen:{PasswordPolicyStandards.MinPasswordLength}"
-            );
+            var error = await PolicyOps.SetMinPasswordLengthAsync(PasswordPolicyStandards.MinPasswordLength);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set minimum password length to {PasswordPolicyStandards.MinPasswordLength}"
                 );
@@ -362,12 +321,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting maximum password age to {PasswordPolicyStandards.MaxPasswordAge} days...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /maxpwage:{PasswordPolicyStandards.MaxPasswordAge}"
-            );
+            var error = await PolicyOps.SetMaxPasswordAgeDaysAsync(PasswordPolicyStandards.MaxPasswordAge);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set maximum password age to {PasswordPolicyStandards.MaxPasswordAge} days"
                 );
@@ -381,12 +337,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting minimum password age to {PasswordPolicyStandards.MinPasswordAge} day(s)...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /minpwage:{PasswordPolicyStandards.MinPasswordAge}"
-            );
+            var error = await PolicyOps.SetMinPasswordAgeDaysAsync(PasswordPolicyStandards.MinPasswordAge);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set minimum password age to {PasswordPolicyStandards.MinPasswordAge} day(s)"
                 );
@@ -400,12 +353,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting password history to {PasswordPolicyStandards.PasswordHistoryCount}...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /uniquepw:{PasswordPolicyStandards.PasswordHistoryCount}"
-            );
+            var error = await PolicyOps.SetPasswordHistoryLengthAsync(PasswordPolicyStandards.PasswordHistoryCount);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set password history to {PasswordPolicyStandards.PasswordHistoryCount}"
                 );
@@ -449,12 +399,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting account lockout threshold to {PasswordPolicyStandards.LockoutThreshold}...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /lockoutthreshold:{PasswordPolicyStandards.LockoutThreshold}"
-            );
+            var error = await PolicyOps.SetLockoutThresholdAsync(PasswordPolicyStandards.LockoutThreshold);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set account lockout threshold to {PasswordPolicyStandards.LockoutThreshold}"
                 );
@@ -468,12 +415,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting lockout duration to {PasswordPolicyStandards.LockoutDuration} minutes...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /lockoutduration:{PasswordPolicyStandards.LockoutDuration}"
-            );
+            var error = await PolicyOps.SetLockoutDurationMinutesAsync(PasswordPolicyStandards.LockoutDuration);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set lockout duration to {PasswordPolicyStandards.LockoutDuration} minutes"
                 );
@@ -487,12 +431,9 @@ public class PasswordPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 $"[yellow]Setting lockout observation window to {PasswordPolicyStandards.LockoutObservationWindow} minutes...[/]"
             );
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"accounts /lockoutwindow:{PasswordPolicyStandards.LockoutObservationWindow}"
-            );
+            var error = await PolicyOps.SetLockoutObservationMinutesAsync(PasswordPolicyStandards.LockoutObservationWindow);
 
-            if (success)
+            if (error is null)
                 fixes.Add(
                     $"Set lockout observation window to {PasswordPolicyStandards.LockoutObservationWindow} minutes"
                 );
@@ -563,39 +504,5 @@ public class PasswordPolicyTask : BaseTask
         {
             return (false, ex.Message);
         }
-    }
-
-    private int ExtractNumericValue(string line)
-    {
-        var parts = line.Split(':');
-        if (parts.Length > 1)
-        {
-            var value = parts[1].Trim();
-
-            // Handle "Never" or "Unlimited" cases
-            if (
-                value.Contains("Never", StringComparison.OrdinalIgnoreCase)
-                || value.Contains("Unlimited", StringComparison.OrdinalIgnoreCase)
-            )
-            {
-                return -1;
-            }
-
-            // Handle "None" case for lockout
-            if (value.Contains("None", StringComparison.OrdinalIgnoreCase))
-            {
-                return 0;
-            }
-
-            // Extract just the numeric part
-            var numericPart = new string(
-                value.TakeWhile(c => char.IsDigit(c) || c == '-').ToArray()
-            );
-            if (int.TryParse(numericPart, out int result))
-            {
-                return result;
-            }
-        }
-        return 0;
     }
 }

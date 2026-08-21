@@ -226,7 +226,7 @@ public class UserManagementTask : BaseTask
         {
             if (!accounts.Any(a => a.Username.Equals(username, StringComparison.OrdinalIgnoreCase)))
             {
-                AnsiConsole.MarkupLine($"[red]? Required user '{username}' not found[/]");
+                AnsiConsole.MarkupLine($"[red]✗ Required user '{username}' not found[/]");
                 allGood = false;
             }
         }
@@ -238,14 +238,14 @@ public class UserManagementTask : BaseTask
             if (account.IsAdmin != shouldBeAdmin && !IsSystemAccount(account.Username))
             {
                 var expected = shouldBeAdmin ? "admin" : "standard user";
-                AnsiConsole.MarkupLine($"[red]? User '{account.Username}' should be {expected}[/]");
+                AnsiConsole.MarkupLine($"[red]✗ User '{account.Username}' should be {expected}[/]");
                 allGood = false;
             }
         }
 
         if (allGood)
         {
-            AnsiConsole.MarkupLine("[green]? All user accounts verified[/]");
+            AnsiConsole.MarkupLine("[green]✓ All user accounts verified[/]");
         }
 
         return allGood;
@@ -255,82 +255,18 @@ public class UserManagementTask : BaseTask
 
     private async Task<List<AccountInfo>> GetAllUserAccountsAsync()
     {
-        var accounts = new List<AccountInfo>();
+        var accounts = await LocalAccounts.EnumerateUsersAsync();
+        if (accounts is null)
+            return new List<AccountInfo>();
 
-        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
-            "Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation"
-        );
+        // Read the Administrators membership once rather than shelling out
+        // per account, and match names exactly.
+        var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
 
-        if (success && !string.IsNullOrEmpty(output))
-        {
-            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-            // Read the Administrators membership once rather than shelling out
-            // per account, and match names exactly.
-            var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
-
-            foreach (var line in lines.Skip(1))
-            {
-                var account = ParseAccountLine(line);
-                if (account != null)
-                {
-                    account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
-                    accounts.Add(account);
-                }
-            }
-        }
+        foreach (var account in accounts)
+            account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
 
         return accounts;
-    }
-
-    private AccountInfo? ParseAccountLine(string csvLine)
-    {
-        try
-        {
-            var values = ParseCsvLine(csvLine);
-            if (values.Count < 3)
-                return null;
-
-            return new AccountInfo
-            {
-                Username = values[0].Trim('"'),
-                FullName = values.Count > 1 ? values[1].Trim('"') : "",
-                IsEnabled =
-                    values.Count > 2
-                    && values[2].Trim('"').Equals("True", StringComparison.OrdinalIgnoreCase),
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private List<string> ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        bool inQuotes = false;
-        var currentValue = "";
-
-        foreach (char c in line)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                currentValue += c;
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(currentValue);
-                currentValue = "";
-            }
-            else
-            {
-                currentValue += c;
-            }
-        }
-        result.Add(currentValue);
-        return result;
     }
 
     private bool IsSystemAccount(string username)
@@ -406,7 +342,7 @@ public class UserManagementTask : BaseTask
 
         if (unauthorizedUsers.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No unauthorized users found[/]");
+            AnsiConsole.MarkupLine("[green]✓ No unauthorized users found[/]");
             return (fixes, issues);
         }
 
@@ -429,20 +365,17 @@ public class UserManagementTask : BaseTask
         {
             AnsiConsole.MarkupLine($"[yellow]Deleting user: {user.Username}...[/]");
 
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"user \"{user.Username}\" /delete"
-            );
+            var error = await LocalAccounts.DeleteUserAsync(user.Username);
 
-            if (success)
+            if (error is null)
             {
                 fixes.Add($"Deleted unauthorized user: {user.Username}");
-                AnsiConsole.MarkupLine($"[green]? Deleted user: {user.Username}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Deleted user: {user.Username}[/]");
             }
             else
             {
                 issues.Add($"Failed to delete user {user.Username}: {error}");
-                AnsiConsole.MarkupLine($"[red]? Failed to delete {user.Username}: {error}[/]");
+                AnsiConsole.MarkupLine($"[red]✗ Failed to delete {user.Username}: {error}[/]");
             }
         }
 
@@ -489,14 +422,14 @@ public class UserManagementTask : BaseTask
                 {
                     fixes.Add($"Added {account.Username} to Administrators group");
                     AnsiConsole.MarkupLine(
-                        $"[green]? {Markup.Escape(account.Username)} is now an administrator[/]"
+                        $"[green]✓ {Markup.Escape(account.Username)} is now an administrator[/]"
                     );
                 }
                 else
                 {
                     issues.Add($"Failed to add {account.Username} to Administrators: {failure}");
                     AnsiConsole.MarkupLine(
-                        $"[red]? Failed to add {Markup.Escape(account.Username)} to Administrators[/]"
+                        $"[red]✗ Failed to add {Markup.Escape(account.Username)} to Administrators[/]"
                     );
                 }
             }
@@ -516,7 +449,7 @@ public class UserManagementTask : BaseTask
                 {
                     fixes.Add($"Removed {account.Username} from Administrators group");
                     AnsiConsole.MarkupLine(
-                        $"[green]? {Markup.Escape(account.Username)} is no longer an administrator[/]"
+                        $"[green]✓ {Markup.Escape(account.Username)} is no longer an administrator[/]"
                     );
                 }
                 else
@@ -525,7 +458,7 @@ public class UserManagementTask : BaseTask
                         $"Failed to remove {account.Username} from Administrators: {failure}"
                     );
                     AnsiConsole.MarkupLine(
-                        $"[red]? Failed to remove {Markup.Escape(account.Username)} from Administrators[/]"
+                        $"[red]✗ Failed to remove {Markup.Escape(account.Username)} from Administrators[/]"
                     );
                 }
             }
@@ -607,14 +540,14 @@ public class UserManagementTask : BaseTask
                 // and the log stays on the competitor's own machine.
                 fixes.Add($"Set secure password for {account.Username}: {password}");
                 AnsiConsole.MarkupLine(
-                    $"[green]? {Markup.Escape(account.Username)} password set to: {Markup.Escape(password)}[/]"
+                    $"[green]✓ {Markup.Escape(account.Username)} password set to: {Markup.Escape(password)}[/]"
                 );
             }
             else
             {
                 issues.Add($"Failed to set password for {account.Username}: {failure}");
                 AnsiConsole.MarkupLine(
-                    $"[red]? Failed to set password for {Markup.Escape(account.Username)}: "
+                    $"[red]✗ Failed to set password for {Markup.Escape(account.Username)}: "
                         + $"{Markup.Escape(failure)}[/]"
                 );
             }
@@ -628,12 +561,11 @@ public class UserManagementTask : BaseTask
             var account in _currentAccounts.Where(a => a.IsEnabled && !IsSystemAccount(a.Username))
         )
         {
-            // Set password to never expire = false, and password required
-            var (success, _, error) = await CommandExecutor.PowerShellAsync(
-                $"Set-LocalUser -Name {CommandExecutor.PsQuote(account.Username)} -PasswordNeverExpires $false"
-            );
+            // Subject the password to the maximum-age policy the password task
+            // just set; without this the account is exempt from it.
+            var error = await LocalAccounts.SetPasswordNeverExpiresAsync(account.Username, false);
 
-            if (success)
+            if (error is null)
             {
                 AnsiConsole.MarkupLine(
                     $"[dim]? Password expiration enabled for {Markup.Escape(account.Username)}[/]"
@@ -662,7 +594,7 @@ public class UserManagementTask : BaseTask
 
         if (usersToCreate.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No new users need to be created[/]");
+            AnsiConsole.MarkupLine("[green]✓ No new users need to be created[/]");
             return (fixes, issues);
         }
 
@@ -694,7 +626,7 @@ public class UserManagementTask : BaseTask
             {
                 fixes.Add($"Created new user {username} with password: {password}");
                 AnsiConsole.MarkupLine(
-                    $"[green]? Created user {Markup.Escape(username)} with password: "
+                    $"[green]✓ Created user {Markup.Escape(username)} with password: "
                         + $"{Markup.Escape(password)}[/]"
                 );
 
@@ -710,14 +642,14 @@ public class UserManagementTask : BaseTask
                     {
                         fixes.Add($"Added {username} to Administrators");
                         AnsiConsole.MarkupLine(
-                            $"[green]? Added {Markup.Escape(username)} to Administrators group[/]"
+                            $"[green]✓ Added {Markup.Escape(username)} to Administrators group[/]"
                         );
                     }
                     else
                     {
                         issues.Add($"Failed to add {username} to Administrators: {adminFailure}");
                         AnsiConsole.MarkupLine(
-                            $"[red]? Failed to add {Markup.Escape(username)} to Administrators: "
+                            $"[red]✗ Failed to add {Markup.Escape(username)} to Administrators: "
                                 + $"{Markup.Escape(adminFailure)}[/]"
                         );
                     }
@@ -727,7 +659,7 @@ public class UserManagementTask : BaseTask
             {
                 issues.Add($"Failed to create user {username}: {failure}");
                 AnsiConsole.MarkupLine(
-                    $"[red]? Failed to create user {Markup.Escape(username)}: "
+                    $"[red]✗ Failed to create user {Markup.Escape(username)}: "
                         + $"{Markup.Escape(failure)}[/]"
                 );
             }
@@ -747,7 +679,7 @@ public class UserManagementTask : BaseTask
 
         if (_readmeData?.GroupRequirements == null || _readmeData.GroupRequirements.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No group requirements specified[/]");
+            AnsiConsole.MarkupLine("[green]✓ No group requirements specified[/]");
             return (fixes, issues);
         }
 
@@ -755,31 +687,26 @@ public class UserManagementTask : BaseTask
         {
             AnsiConsole.MarkupLine($"[cyan]Configuring group: {groupReq.GroupName}[/]");
 
-            // Check if group exists
-            var (checkSuccess, checkOutput, _) = await CommandExecutor.ExecuteAsync(
-                "net",
-                $"localgroup \"{groupReq.GroupName}\""
-            );
+            // Check if group exists. Unknown counts as absent: creating a group
+            // that is already there is harmless, skipping one that is not is not.
+            var exists = await LocalAccounts.GroupExistsAsync(groupReq.GroupName);
 
-            if (!checkSuccess || checkOutput.Contains("does not exist"))
+            if (exists != true)
             {
                 // Create the group
                 AnsiConsole.MarkupLine($"[yellow]Creating group: {groupReq.GroupName}...[/]");
-                var (createSuccess, _, createError) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"localgroup \"{groupReq.GroupName}\" /add"
-                );
+                var createError = await LocalAccounts.CreateGroupAsync(groupReq.GroupName);
 
-                if (createSuccess)
+                if (createError is null)
                 {
                     fixes.Add($"Created group: {groupReq.GroupName}");
-                    AnsiConsole.MarkupLine($"[green]? Created group: {groupReq.GroupName}[/]");
+                    AnsiConsole.MarkupLine($"[green]✓ Created group: {groupReq.GroupName}[/]");
                 }
                 else
                 {
                     issues.Add($"Failed to create group {groupReq.GroupName}: {createError}");
                     AnsiConsole.MarkupLine(
-                        $"[red]? Failed to create group: {groupReq.GroupName}[/]"
+                        $"[red]✗ Failed to create group: {groupReq.GroupName}[/]"
                     );
                     continue;
                 }
@@ -792,25 +719,20 @@ public class UserManagementTask : BaseTask
             // Add members to the group
             foreach (var member in groupReq.Members)
             {
-                var (addSuccess, _, addError) = await CommandExecutor.ExecuteAsync(
-                    "net",
-                    $"localgroup \"{groupReq.GroupName}\" \"{member}\" /add"
-                );
+                // Already a member reads as success from here, so there is no
+                // longer a localised "already a member" string to match on.
+                var addError = await LocalAccounts.AddToGroupAsync(member, groupReq.GroupName);
 
-                if (addSuccess)
+                if (addError is null)
                 {
                     fixes.Add($"Added {member} to group {groupReq.GroupName}");
-                    AnsiConsole.MarkupLine($"[green]? Added {member} to {groupReq.GroupName}[/]");
-                }
-                else if (addError?.Contains("already a member") == true)
-                {
-                    AnsiConsole.MarkupLine($"[dim]{member} is already in {groupReq.GroupName}[/]");
+                    AnsiConsole.MarkupLine($"[green]✓ Added {member} to {groupReq.GroupName}[/]");
                 }
                 else
                 {
                     issues.Add($"Failed to add {member} to {groupReq.GroupName}: {addError}");
                     AnsiConsole.MarkupLine(
-                        $"[red]? Failed to add {member} to {groupReq.GroupName}[/]"
+                        $"[red]✗ Failed to add {member} to {groupReq.GroupName}[/]"
                     );
                 }
             }

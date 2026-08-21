@@ -1,10 +1,9 @@
 //! Configures key Group Policy (gpedit) settings for security hardening.
 
-use crate::command;
-use crate::registry_ops;
-use crate::service_ops;
 use crate::impl_task_meta;
 use crate::models::{SystemInfo, TaskResult};
+use crate::registry_ops;
+use crate::service_ops;
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
@@ -33,7 +32,6 @@ impl Default for GroupPolicyTask {
     }
 }
 
-
 const POLICIES_SYSTEM: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 const LSA_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa";
 
@@ -56,13 +54,13 @@ async fn reg_dword_equals(key: &str, name: &str, expected: u32) -> bool {
     registry_ops::dword_equals(key, name, expected).await
 }
 
-
 #[async_trait]
 impl Task for GroupPolicyTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let hide_last_user = registry_ops::get_dword(POLICIES_SYSTEM, "dontdisplaylastusername").await;
+        let hide_last_user =
+            registry_ops::get_dword(POLICIES_SYSTEM, "dontdisplaylastusername").await;
         let disable_cad = registry_ops::get_dword(POLICIES_SYSTEM, "DisableCAD").await;
         let restrict_anonymous = registry_ops::get_dword(LSA_KEY, "restrictanonymous").await;
 
@@ -82,7 +80,9 @@ impl Task for GroupPolicyTask {
 
     async fn execute(&mut self) -> TaskResult {
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing Group Policy changes (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing Group Policy changes (no changes will be made)[/]",
+            );
             return TaskResult {
                 task_name: self.name.clone(),
                 success: true,
@@ -94,16 +94,19 @@ impl Task for GroupPolicyTask {
         let mut details: Vec<String> = Vec::new();
         let mut all_success = true;
 
-        let hide_user_error = registry_ops::set_dword(POLICIES_SYSTEM, "dontdisplaylastusername", 1)
-            .await
-            .err();
+        let hide_user_error =
+            registry_ops::set_dword(POLICIES_SYSTEM, "dontdisplaylastusername", 1)
+                .await
+                .err();
         details.push(match &hide_user_error {
             None => "✓ Don't display last user name set".to_string(),
             Some(e) => format!("✗ Failed: {e}"),
         });
         all_success &= hide_user_error.is_none();
 
-        let cad_error = registry_ops::set_dword(POLICIES_SYSTEM, "DisableCAD", 0).await.err();
+        let cad_error = registry_ops::set_dword(POLICIES_SYSTEM, "DisableCAD", 0)
+            .await
+            .err();
         details.push(match &cad_error {
             None => "✓ Require Ctrl+Alt+Del set".to_string(),
             Some(e) => format!("✗ Failed: {e}"),
@@ -132,17 +135,14 @@ impl Task for GroupPolicyTask {
         // what makes SMB relay attacks work. The server-side setting goes with
         // it: they are a pair in every hardening benchmark, and signing only one
         // side leaves the other able to negotiate an unsigned session.
-        for (key, label) in [
-            (LANMAN_WORKSTATION, "client"),
-            (LANMAN_SERVER, "server"),
-        ] {
+        for (key, label) in [(LANMAN_WORKSTATION, "client"), (LANMAN_SERVER, "server")] {
             let error = registry_ops::set_dword(key, "RequireSecuritySignature", 1)
                 .await
                 .err();
             details.push(match &error {
-                None => format!(
-                    "✓ Microsoft network {label}: digitally sign communications (always)"
-                ),
+                None => {
+                    format!("✓ Microsoft network {label}: digitally sign communications (always)")
+                }
                 Some(e) => format!("✗ Failed: {e}"),
             });
             all_success &= error.is_none();
@@ -156,7 +156,10 @@ impl Task for GroupPolicyTask {
         // matter what the local setting said.
         for (key, label) in [
             (TERMINAL_SERVER, "Remote desktop sharing turned off"),
-            (TERMINAL_SERVICES_POLICY, "Remote desktop sharing denied by policy"),
+            (
+                TERMINAL_SERVICES_POLICY,
+                "Remote desktop sharing denied by policy",
+            ),
         ] {
             let error = registry_ops::set_dword(key, "fDenyTSConnections", 1)
                 .await
@@ -188,26 +191,22 @@ impl Task for GroupPolicyTask {
         let cad_ok = reg_dword_equals(POLICIES, "DisableCAD", 0).await;
         let anon_ok = reg_dword_equals(LSA, "restrictanonymous", 1).await;
 
-        let (sc_success, sc_output, _e) = command::execute("sc", Some("qc SharedAccess")).await;
-        // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
-        let ics_ok = sc_success
-            && sc_output
-                .lines()
-                .find(|l| l.to_uppercase().contains("START_TYPE"))
-                .map(|l| l.to_uppercase().contains("DISABLED"))
-                .unwrap_or(false);
+        // This used to look for the word "DISABLED" in `sc qc` output, which is
+        // localised; the service control manager returns the start type as a
+        // number.
+        let ics_ok = service_ops::is_disabled("SharedAccess").await == Some(true);
 
         if !hide_user_ok {
-            ui::markup_line("[red]? 'Don't display last user name' is not set[/]");
+            ui::markup_line("[red]✗ 'Don't display last user name' is not set[/]");
         }
         if !cad_ok {
-            ui::markup_line("[red]? Ctrl+Alt+Del is not required at logon[/]");
+            ui::markup_line("[red]✗ Ctrl+Alt+Del is not required at logon[/]");
         }
         if !anon_ok {
-            ui::markup_line("[red]? Anonymous access is not restricted[/]");
+            ui::markup_line("[red]✗ Anonymous access is not restricted[/]");
         }
         if !ics_ok {
-            ui::markup_line("[red]? Internet Connection Sharing is not disabled[/]");
+            ui::markup_line("[red]✗ Internet Connection Sharing is not disabled[/]");
         }
 
         let client_signing_ok =
@@ -218,13 +217,13 @@ impl Task for GroupPolicyTask {
         let rdp_ok = reg_dword_equals(TERMINAL_SERVER, "fDenyTSConnections", 1).await;
 
         if !client_signing_ok {
-            ui::markup_line("[red]? Microsoft network client does not require SMB signing[/]");
+            ui::markup_line("[red]✗ Microsoft network client does not require SMB signing[/]");
         }
         if !server_signing_ok {
-            ui::markup_line("[red]? Microsoft network server does not require SMB signing[/]");
+            ui::markup_line("[red]✗ Microsoft network server does not require SMB signing[/]");
         }
         if !rdp_ok {
-            ui::markup_line("[red]? Remote desktop sharing is not turned off[/]");
+            ui::markup_line("[red]✗ Remote desktop sharing is not turned off[/]");
         }
 
         hide_user_ok
@@ -249,24 +248,39 @@ HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Syst
 
     #[test]
     fn parse_reg_dword_reads_the_named_value() {
-        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "dontdisplaylastusername"), Some(1));
-        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(0));
+        assert_eq!(
+            registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "dontdisplaylastusername"),
+            Some(1)
+        );
+        assert_eq!(
+            registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"),
+            Some(0)
+        );
     }
 
     #[test]
     fn parse_reg_dword_is_case_insensitive_on_the_value_name() {
-        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DONTDISPLAYLASTUSERNAME"), Some(1));
+        assert_eq!(
+            registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DONTDISPLAYLASTUSERNAME"),
+            Some(1)
+        );
     }
 
     #[test]
     fn parse_reg_dword_returns_none_when_absent() {
-        assert_eq!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "restrictanonymous"), None);
+        assert_eq!(
+            registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "restrictanonymous"),
+            None
+        );
     }
 
     #[test]
     fn a_present_but_wrong_value_is_distinguishable() {
         // The old verify only checked that `reg query` exited 0, so a value
         // present with the wrong contents passed verification.
-        assert_ne!(registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"), Some(1));
+        assert_ne!(
+            registry_ops::parse_reg_dword(REG_QUERY_OUTPUT, "DisableCAD"),
+            Some(1)
+        );
     }
 }

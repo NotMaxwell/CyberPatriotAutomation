@@ -61,9 +61,7 @@ impl SoftwareManagementTask {
                 .required_software
                 .iter()
                 .any(|r| Self::contains_ci(&r.name, candidate));
-            let already_listed = prohibited
-                .iter()
-                .any(|p| p.eq_ignore_ascii_case(candidate));
+            let already_listed = prohibited.iter().any(|p| p.eq_ignore_ascii_case(candidate));
             if !required && !already_listed {
                 prohibited.push(candidate.to_string());
             }
@@ -83,9 +81,30 @@ impl SoftwareManagementTask {
             .collect()
     }
 
+    /// The installed-software list, from the uninstall registry where possible.
+    ///
+    /// Returns `None` when the inventory could not be read at all.
+    async fn read_installed() -> Option<Vec<String>> {
+        #[cfg(windows)]
+        if let Some(names) = crate::native::installed_software::enumerate_names() {
+            return Some(names);
+        }
+
+        // Fallback only. `wmic product` is deprecated, misses non-MSI installs,
+        // and reconfigures every installed product just to list them.
+        let (success, output, _error) =
+            command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT)
+                .await;
+        success.then(|| Self::parse_installed(&output))
+    }
+
     /// Runs a Windows Defender malware scan and returns (success, threats_found, message).
     async fn run_windows_defender_scan(&self) -> (bool, i32, String) {
-        let scan_type = if self.use_quick_scan { "QuickScan" } else { "FullScan" };
+        let scan_type = if self.use_quick_scan {
+            "QuickScan"
+        } else {
+            "FullScan"
+        };
         ui::markup_line(&format!("[blue]Running Windows Defender {scan_type}...[/]"));
 
         let (update_success, _o, update_error) = command::powershell("Update-MpSignature").await;
@@ -111,10 +130,19 @@ impl SoftwareManagementTask {
                 "[red]✗ Windows Defender scan failed: {}[/]",
                 ui::escape(&scan_error.clone().unwrap_or_default())
             ));
-            return (false, 0, format!("Windows Defender scan failed: {}", scan_error.unwrap_or_default()));
+            return (
+                false,
+                0,
+                format!(
+                    "Windows Defender scan failed: {}",
+                    scan_error.unwrap_or_default()
+                ),
+            );
         }
 
-        ui::markup_line(&format!("[green]✓ Windows Defender {scan_type} completed[/]"));
+        ui::markup_line(&format!(
+            "[green]✓ Windows Defender {scan_type} completed[/]"
+        ));
 
         let (threat_success, threat_output, _e) = command::powershell_query(
             "Get-MpThreatDetection | Select-Object -Property ThreatID, ActionSuccess | ConvertTo-Json",
@@ -125,8 +153,11 @@ impl SoftwareManagementTask {
         if threat_success && !threat_output.trim().is_empty() {
             threats_found = threat_output.split("ThreatID").count() as i32 - 1;
             if threats_found > 0 {
-                ui::markup_line(&format!("[red]⚠ Windows Defender found {threats_found} threat(s)[/]"));
-                let (remove_success, _o, remove_error) = command::powershell("Remove-MpThreat").await;
+                ui::markup_line(&format!(
+                    "[red]⚠ Windows Defender found {threats_found} threat(s)[/]"
+                ));
+                let (remove_success, _o, remove_error) =
+                    command::powershell("Remove-MpThreat").await;
                 if remove_success {
                     ui::markup_line("[green]✓ Attempted to remove detected threats[/]");
                 } else {
@@ -165,10 +196,12 @@ impl Task for SoftwareManagementTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let (_success, output, error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
+        let installed = Self::read_installed().await;
         SystemInfo {
-            raw_output: Some(output),
-            error_output: error,
+            raw_output: Some(installed.clone().unwrap_or_default().join("\n")),
+            error_output: installed
+                .is_none()
+                .then(|| "Could not read installed software".to_string()),
             ..Default::default()
         }
     }
@@ -184,24 +217,26 @@ impl Task for SoftwareManagementTask {
             };
         }
 
-        let (success, output, error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
-        if !success {
-            ui::markup_line(&format!(
-                "[red]✗ Failed to list installed software: {}[/]",
-                ui::escape(&error.clone().unwrap_or_default())
-            ));
+        let Some(installed) = Self::read_installed().await else {
+            ui::markup_line("[red]✗ Failed to list installed software[/]");
             return TaskResult {
                 task_name: self.name.clone(),
                 success: false,
-                message: error.unwrap_or_else(|| "Unknown error".to_string()),
+                message: "Could not read installed software.".to_string(),
+                error_details: Some(
+                    "Neither the uninstall registry nor `wmic product` returned an inventory."
+                        .to_string(),
+                ),
                 ..Default::default()
             };
-        }
-
-        let installed = Self::parse_installed(&output);
+        };
         let to_remove: Vec<String> = installed
             .iter()
-            .filter(|i| self.prohibited_software.iter().any(|p| Self::contains_ci(i, p)))
+            .filter(|i| {
+                self.prohibited_software
+                    .iter()
+                    .any(|p| Self::contains_ci(i, p))
+            })
             .cloned()
             .collect();
         let to_install: Vec<SoftwareRequirement> = self
@@ -212,11 +247,21 @@ impl Task for SoftwareManagementTask {
             .collect();
 
         let mut details: Vec<String> = Vec::new();
-        details.push(format!("Installed software checked: {}", installed.join(", ")));
-        details.push(format!("Prohibited software list: {}", self.prohibited_software.join(", ")));
+        details.push(format!(
+            "Installed software checked: {}",
+            installed.join(", ")
+        ));
+        details.push(format!(
+            "Prohibited software list: {}",
+            self.prohibited_software.join(", ")
+        ));
         details.push(format!(
             "Required software list: {}",
-            self.required_software.iter().map(|r| r.name.clone()).collect::<Vec<_>>().join(", ")
+            self.required_software
+                .iter()
+                .map(|r| r.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
 
         if !to_remove.is_empty() {
@@ -228,7 +273,11 @@ impl Task for SoftwareManagementTask {
         if !to_install.is_empty() {
             details.push(format!(
                 "Missing required software: {}",
-                to_install.iter().map(|s| s.name.clone()).collect::<Vec<_>>().join(", ")
+                to_install
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         } else {
             details.push("All required software is installed.".to_string());
@@ -238,7 +287,9 @@ impl Task for SoftwareManagementTask {
         for sw in &to_remove {
             let (rem_success, _o, rem_error) = command::execute(
                 "wmic",
-                Some(&format!("product where name=\"{sw}\" call uninstall /nointeractive")),
+                Some(&format!(
+                    "product where name=\"{sw}\" call uninstall /nointeractive"
+                )),
             )
             .await;
             if rem_success {
@@ -288,11 +339,15 @@ impl Task for SoftwareManagementTask {
     }
 
     async fn verify(&mut self) -> bool {
-        let (_success, output, _error) = command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT).await;
-        let installed = Self::parse_installed(&output);
-        let still_present = installed
-            .iter()
-            .any(|i| self.prohibited_software.iter().any(|p| Self::contains_ci(i, p)));
+        // A read failure is not proof the machine is in the wanted state.
+        let Some(installed) = Self::read_installed().await else {
+            return false;
+        };
+        let still_present = installed.iter().any(|i| {
+            self.prohibited_software
+                .iter()
+                .any(|p| Self::contains_ci(i, p))
+        });
         let still_missing = self
             .required_software
             .iter()

@@ -31,15 +31,42 @@ impl Default for DnsSettingsAuditTask {
     }
 }
 
-/// Which insecure resolvers appear in `netsh` output.
+/// The DNS servers configured on every live, non-loopback interface, rendered
+/// as "interface: address".
+///
+/// Returns `None` when they could not be read at all, so "no resolvers" and
+/// "could not look" stay distinguishable.
+async fn read_dns_servers() -> Option<Vec<String>> {
+    #[cfg(windows)]
+    if let Some(servers) = crate::native::dns::servers() {
+        return Some(
+            servers
+                .into_iter()
+                .map(|(interface, address)| format!("{interface}: {address}"))
+                .collect(),
+        );
+    }
+
+    let (success, output, _error) = command::execute("netsh", Some("interface ip show dns")).await;
+    success.then(|| {
+        output
+            .split(['\n', '\r'])
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect()
+    })
+}
+
+/// Which insecure resolvers appear in the configured list.
 ///
 /// Compares whole whitespace-delimited tokens. A plain substring search matched
 /// an address embedded in a longer one - "1.1.1.1" is a substring of the
-/// perfectly ordinary "10.1.1.1.1"-style text netsh prints - producing false
-/// positives on legitimate configurations.
-fn insecure_servers_in(output: &str) -> Vec<&'static str> {
-    let tokens: Vec<&str> = output
-        .split(|c: char| c.is_whitespace() || c == ',')
+/// perfectly ordinary "11.1.1.10" - producing false positives on legitimate
+/// configurations.
+fn insecure_servers_in(lines: &[String]) -> Vec<&'static str> {
+    let tokens: Vec<&str> = lines
+        .iter()
+        .flat_map(|line| line.split(|c: char| c.is_whitespace() || c == ','))
         .map(|t| t.trim_matches(|c: char| c == ':' || c == '(' || c == ')'))
         .filter(|t| !t.is_empty())
         .collect();
@@ -55,37 +82,44 @@ impl Task for DnsSettingsAuditTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let (_success, output, error) =
-            command::execute("netsh", Some("interface ip show dns")).await;
+        let servers = read_dns_servers().await;
         SystemInfo {
-            raw_output: Some(output),
-            error_output: error,
+            raw_output: Some(servers.clone().unwrap_or_default().join("\n")),
+            error_output: servers
+                .is_none()
+                .then(|| "Could not read the DNS settings".to_string()),
             ..Default::default()
         }
     }
 
     async fn execute(&mut self) -> TaskResult {
-        let (success, output, error) =
-            command::execute("netsh", Some("interface ip show dns")).await;
         let mut details: Vec<String> = Vec::new();
-        if !success {
-            details.push(format!("Failed to read DNS settings: {}", error.clone().unwrap_or_default()));
-            ui::markup_line(&format!(
-                "[red]✗ Failed to read DNS settings: {}[/]",
-                ui::escape(&error.unwrap_or_default())
-            ));
+        let Some(servers) = read_dns_servers().await else {
+            details.push("Failed to read DNS settings".to_string());
+            ui::markup_line("[red]✗ Failed to read DNS settings[/]");
             return TaskResult {
                 task_name: self.name.clone(),
                 success: false,
                 message: details.join("\n"),
                 ..Default::default()
             };
-        }
+        };
         details.push("DNS settings output:".to_string());
-        for l in output.split(['\n', '\r']).filter(|l| !l.is_empty()) {
-            details.push(format!("  {}", l.trim()));
+        for line in &servers {
+            details.push(format!("  {line}"));
         }
-        let found = insecure_servers_in(&output);
+        let found = insecure_servers_in(&servers);
+        crate::remediation::record_finding(
+            "Configured DNS servers",
+            "no public resolver on any live interface",
+            found.is_empty(),
+            &if servers.is_empty() {
+                "no interface reported a DNS server".to_string()
+            } else {
+                format!("read from the adapter list: {}", servers.join("; "))
+            },
+        );
+
         if found.is_empty() {
             details.push("No insecure DNS servers found.".to_string());
             ui::markup_line("[green]✓ No insecure DNS servers found[/]");
@@ -110,8 +144,10 @@ impl Task for DnsSettingsAuditTask {
     }
 
     async fn verify(&mut self) -> bool {
-        let (_success, output, _error) =
-            command::execute("netsh", Some("interface ip show dns")).await;
-        insecure_servers_in(&output).is_empty()
+        // A read failure is not proof the resolvers are clean.
+        match read_dns_servers().await {
+            Some(servers) => insecure_servers_in(&servers).is_empty(),
+            None => false,
+        }
     }
 }

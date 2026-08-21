@@ -87,7 +87,7 @@ impl FirewallConfigurationTask {
                     "Enabled firewall for {} profiles",
                     profiles.join(", ")
                 ));
-                ui::markup_line("[green]? Firewall enabled for all profiles[/]");
+                ui::markup_line("[green]✓ Firewall enabled for all profiles[/]");
                 return;
             }
             Err(reason) => {
@@ -98,15 +98,19 @@ impl FirewallConfigurationTask {
             }
         }
 
-        let (success, _o, error) =
-            command::powershell("Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True")
-                .await;
+        let (success, _o, error) = command::powershell(
+            "Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True",
+        )
+        .await;
         if success {
             fixes.push("Enabled firewall for Domain, Public, and Private profiles".to_string());
-            ui::markup_line("[green]? Firewall enabled for all profiles[/]");
+            ui::markup_line("[green]✓ Firewall enabled for all profiles[/]");
         } else {
-            issues.push(format!("Failed to enable firewall profiles: {}", error.unwrap_or_default()));
-            ui::markup_line("[red]? Failed to enable firewall profiles[/]");
+            issues.push(format!(
+                "Failed to enable firewall profiles: {}",
+                error.unwrap_or_default()
+            ));
+            ui::markup_line("[red]✗ Failed to enable firewall profiles[/]");
         }
     }
 
@@ -117,10 +121,15 @@ impl FirewallConfigurationTask {
         )
         .await;
         if success {
-            fixes.push("Configured default firewall actions (Block inbound, Allow outbound)".to_string());
-            ui::markup_line("[green]? Default actions configured[/]");
+            fixes.push(
+                "Configured default firewall actions (Block inbound, Allow outbound)".to_string(),
+            );
+            ui::markup_line("[green]✓ Default actions configured[/]");
         } else {
-            issues.push(format!("Failed to configure default actions: {}", error.unwrap_or_default()));
+            issues.push(format!(
+                "Failed to configure default actions: {}",
+                error.unwrap_or_default()
+            ));
         }
 
         // Best-effort: there may be no active connection profile to change, so a
@@ -129,7 +138,7 @@ impl FirewallConfigurationTask {
             command::powershell("Set-NetConnectionProfile -NetworkCategory Public").await;
         if profile_success {
             fixes.push("Set network profile to Public".to_string());
-            ui::markup_line("[green]? Network profile set to Public[/]");
+            ui::markup_line("[green]✓ Network profile set to Public[/]");
         } else {
             ui::markup_line("[dim]No network connection profile to set to Public[/]");
         }
@@ -138,10 +147,20 @@ impl FirewallConfigurationTask {
     async fn block_insecure_ports(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         let mut table = ui::TableBuilder::new()
             .title("[bold]Blocking Insecure Ports[/]")
-            .columns(&["[bold]Port[/]", "[bold]Protocol[/]", "[bold]Description[/]", "[bold]Status[/]"]);
+            .columns(&[
+                "[bold]Port[/]",
+                "[bold]Protocol[/]",
+                "[bold]Description[/]",
+                "[bold]Status[/]",
+            ]);
 
         for (port, protocol, description) in PORTS_TO_BLOCK {
-            let rule_name = format!("CyberPatriot_Block_{}_{}_{}", description.replace(' ', ""), protocol, port);
+            let rule_name = format!(
+                "CyberPatriot_Block_{}_{}_{}",
+                description.replace(' ', ""),
+                protocol,
+                port
+            );
             let quoted = command::ps_quote(&rule_name);
             let (success, _o, _e) = command::powershell(&format!(
                 "New-NetFirewallRule -DisplayName {quoted} -Direction Inbound -LocalPort {port} -Protocol {protocol} -Action Block"
@@ -149,7 +168,12 @@ impl FirewallConfigurationTask {
             .await;
 
             if success {
-                table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[green]Blocked[/]".to_string()]);
+                table.add_row([
+                    port.to_string(),
+                    protocol.to_string(),
+                    description.to_string(),
+                    "[green]Blocked[/]".to_string(),
+                ]);
                 fixes.push(format!("Blocked port {port}/{protocol} ({description})"));
                 continue;
             }
@@ -158,13 +182,27 @@ impl FirewallConfigurationTask {
             // enabling it. The fallback ran before too, but its result was
             // discarded: a rule that could not be enabled was still reported as
             // "Exists", implying the port was covered when it was not.
-            let (enabled, _o, enable_error) =
-                command::powershell(&format!("Set-NetFirewallRule -DisplayName {quoted} -Enabled True")).await;
+            let (enabled, _o, enable_error) = command::powershell(&format!(
+                "Set-NetFirewallRule -DisplayName {quoted} -Enabled True"
+            ))
+            .await;
             if enabled {
-                table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[yellow]Exists[/]".to_string()]);
-                fixes.push(format!("Enabled existing block rule for {port}/{protocol} ({description})"));
+                table.add_row([
+                    port.to_string(),
+                    protocol.to_string(),
+                    description.to_string(),
+                    "[yellow]Exists[/]".to_string(),
+                ]);
+                fixes.push(format!(
+                    "Enabled existing block rule for {port}/{protocol} ({description})"
+                ));
             } else {
-                table.add_row([port.to_string(), protocol.to_string(), description.to_string(), "[red]Failed[/]".to_string()]);
+                table.add_row([
+                    port.to_string(),
+                    protocol.to_string(),
+                    description.to_string(),
+                    "[red]Failed[/]".to_string(),
+                ]);
                 issues.push(format!(
                     "Could not block port {port}/{protocol} ({description}): {}",
                     enable_error.unwrap_or_default()
@@ -180,24 +218,31 @@ impl FirewallConfigurationTask {
         for rule in RULES_TO_DISABLE {
             let (success, _o, _e) = command::execute(
                 "netsh",
-                Some(&format!("advfirewall firewall set rule name=\"{rule}\" new enable=no")),
+                Some(&format!(
+                    "advfirewall firewall set rule name=\"{rule}\" new enable=no"
+                )),
             )
             .await;
             if success {
                 fixes.push(format!("Disabled rule: {rule}"));
-                ui::markup_line(&format!("[green]? Disabled: {}[/]", ui::escape(rule)));
+                ui::markup_line(&format!("[green]✓ Disabled: {}[/]", ui::escape(rule)));
             }
         }
 
         for group in RULE_GROUPS_TO_DISABLE {
             let (success, _o, _e) = command::execute(
                 "netsh",
-                Some(&format!("advfirewall firewall set rule group=\"{group}\" new enable=No")),
+                Some(&format!(
+                    "advfirewall firewall set rule group=\"{group}\" new enable=No"
+                )),
             )
             .await;
             if success {
                 fixes.push(format!("Disabled rule group: {group}"));
-                ui::markup_line(&format!("[green]? Disabled group: {}[/]", ui::escape(group)));
+                ui::markup_line(&format!(
+                    "[green]✓ Disabled group: {}[/]",
+                    ui::escape(group)
+                ));
             }
         }
 
@@ -217,11 +262,13 @@ impl FirewallConfigurationTask {
 
         if in_success && out_success {
             fixes.push("Blocked Remote Registry service in firewall".to_string());
-            ui::markup_line("[green]? Blocked Remote Registry service[/]");
+            ui::markup_line("[green]✓ Blocked Remote Registry service[/]");
         } else {
             let e = in_error.or(out_error).unwrap_or_default();
-            issues.push(format!("Failed to block Remote Registry service in firewall: {e}"));
-            ui::markup_line("[red]? Failed to block Remote Registry service[/]");
+            issues.push(format!(
+                "Failed to block Remote Registry service in firewall: {e}"
+            ));
+            ui::markup_line("[red]✗ Failed to block Remote Registry service[/]");
         }
     }
 
@@ -237,7 +284,7 @@ impl FirewallConfigurationTask {
 
         if success {
             fixes.push("Configured firewall logging".to_string());
-            ui::markup_line("[green]? Firewall logging configured[/]");
+            ui::markup_line("[green]✓ Firewall logging configured[/]");
             return;
         }
 
@@ -246,7 +293,9 @@ impl FirewallConfigurationTask {
         // failed.
         let (name_ok, _o, name_err) = command::execute(
             "netsh",
-            Some(&format!("advfirewall set allprofiles logging filename {log_path}")),
+            Some(&format!(
+                "advfirewall set allprofiles logging filename {log_path}"
+            )),
         )
         .await;
         let (dropped_ok, _o, dropped_err) = command::execute(
@@ -254,16 +303,19 @@ impl FirewallConfigurationTask {
             Some("advfirewall set allprofiles logging droppedconnections enable"),
         )
         .await;
-        let (size_ok, _o, size_err) =
-            command::execute("netsh", Some("advfirewall set allprofiles logging maxfilesize 32767")).await;
+        let (size_ok, _o, size_err) = command::execute(
+            "netsh",
+            Some("advfirewall set allprofiles logging maxfilesize 32767"),
+        )
+        .await;
 
         if name_ok && dropped_ok && size_ok {
             fixes.push("Configured firewall logging (via netsh)".to_string());
-            ui::markup_line("[green]? Firewall logging configured via netsh[/]");
+            ui::markup_line("[green]✓ Firewall logging configured via netsh[/]");
         } else {
             let e = name_err.or(dropped_err).or(size_err).unwrap_or_default();
             issues.push(format!("Failed to configure firewall logging: {e}"));
-            ui::markup_line("[red]? Failed to configure firewall logging[/]");
+            ui::markup_line("[red]✗ Failed to configure firewall logging[/]");
         }
     }
 }
@@ -292,7 +344,11 @@ impl Task for FirewallConfigurationTask {
             ui::markup_line(&format!(
                 "  {} Profile: {}",
                 profile,
-                if enabled { "[green]Enabled[/]" } else { "[red]Disabled[/]" }
+                if enabled {
+                    "[green]Enabled[/]"
+                } else {
+                    "[red]Disabled[/]"
+                }
             ));
         }
 
@@ -311,7 +367,9 @@ impl Task for FirewallConfigurationTask {
         let mut issues: Vec<String> = Vec::new();
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing firewall changes (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing firewall changes (no changes will be made)[/]",
+            );
             result.message = "DRY RUN: Firewall configuration changes previewed.".to_string();
             return result;
         }
@@ -337,10 +395,24 @@ impl Task for FirewallConfigurationTask {
         Self::configure_firewall_logging(&mut fixes, &mut issues).await;
 
         if !issues.is_empty() {
-            result.message = format!("Applied {} firewall changes. {} issues encountered.", fixes.len(), issues.len());
-            result.error_details = Some(issues.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+            result.message = format!(
+                "Applied {} firewall changes. {} issues encountered.",
+                fixes.len(),
+                issues.len()
+            );
+            result.error_details = Some(
+                issues
+                    .iter()
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         } else {
-            result.message = format!("Successfully applied {} firewall configuration changes.", fixes.len());
+            result.message = format!(
+                "Successfully applied {} firewall configuration changes.",
+                fixes.len()
+            );
         }
 
         result
@@ -356,9 +428,11 @@ impl Task for FirewallConfigurationTask {
             .await;
             let enabled = success && output.trim().eq_ignore_ascii_case("True");
             if enabled {
-                ui::markup_line(&format!("[green]? {profile} firewall profile is enabled[/]"));
+                ui::markup_line(&format!(
+                    "[green]✓ {profile} firewall profile is enabled[/]"
+                ));
             } else {
-                ui::markup_line(&format!("[red]? {profile} firewall profile is disabled[/]"));
+                ui::markup_line(&format!("[red]✗ {profile} firewall profile is disabled[/]"));
                 all_good = false;
             }
         }

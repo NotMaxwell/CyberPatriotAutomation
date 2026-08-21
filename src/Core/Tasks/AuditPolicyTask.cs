@@ -461,13 +461,13 @@ public class AuditPolicyTask : BaseTask
                     if (unauditedCount == 0)
                     {
                         AnsiConsole.MarkupLine(
-                            $"[green]? {category}: Success and Failure auditing enabled[/]"
+                            $"[green]✓ {category}: Success and Failure auditing enabled[/]"
                         );
                     }
                     else
                     {
                         AnsiConsole.MarkupLine(
-                            $"[red]? {category}: {unauditedCount} subcategory(ies) still set to No Auditing[/]"
+                            $"[red]✗ {category}: {unauditedCount} subcategory(ies) still set to No Auditing[/]"
                         );
                         allGood = false;
                     }
@@ -495,13 +495,13 @@ public class AuditPolicyTask : BaseTask
                 if (unaudited == 0)
                 {
                     AnsiConsole.MarkupLine(
-                        $"[green]? {category}: Success and Failure auditing enabled[/]"
+                        $"[green]✓ {category}: Success and Failure auditing enabled[/]"
                     );
                 }
                 else
                 {
                     AnsiConsole.MarkupLine(
-                        $"[red]? {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
+                        $"[red]✗ {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
                     );
                     allGood = false;
                 }
@@ -589,7 +589,7 @@ public class AuditPolicyTask : BaseTask
                 {
                     progressTable.AddRow(
                         category,
-                        $"[green]? Success & Failure ({count} subcategories)[/]"
+                        $"[green]✓ Success & Failure ({count} subcategories)[/]"
                     );
                     fixes.Add(
                         $"Configured audit: {category} (Success & Failure, {count} subcategories)"
@@ -597,7 +597,7 @@ public class AuditPolicyTask : BaseTask
                     continue;
                 }
 
-                progressTable.AddRow(category, "[red]? Failed[/]");
+                progressTable.AddRow(category, "[red]✗ Failed[/]");
                 issues.Add($"Failed to configure {category}: {nativeError}");
                 continue;
             }
@@ -617,12 +617,12 @@ public class AuditPolicyTask : BaseTask
 
             if (successEnable && failureEnable)
             {
-                progressTable.AddRow(category, "[green]? Success & Failure[/]");
+                progressTable.AddRow(category, "[green]✓ Success & Failure[/]");
                 fixes.Add($"Configured audit: {category} (Success & Failure)");
             }
             else
             {
-                progressTable.AddRow(category, "[red]? Failed[/]");
+                progressTable.AddRow(category, "[red]✗ Failed[/]");
                 issues.Add($"Failed to configure {category}: {successError ?? failureError}");
             }
         }
@@ -656,7 +656,7 @@ public class AuditPolicyTask : BaseTask
         {
             fixes.Add($"Configured {auditedSubcategories} audit subcategories");
             AnsiConsole.MarkupLine(
-                $"[green]? Configured {auditedSubcategories} audit subcategories[/]"
+                $"[green]✓ Configured {auditedSubcategories} audit subcategories[/]"
             );
             return;
         }
@@ -688,7 +688,7 @@ public class AuditPolicyTask : BaseTask
         }
 
         fixes.Add($"Configured {configuredCount} audit subcategories");
-        AnsiConsole.MarkupLine($"[green]? Configured {configuredCount} audit subcategories[/]");
+        AnsiConsole.MarkupLine($"[green]✓ Configured {configuredCount} audit subcategories[/]");
 
         // Additional specific auditing commands
         var additionalAudits = new[]
@@ -721,23 +721,16 @@ public class AuditPolicyTask : BaseTask
         {
             var (path, name, value, description) = setting;
 
-            // Determine the registry type based on value
-            var regType = "REG_DWORD";
-            var valueStr = value.ToString();
+            var error = await RegistryOps.SetDwordAsync(path, name, value);
 
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "reg",
-                $"add \"{path}\" /v {name} /t {regType} /d {valueStr} /f"
-            );
-
-            if (success)
+            if (error is null)
             {
-                settingsTable.AddRow(key, description, "[green]? Set[/]");
+                settingsTable.AddRow(key, description, "[green]✓ Set[/]");
                 fixes.Add($"Set registry: {name}");
             }
             else
             {
-                settingsTable.AddRow(key, description, "[red]? Failed[/]");
+                settingsTable.AddRow(key, description, "[red]✗ Failed[/]");
                 issues.Add($"Failed to set {name}: {error}");
             }
         }
@@ -763,12 +756,12 @@ public class AuditPolicyTask : BaseTask
             {
                 fixes.Add($"Configured {logName} log: {maxSize / 1024}MB max size");
                 AnsiConsole.MarkupLine(
-                    $"[green]? Configured {logName} log: {maxSize / 1024}MB max size[/]"
+                    $"[green]✓ Configured {logName} log: {maxSize / 1024}MB max size[/]"
                 );
             }
             else
             {
-                AnsiConsole.MarkupLine($"[yellow]? Could not configure {logName} log[/]");
+                AnsiConsole.MarkupLine($"[yellow]⚠ Could not configure {logName} log[/]");
             }
         }
 
@@ -796,30 +789,41 @@ public class AuditPolicyTask : BaseTask
 
         foreach (var (path, name, value) in psLoggingKeys)
         {
-            // Ensure the key exists
-            await CommandExecutor.ExecuteAsync("reg", $"add \"{path}\" /f");
+            // The key has to exist before the value can be written; SetDword
+            // creates it, so the separate create is only here for the policy
+            // keys that are meant to exist even with no values under them.
+            await RegistryOps.CreateKeyAsync(path);
 
-            var (success, _, _) = await CommandExecutor.ExecuteAsync(
-                "reg",
-                $"add \"{path}\" /v {name} /t REG_DWORD /d {value} /f"
-            );
-
-            if (success)
+            if (await RegistryOps.SetDwordAsync(path, name, value) is null)
             {
                 fixes.Add($"Enabled PowerShell {name}");
             }
         }
 
-        AnsiConsole.MarkupLine("[green]? Configured PowerShell logging[/]");
+        AnsiConsole.MarkupLine("[green]✓ Configured PowerShell logging[/]");
 
-        // Enable command line auditing in process creation events
-        await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"add ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit"" /v ProcessCreationIncludeCmdLine_Enabled /t REG_DWORD /d 1 /f"
+        // Enable command line auditing in process creation events. The result
+        // used to be discarded and the fix recorded regardless.
+        var cmdLineError = await RegistryOps.SetDwordAsync(
+            @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit",
+            "ProcessCreationIncludeCmdLine_Enabled",
+            1
         );
 
-        fixes.Add("Enabled command line in process creation audit");
-        AnsiConsole.MarkupLine("[green]? Enabled command line in process creation audit[/]");
+        if (cmdLineError is null)
+        {
+            fixes.Add("Enabled command line in process creation audit");
+            AnsiConsole.MarkupLine("[green]✓ Enabled command line in process creation audit[/]");
+        }
+        else
+        {
+            issues.Add(
+                $"Failed to enable command line in process creation audit: {cmdLineError}"
+            );
+            AnsiConsole.MarkupLine(
+                "[red]✗ Failed to enable command line in process creation audit[/]"
+            );
+        }
     }
 
     #endregion

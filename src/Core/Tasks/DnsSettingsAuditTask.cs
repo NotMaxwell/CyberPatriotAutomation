@@ -81,6 +81,15 @@ public class DnsSettingsAuditTask : BaseTask
         details.AddRange(servers.Select(s => $"  {s.Interface}: {s.Address}"));
 
         var found = FindInsecure(servers);
+        Remediation.RecordFinding(
+            "Configured DNS servers",
+            "no public resolver on any live interface",
+            compliant: found.Count == 0,
+            evidence: servers.Count == 0
+                ? "no interface reported a DNS server"
+                : $"read from the adapter list: {string.Join(", ", servers.Select(s => $"{s.Interface}={s.Address}"))}"
+        );
+
         if (found.Count == 0)
         {
             details.Add("No insecure DNS servers found.");
