@@ -208,21 +208,53 @@ public class PasswordPolicyTask : BaseTask
             }
         }
 
-        // Check password complexity via secedit (requires admin)
+        // Check password complexity via secedit (requires admin).
+        //
+        // The path is expanded here rather than written as %TEMP%. Process
+        // arguments are passed to the child verbatim - ProcessStartInfo does no
+        // environment expansion when UseShellExecute is false - so `secedit`
+        // received the literal string "%TEMP%\secpol.cfg", could not create it,
+        // and exited 2 on every run. Complexity therefore always read as
+        // disabled, and the comparison table always reported "No" no matter how
+        // the machine was configured.
+        var exportPath = Path.Combine(Path.GetTempPath(), "secpol_read.cfg");
         var (secSuccess, _, _) = await CommandExecutor.ExecuteAsync(
             "secedit",
-            "/export /cfg %TEMP%\\secpol.cfg /quiet"
+            $"/export /cfg \"{exportPath}\" /quiet"
         );
         if (secSuccess)
         {
-            var (readSuccess, cfgOutput, _) = await CommandExecutor.ExecuteAsync(
-                "cmd",
-                "/c type %TEMP%\\secpol.cfg"
-            );
-            if (readSuccess && cfgOutput.Contains("PasswordComplexity"))
+            try
             {
-                policy.ComplexityEnabled = cfgOutput.Contains("PasswordComplexity = 1");
+                // Read it directly instead of shelling out to `cmd /c type`,
+                // which had the same unexpanded-variable problem.
+                var cfgOutput = await File.ReadAllTextAsync(exportPath);
+                if (cfgOutput.Contains("PasswordComplexity"))
+                    policy.ComplexityEnabled = cfgOutput.Contains("PasswordComplexity = 1");
             }
+            catch (Exception ex)
+            {
+                RunLog.Diagnostic("password", $"could not read the exported policy: {ex.Message}");
+            }
+            finally
+            {
+                try
+                {
+                    if (File.Exists(exportPath))
+                        File.Delete(exportPath);
+                }
+                catch
+                {
+                    // A leftover temp file is not worth failing the task over.
+                }
+            }
+        }
+        else
+        {
+            RunLog.Diagnostic(
+                "password",
+                "secedit export failed; password complexity could not be read"
+            );
         }
 
         return policy;

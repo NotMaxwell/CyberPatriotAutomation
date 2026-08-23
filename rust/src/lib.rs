@@ -12,6 +12,7 @@ pub mod command;
 pub mod models;
 pub mod native;
 pub mod readme_parser;
+pub mod readme_services;
 pub mod registry_ops;
 pub mod run_log;
 pub mod service_ops;

@@ -54,6 +54,7 @@ public static class Tui
         new("--audit-policy", "Audit Policy", "event logging and security settings"),
         new("--firewall", "Firewall", "profiles, blocked ports, risky rules"),
         new("--security-hardening", "Security Hardening", "registry hardening, features"),
+        new("--group-policy", "Local Security Policy", "SMB signing, logon, RDP"),
         new("--media-scan", "Prohibited Media", "deletes matching files permanently"),
         new("--software-management", "Software Management", "remove, install, Defender scan"),
         new("--shared-folders", "Shared Folders Audit", "removes non-default shares"),

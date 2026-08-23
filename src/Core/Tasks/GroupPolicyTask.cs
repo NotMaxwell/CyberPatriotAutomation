@@ -17,13 +17,22 @@ namespace PinnacleCyPat.Core.Tasks;
 /// </summary>
 public class GroupPolicyTask : BaseTask
 {
+    private ReadmeData? _readmeData;
+
     public GroupPolicyTask()
     {
         Name = "Group Policy";
         Description =
-            "Configures Group Policy settings: hide last user, require Ctrl+Alt+Del, "
+            "Configures Local Security Policy: hide last user, require Ctrl+Alt+Del, "
             + "disable ICS, require SMB signing, and turn off remote desktop sharing.";
     }
+
+    /// <summary>Set the README data for this task.</summary>
+    /// <remarks>
+    /// Only one setting consults it - Remote Desktop, which a README can declare
+    /// critical. Everything else here is unconditional hardening.
+    /// </remarks>
+    public void SetReadmeData(ReadmeData data) => _readmeData = data;
 
     private const string PoliciesSystemKey =
         @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
@@ -79,7 +88,14 @@ public class GroupPolicyTask : BaseTask
                 TaskName = Name,
                 Success = true,
                 Message =
-                    "DRY RUN: Would apply:\n✓ Don't display last user name set\n✓ Require Ctrl+Alt+Del set\n✓ ICS (Internet Connection Sharing) disabled\n✓ Restrict anonymous access set",
+                    "DRY RUN: Would apply:\n✓ Don't display last user name set\n✓ Require Ctrl+Alt+Del set\n"
+                    + "✓ ICS (Internet Connection Sharing) disabled\n✓ Restrict anonymous access set\n"
+                    + "✓ SMB signing required and offered, client and server\n"
+                    + (
+                        ReadmeServices.IsRemoteDesktopRequired(_readmeData)
+                            ? "- Remote desktop left enabled (the README lists it as critical)"
+                            : "✓ Remote desktop sharing turned off"
+                    ),
             };
         }
 
@@ -153,29 +169,81 @@ public class GroupPolicyTask : BaseTask
         );
         allSuccess &= serverSigningError is null;
 
-        // Remote desktop sharing off.
+        // The "(if server/client agrees)" halves of the same four-setting group.
+        //
+        // Local Security Policy lists four SMB signing settings, not two, and the
+        // benchmarks want all four. The "always" pair is what forces signing; the
+        // "if the other side agrees" pair is what makes this machine *offer* it
+        // when talking to a peer that does not require it. Setting only the
+        // "always" pair leaves the negotiated case unsigned, and leaves two of
+        // the four scored items unset.
+        var clientAgreeError = await RegistryOps.SetDwordAsync(
+            LanmanWorkstationKey,
+            "EnableSecuritySignature",
+            1
+        );
+        details.Add(
+            clientAgreeError is null
+                ? "✓ Microsoft network client: digitally sign communications (if server agrees)"
+                : $"✗ Failed: {clientAgreeError}"
+        );
+        allSuccess &= clientAgreeError is null;
+
+        var serverAgreeError = await RegistryOps.SetDwordAsync(
+            LanmanServerKey,
+            "EnableSecuritySignature",
+            1
+        );
+        details.Add(
+            serverAgreeError is null
+                ? "✓ Microsoft network server: digitally sign communications (if client agrees)"
+                : $"✗ Failed: {serverAgreeError}"
+        );
+        allSuccess &= serverAgreeError is null;
+
+        // Remote desktop sharing off - unless the README says it must work.
         //
         // fDenyTSConnections is the switch the Settings UI toggles. The policy
         // key is set too: a policy value overrides the local one, so an image
         // with the policy set to "allow" would otherwise keep RDP listening no
         // matter what the local setting said.
-        var rdpError = await RegistryOps.SetDwordAsync(TerminalServerKey, "fDenyTSConnections", 1);
-        details.Add(
-            rdpError is null ? "✓ Remote desktop sharing turned off" : $"✗ Failed: {rdpError}"
-        );
-        allSuccess &= rdpError is null;
+        //
+        // A README that lists Remote Desktop as critical is describing a machine
+        // administered remotely, where RDP *working* is the scored condition.
+        // Service management already protects TermService in that case; denying
+        // connections here as well would leave the service running with every
+        // connection refused - the worst of both, and a lost point.
+        if (ReadmeServices.IsRemoteDesktopRequired(_readmeData))
+        {
+            var note = "- Remote desktop left enabled: the README lists it as a critical service";
+            details.Add(note);
+            RunLog.Diagnostic("grouppolicy", note.TrimStart('-', ' '));
+            AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(note)}[/]");
+        }
+        else
+        {
+            var rdpError = await RegistryOps.SetDwordAsync(
+                TerminalServerKey,
+                "fDenyTSConnections",
+                1
+            );
+            details.Add(
+                rdpError is null ? "✓ Remote desktop sharing turned off" : $"✗ Failed: {rdpError}"
+            );
+            allSuccess &= rdpError is null;
 
-        var rdpPolicyError = await RegistryOps.SetDwordAsync(
-            TerminalServicesPolicyKey,
-            "fDenyTSConnections",
-            1
-        );
-        details.Add(
-            rdpPolicyError is null
-                ? "✓ Remote desktop sharing denied by policy"
-                : $"✗ Failed: {rdpPolicyError}"
-        );
-        allSuccess &= rdpPolicyError is null;
+            var rdpPolicyError = await RegistryOps.SetDwordAsync(
+                TerminalServicesPolicyKey,
+                "fDenyTSConnections",
+                1
+            );
+            details.Add(
+                rdpPolicyError is null
+                    ? "✓ Remote desktop sharing denied by policy"
+                    : $"✗ Failed: {rdpPolicyError}"
+            );
+            allSuccess &= rdpPolicyError is null;
+        }
 
         return new TaskResult
         {
@@ -214,8 +282,23 @@ public class GroupPolicyTask : BaseTask
             "RequireSecuritySignature",
             1
         );
-        // fDenyTSConnections = 1 means Remote Desktop is refused.
-        var rdpOk = await RegDwordEqualsAsync(TerminalServerKey, "fDenyTSConnections", 1);
+        var clientAgreeOk = await RegDwordEqualsAsync(
+            LanmanWorkstationKey,
+            "EnableSecuritySignature",
+            1
+        );
+        var serverAgreeOk = await RegDwordEqualsAsync(
+            LanmanServerKey,
+            "EnableSecuritySignature",
+            1
+        );
+
+        // fDenyTSConnections = 1 means Remote Desktop is refused. When the README
+        // requires RDP this step was deliberately skipped, so verifying it as
+        // "must be denied" would report a failure for doing the right thing.
+        var rdpOk =
+            ReadmeServices.IsRemoteDesktopRequired(_readmeData)
+            || await RegDwordEqualsAsync(TerminalServerKey, "fDenyTSConnections", 1);
 
         var (scSuccess, scOutput, _) = await CommandExecutor.ExecuteAsync("sc", "qc SharedAccess");
         // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
@@ -244,6 +327,10 @@ public class GroupPolicyTask : BaseTask
             AnsiConsole.MarkupLine(
                 "[red]? Microsoft network server does not require SMB signing[/]"
             );
+        if (!clientAgreeOk)
+            AnsiConsole.MarkupLine("[red]? Microsoft network client does not offer SMB signing[/]");
+        if (!serverAgreeOk)
+            AnsiConsole.MarkupLine("[red]? Microsoft network server does not offer SMB signing[/]");
         if (!rdpOk)
             AnsiConsole.MarkupLine("[red]? Remote desktop sharing is not turned off[/]");
 
@@ -253,6 +340,8 @@ public class GroupPolicyTask : BaseTask
             && icsOk
             && clientSigningOk
             && serverSigningOk
+            && clientAgreeOk
+            && serverAgreeOk
             && rdpOk;
     }
 }

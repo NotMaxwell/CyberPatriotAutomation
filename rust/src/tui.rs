@@ -83,6 +83,11 @@ const TASKS: &[TaskChoice] = &[
         detail: "deletes matching files permanently",
     },
     TaskChoice {
+        flag: "--group-policy",
+        label: "Local Security Policy",
+        detail: "SMB signing, logon, RDP",
+    },
+    TaskChoice {
         flag: "--software-updates",
         label: "Software Updates",
         detail: "update installed applications",

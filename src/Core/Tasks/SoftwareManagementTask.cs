@@ -432,10 +432,32 @@ public class SoftwareManagementTask : BaseTask
             // (x64 en-US)". The previous exact dictionary lookup matched only
             // names with no suffix at all, which is why Notepad++ was never
             // updated.
+            // Never offer prohibited software to the updater.
+            //
+            // `choco upgrade <pkg>` *installs* a package that is not present, so
+            // feeding it software this run just uninstalled reinstalls it - and
+            // the candidate list is built from the inventory read *before*
+            // removal, so every removed program was still in it. A real run
+            // removed Python 3.13.0 and then put Python 3.14.7 back four minutes
+            // later, which is worse than never having removed it.
             var recognised = installed
+                .Where(i => !ProhibitedSoftware.Any(p => PackageMatching.Matches(i.Name, p)))
                 .Select(i => (i.Name, Id: PackageMatching.ResolvePackageId(i.Name, PackageIds)))
                 .Where(x => x.Id is not null)
                 .ToList();
+
+            // The README's own required list gets the same treatment: a package
+            // id that would reinstall prohibited software must not survive
+            // because two different display names mapped onto it.
+            var prohibitedIds = installed
+                .Where(i => ProhibitedSoftware.Any(p => PackageMatching.Matches(i.Name, p)))
+                .Select(i => PackageMatching.ResolvePackageId(i.Name, PackageIds))
+                .Where(id => id is not null)
+                .Select(id => id!)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var id in prohibitedIds)
+                RunLog.Diagnostic("software", $"excluded from updates (prohibited): {id}");
 
             foreach (var (name, id) in recognised)
                 RunLog.Diagnostic("software", $"update candidate: {name} -> {id}");
@@ -443,7 +465,7 @@ public class SoftwareManagementTask : BaseTask
             var toUpdate = RequiredSoftware
                 .Select(PackageIdFor)
                 .Concat(recognised.Select(x => x.Id!))
-                .Where(id => id.Length > 0)
+                .Where(id => id.Length > 0 && !prohibitedIds.Contains(id))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
@@ -466,9 +488,23 @@ public class SoftwareManagementTask : BaseTask
             }
 
             // Then anything else Chocolatey manages, which the loop above misses.
-            var upgradeError = await Chocolatey.UpgradeAllAsync();
-            if (upgradeError is not null)
-                details.Add($"choco upgrade all reported: {upgradeError}");
+            //
+            // Skipped when prohibited software is still installed: `upgrade all`
+            // would happily bring the survivor to its latest version, which is
+            // the opposite of what this task is for.
+            if (prohibitedIds.Count == 0)
+            {
+                var upgradeError = await Chocolatey.UpgradeAllAsync();
+                if (upgradeError is not null)
+                    details.Add($"choco upgrade all reported: {upgradeError}");
+            }
+            else
+            {
+                RunLog.Diagnostic(
+                    "software",
+                    "skipped `choco upgrade all`: prohibited software is still installed and it would upgrade it"
+                );
+            }
         }
 
         if (updatedNow.Count > 0)

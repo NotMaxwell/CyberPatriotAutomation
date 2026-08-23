@@ -409,32 +409,15 @@ public class ServiceManagementTask : BaseTask
     }
 
     /// <summary>
-    /// Map common service display names to actual service names
+    /// Map common service display names to actual service names.
     /// </summary>
-    private string MapServiceName(string displayName)
-    {
-        var mappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            { "CCS Client", "CCSClient" },
-            { "Remote Desktop", "TermService" },
-            { "Remote Desktop Services", "TermService" },
-            { "RDP", "TermService" },
-            { "FTP", "ftpsvc" },
-            { "Telnet", "TlntSvr" },
-            { "SSH", "sshd" },
-            { "OpenSSH", "sshd" },
-            { "OpenSSH SSH Server", "sshd" },
-            { "Remote Registry", "RemoteRegistry" },
-            { "Windows Update", "wuauserv" },
-            { "Windows Defender", "WinDefend" },
-            { "Windows Firewall", "MpsSvc" },
-            { "Print Spooler", "Spooler" },
-            { "ICS", "SharedAccess" },
-            { "Internet Connection Sharing", "SharedAccess" },
-        };
-
-        return mappings.TryGetValue(displayName, out var serviceName) ? serviceName : displayName;
-    }
+    /// <remarks>
+    /// Delegates to the shared table. This task used to keep its own private
+    /// copy, which is how it came to disagree with the hardening tasks about
+    /// whether the README had asked for Remote Desktop: this one knew "RDP"
+    /// meant TermService and they did not look at the README at all.
+    /// </remarks>
+    private string MapServiceName(string displayName) => ReadmeServices.Resolve(displayName);
 
     private async Task ProtectCriticalServicesAsync(
         HashSet<string> doNotTouch,

@@ -66,6 +66,7 @@ const FLAGS: &[(&str, &str, &str)] = &[
     ("--hosts-file", "", "Remove unauthorised hosts file entries"),
     ("--dns-settings", "", "Report public DNS resolvers"),
     ("--scheduled-tasks", "", "Disable suspicious scheduled tasks"),
+    ("--group-policy", "-g", "Local Security Policy: SMB signing, logon, RDP"),
     ("--log <path>", "", "Write the run log to <path>"),
 ];
 
@@ -213,6 +214,7 @@ async fn run_automation() {
     let run_hosts_file = has_flag(&cli_args, &["--hosts-file"]);
     let run_dns_settings = has_flag(&cli_args, &["--dns-settings"]);
     let run_scheduled_tasks = has_flag(&cli_args, &["--scheduled-tasks"]);
+    let run_group_policy = has_flag(&cli_args, &["--group-policy", "-g"]);
 
     let parse_readme_only = has_flag(&cli_args, &["--parse-readme"]);
 
@@ -235,6 +237,7 @@ async fn run_automation() {
         || run_hosts_file
         || run_dns_settings
         || run_scheduled_tasks
+        || run_group_policy
         || parse_readme_only;
 
     // Running everything has to be asked for.
@@ -348,6 +351,7 @@ async fn run_automation() {
             || run_hosts_file
             || run_dns_settings
             || run_scheduled_tasks
+            || run_group_policy
         {
             ui::write_line();
             ui::markup_line(
@@ -399,6 +403,13 @@ async fn run_automation() {
     }
     if run_security_hardening || run_all {
         tasks.push(Box::new(SecurityHardeningTask::new()));
+    }
+    if run_group_policy || run_all {
+        let mut task = GroupPolicyTask::new();
+        if let Some(rd) = &readme_data {
+            task.set_readme_data(rd.clone());
+        }
+        tasks.push(Box::new(task));
     }
     if run_media_scan || run_all {
         let mut task = ProhibitedMediaTask::new();

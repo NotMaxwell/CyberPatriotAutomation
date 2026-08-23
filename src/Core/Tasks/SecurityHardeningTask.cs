@@ -10,6 +10,32 @@ namespace PinnacleCyPat.Core.Tasks;
 /// </summary>
 public class SecurityHardeningTask : BaseTask
 {
+    private ReadmeData? _readmeData;
+
+    /// <summary>Set the README data for this task.</summary>
+    /// <remarks>
+    /// Only the Remote Desktop settings consult it. A README can declare RDP a
+    /// critical service, in which case denying connections here would leave the
+    /// service running and every connection to it refused - and lose the point
+    /// the README was describing.
+    /// </remarks>
+    public void SetReadmeData(ReadmeData data) => _readmeData = data;
+
+    /// <summary>
+    /// Registry values that must be skipped when the README requires Remote
+    /// Desktop, keyed by value name.
+    /// </summary>
+    /// <remarks>
+    /// Named rather than filtered by path: the Terminal Server key also carries
+    /// <c>fAllowToGetHelp</c>, which disables Remote *Assistance* - a different
+    /// feature, never required by a README, and still worth turning off.
+    /// </remarks>
+    private static readonly string[] RemoteDesktopValues =
+    [
+        "fDenyTSConnections",
+        "AllowTSConnections",
+    ];
+
     /// <summary>
     /// Registry settings to apply for security hardening
     /// </summary>
@@ -491,7 +517,13 @@ public class SecurityHardeningTask : BaseTask
             "reg",
             @"query ""HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server"" /v fDenyTSConnections"
         );
-        if (rdpSuccess && rdpOutput.Contains("0x1"))
+        if (ReadmeServices.IsRemoteDesktopRequired(_readmeData))
+        {
+            // Deliberately left enabled; verifying it as "must be denied" would
+            // report a failure for having done the right thing.
+            AnsiConsole.MarkupLine("[dim]? Remote Desktop left enabled at the README's request[/]");
+        }
+        else if (rdpSuccess && rdpOutput.Contains("0x1"))
         {
             AnsiConsole.MarkupLine("[green]? Remote Desktop is disabled[/]");
         }
@@ -510,53 +542,70 @@ public class SecurityHardeningTask : BaseTask
     {
         AnsiConsole.MarkupLine($"[cyan]Applying {RegistrySettings.Length} registry settings...[/]");
 
+        var skipRemoteDesktop = ReadmeServices.IsRemoteDesktopRequired(_readmeData);
+        if (skipRemoteDesktop)
+        {
+            AnsiConsole.MarkupLine(
+                "[yellow]! Leaving Remote Desktop enabled: the README lists it as a critical service[/]"
+            );
+        }
+
         var successCount = 0;
         var failCount = 0;
+        var skippedCount = 0;
 
-        await AnsiConsole
-            .Progress()
-            .AutoClear(false)
-            .HideCompleted(false)
-            .Columns(
-                new ProgressColumn[]
-                {
-                    new TaskDescriptionColumn(),
-                    new ProgressBarColumn(),
-                    new PercentageColumn(),
-                }
-            )
-            .StartAsync(async ctx =>
+        // No progress display here.
+        //
+        // Program.cs already runs each task's ExecuteAsync inside an
+        // AnsiConsole.Progress(), and Spectre refuses to run two dynamic
+        // displays at once - it throws "Trying to run one or more interactive
+        // functions concurrently". That exception propagated out of this method,
+        // the task's own catch reported "Failed to apply security hardening",
+        // and **not one of the 41 registry settings was applied**. The task
+        // failed this way on every run.
+        foreach (var (path, name, type, value, description) in RegistrySettings)
+        {
+            // Leave Remote Desktop alone when the README calls it critical.
+            // Service management already protects TermService in that case;
+            // denying connections here as well would leave the service running
+            // with every connection refused.
+            if (skipRemoteDesktop && RemoteDesktopValues.Contains(name))
             {
-                var task = ctx.AddTask(
-                    "[cyan]Applying registry settings...[/]",
-                    maxValue: RegistrySettings.Length
+                RunLog.Diagnostic(
+                    "hardening",
+                    $"skipped {name}: the README lists Remote Desktop as a critical service"
                 );
+                skippedCount++;
+                continue;
+            }
 
-                foreach (var (path, name, type, value, description) in RegistrySettings)
-                {
-                    var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                        "reg",
-                        $"add \"{path}\" /v {name} /t {type} /d {value} /f"
-                    );
+            var (success, _, error) = await CommandExecutor.ExecuteAsync(
+                "reg",
+                $"add \"{path}\" /v {name} /t {type} /d {value} /f"
+            );
 
-                    if (success)
-                    {
-                        fixes.Add($"Set {description}");
-                        successCount++;
-                    }
-                    else
-                    {
-                        failCount++;
-                    }
+            if (success)
+            {
+                fixes.Add($"Set {description}");
+                successCount++;
+            }
+            else
+            {
+                // Counted for the tally *and* surfaced, so a value that could not
+                // be written is not invisible.
+                failCount++;
+                issues.Add(
+                    $"Could not set {description} ({name}): {error ?? "no reason reported"}"
+                );
+            }
+        }
 
-                    task.Increment(1);
-                }
-            });
-
-        AnsiConsole.MarkupLine($"[green]? Applied {successCount} settings[/]");
+        AnsiConsole.MarkupLine($"[green]✓ Applied {successCount} settings[/]");
+        if (skippedCount > 0)
+            AnsiConsole.MarkupLine($"[dim]  {skippedCount} skipped at the README's request[/]");
         if (failCount > 0)
         {
-            AnsiConsole.MarkupLine($"[yellow]? {failCount} settings could not be applied[/]");
+            AnsiConsole.MarkupLine($"[yellow]! {failCount} settings could not be applied[/]");
         }
     }
 

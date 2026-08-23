@@ -87,6 +87,7 @@ public class Program
         var runHostsFile = cliArgs.Contains("--hosts-file");
         var runDnsSettings = cliArgs.Contains("--dns-settings");
         var runScheduledTasks = cliArgs.Contains("--scheduled-tasks");
+        var runGroupPolicy = cliArgs.Contains("--group-policy") || cliArgs.Contains("-g");
 
         var parseReadmeOnly = cliArgs.Contains("--parse-readme");
 
@@ -107,7 +108,8 @@ public class Program
             || runSharedFolders
             || runHostsFile
             || runDnsSettings
-            || runScheduledTasks;
+            || runScheduledTasks
+            || runGroupPolicy;
 
         var anyTaskNamed = anyRemediationNamed || parseReadmeOnly;
 
@@ -286,7 +288,19 @@ public class Program
         if (runFirewall || runAll)
             tasks.Add(new FirewallConfigurationTask());
         if (runSecurityHardening || runAll)
-            tasks.Add(new SecurityHardeningTask());
+        {
+            var hardeningTask = new SecurityHardeningTask();
+            if (readmeData != null)
+                hardeningTask.SetReadmeData(readmeData);
+            tasks.Add(hardeningTask);
+        }
+        if (runGroupPolicy || runAll)
+        {
+            var groupPolicyTask = new GroupPolicyTask();
+            if (readmeData != null)
+                groupPolicyTask.SetReadmeData(readmeData);
+            tasks.Add(groupPolicyTask);
+        }
         if (runMediaScan || runAll)
         {
             var mediaTask = new ProhibitedMediaTask();
@@ -489,6 +503,7 @@ public class Program
         ("--hosts-file", "", "Remove unauthorised hosts file entries"),
         ("--dns-settings", "", "Report public DNS resolvers"),
         ("--scheduled-tasks", "", "Disable suspicious scheduled tasks"),
+        ("--group-policy", "-g", "Local Security Policy: SMB signing, logon, RDP"),
         ("--log <path>", "", "Write the run log to <path>"),
     ];
 

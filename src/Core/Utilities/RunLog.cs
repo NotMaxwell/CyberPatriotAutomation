@@ -108,14 +108,30 @@ public static class RunLog
     }
 
     /// <summary>Longest captured output kept per failed command.</summary>
-    private const int MaxCapturedOutput = 600;
+    private const int MaxCapturedOutput = 2000;
 
+    /// <summary>How much of a long capture to keep from each end.</summary>
+    private const int TruncationEdge = MaxCapturedOutput / 2;
+
+    /// <summary>
+    /// Shorten a long capture, keeping both ends.
+    /// </summary>
+    /// <remarks>
+    /// Keeping only the head loses the reason. A failed Chocolatey upgrade opens
+    /// with pages of package boilerplate and states the actual error - "Error -
+    /// hashes do not match" - at the very end, so a head-only cut recorded
+    /// everything except the one line worth having.
+    /// </remarks>
     private static string Truncate(string text)
     {
         text = text.Trim();
-        return text.Length <= MaxCapturedOutput
-            ? text
-            : text[..MaxCapturedOutput] + $"... [{text.Length - MaxCapturedOutput} more chars]";
+        if (text.Length <= MaxCapturedOutput)
+            return text;
+
+        var head = text[..TruncationEdge].TrimEnd();
+        var tail = text[^TruncationEdge..].TrimStart();
+        var omitted = text.Length - (2 * TruncationEdge);
+        return $"{head}\n    ... [{omitted} chars omitted] ...\n    {tail}";
     }
 
     /// <summary>

@@ -235,3 +235,72 @@ public class UninstallCommandTests
         UninstallCommandBuilder.Build("MsiExec.exe /I{not-a-guid}").Should().BeNull();
     }
 }
+
+/// <summary>
+/// Regressions found in a real run log, not by reasoning about the code.
+/// </summary>
+public class SoftwareRunLogRegressionTests
+{
+    /// <summary>
+    /// The updater must never be offered software the run just removed.
+    /// </summary>
+    /// <remarks>
+    /// A real run removed "Python 3.13.0 (64-bit)", then four minutes later ran
+    /// <c>choco upgrade python</c> - which installs a package that is absent -
+    /// and Python 3.14.7 was present at verification. The candidate list is
+    /// built from the inventory read *before* removal, so every removed program
+    /// was still in it.
+    /// </remarks>
+    [Fact]
+    public void ProhibitedSoftwareResolvesToAPackageIdThatMustBeExcluded()
+    {
+        // The mapping itself is correct and has to stay correct - it is what the
+        // exclusion is keyed on.
+        PackageMatching
+            .ResolvePackageId("Python 3.13.0 (64-bit)", SoftwareManagementTask.PackageIds)
+            .Should()
+            .Be("python");
+
+        PackageMatching
+            .ResolvePackageId("Python Launcher", SoftwareManagementTask.PackageIds)
+            .Should()
+            .Be("python");
+    }
+
+    /// <summary>
+    /// The display names from the real run resolve to the ids the run logged.
+    /// </summary>
+    [Theory]
+    [InlineData("7-Zip 24.08 (x64)", "7zip.install")]
+    [InlineData("Notepad++ (32-bit x86)", "notepadplusplus.install")]
+    [InlineData("Wireshark 4.4.1 x64", "wireshark")]
+    [InlineData("Google Chrome", "googlechrome")]
+    public void RealInstalledNamesResolveAsTheRunLogged(string installed, string expected)
+    {
+        PackageMatching
+            .ResolvePackageId(installed, SoftwareManagementTask.PackageIds)
+            .Should()
+            .Be(expected);
+    }
+
+    /// <summary>
+    /// The uninstall strings the real image registered are all usable.
+    /// </summary>
+    [Fact]
+    public void TheUninstallStringsFromTheRealImageAreUsable()
+    {
+        // Jellyfin and Python register bundles that already carry both switches.
+        var jellyfin = UninstallCommandBuilder.Build(
+            "\"C:\\ProgramData\\Package Cache\\{dd9e5c35}\\JellyfinMediaPlayer-1.11.1-windows-x64.exe\" /uninstall /quiet"
+        );
+        jellyfin!.Value.Arguments.Should().Contain("/uninstall").And.Contain("/quiet");
+
+        // Python Launcher registers an MSI with /X - already uninstall, but it
+        // still needs /qn or msiexec shows UI.
+        var launcher = UninstallCommandBuilder.Build(
+            "MsiExec.exe /X{1F3BC6BD-2010-40E7-85B2-F1A5E2EB5FF2}"
+        );
+        launcher!.Value.Program.Should().Be("msiexec.exe");
+        launcher.Value.Arguments.Should().Be("/x {1F3BC6BD-2010-40E7-85B2-F1A5E2EB5FF2} /qn /norestart");
+    }
+}

@@ -1,7 +1,9 @@
 //! Configures key Group Policy (gpedit) settings for security hardening.
 
 use crate::command;
+use crate::readme_services;
 use crate::registry_ops;
+use crate::run_log;
 use crate::service_ops;
 use crate::impl_task_meta;
 use crate::models::{SystemInfo, TaskResult};
@@ -13,9 +15,18 @@ pub struct GroupPolicyTask {
     name: String,
     description: String,
     dry_run: bool,
+    readme_data: Option<crate::models::ReadmeData>,
 }
 
 impl GroupPolicyTask {
+    /// Set the README data for this task.
+    ///
+    /// Only one setting consults it - Remote Desktop, which a README can declare
+    /// critical. Everything else here is unconditional hardening.
+    pub fn set_readme_data(&mut self, data: crate::models::ReadmeData) {
+        self.readme_data = Some(data);
+    }
+
     pub fn new() -> Self {
         Self {
             name: "Group Policy".to_string(),
@@ -23,6 +34,7 @@ impl GroupPolicyTask {
                 "Configures Group Policy settings: Hide last user, require Ctrl+Alt+Del, disable ICS, and more."
                     .to_string(),
             dry_run: false,
+            readme_data: None,
         }
     }
 }
@@ -132,40 +144,68 @@ impl Task for GroupPolicyTask {
         // what makes SMB relay attacks work. The server-side setting goes with
         // it: they are a pair in every hardening benchmark, and signing only one
         // side leaves the other able to negotiate an unsigned session.
-        for (key, label) in [
-            (LANMAN_WORKSTATION, "client"),
-            (LANMAN_SERVER, "server"),
+        // Local Security Policy lists four SMB signing settings, not two, and
+        // the benchmarks want all four. "Always" forces signing; "if the other
+        // side agrees" makes this machine *offer* it to a peer that does not
+        // require it. Setting only the "always" pair leaves the negotiated case
+        // unsigned and two of the four scored items unset.
+        for (key, label, value, qualifier) in [
+            (LANMAN_WORKSTATION, "client", "RequireSecuritySignature", "always"),
+            (LANMAN_SERVER, "server", "RequireSecuritySignature", "always"),
+            (
+                LANMAN_WORKSTATION,
+                "client",
+                "EnableSecuritySignature",
+                "if server agrees",
+            ),
+            (
+                LANMAN_SERVER,
+                "server",
+                "EnableSecuritySignature",
+                "if client agrees",
+            ),
         ] {
-            let error = registry_ops::set_dword(key, "RequireSecuritySignature", 1)
-                .await
-                .err();
+            let error = registry_ops::set_dword(key, value, 1).await.err();
             details.push(match &error {
                 None => format!(
-                    "✓ Microsoft network {label}: digitally sign communications (always)"
+                    "✓ Microsoft network {label}: digitally sign communications ({qualifier})"
                 ),
                 Some(e) => format!("✗ Failed: {e}"),
             });
             all_success &= error.is_none();
         }
 
-        // Remote desktop sharing off.
+        // Remote desktop sharing off - unless the README says it must work.
         //
         // fDenyTSConnections is the switch the Settings UI toggles. The policy
         // key is set too: a policy value overrides the local one, so an image
         // with the policy set to "allow" would otherwise keep RDP listening no
         // matter what the local setting said.
-        for (key, label) in [
-            (TERMINAL_SERVER, "Remote desktop sharing turned off"),
-            (TERMINAL_SERVICES_POLICY, "Remote desktop sharing denied by policy"),
-        ] {
-            let error = registry_ops::set_dword(key, "fDenyTSConnections", 1)
-                .await
-                .err();
-            details.push(match &error {
-                None => format!("✓ {label}"),
-                Some(e) => format!("✗ Failed: {e}"),
-            });
-            all_success &= error.is_none();
+        //
+        // A README that lists Remote Desktop as critical is describing a machine
+        // administered remotely, where RDP *working* is the scored condition.
+        // Service management already protects TermService in that case; denying
+        // connections here too would leave the service running with every
+        // connection refused - the worst of both, and a lost point.
+        if readme_services::is_remote_desktop_required(self.readme_data.as_ref()) {
+            let note = "- Remote desktop left enabled: the README lists it as a critical service";
+            details.push(note.to_string());
+            run_log::diagnostic("grouppolicy", note.trim_start_matches(['-', ' ']));
+            ui::markup_line(&format!("[yellow]{}[/]", ui::escape(note)));
+        } else {
+            for (key, label) in [
+                (TERMINAL_SERVER, "Remote desktop sharing turned off"),
+                (TERMINAL_SERVICES_POLICY, "Remote desktop sharing denied by policy"),
+            ] {
+                let error = registry_ops::set_dword(key, "fDenyTSConnections", 1)
+                    .await
+                    .err();
+                details.push(match &error {
+                    None => format!("✓ {label}"),
+                    Some(e) => format!("✗ Failed: {e}"),
+                });
+                all_success &= error.is_none();
+            }
         }
 
         TaskResult {
