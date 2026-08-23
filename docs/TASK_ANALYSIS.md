@@ -55,22 +55,26 @@
 - Sets additional local security policies (e.g., restrict anonymous access)
 
 
-## Unit Tests
+## Tests
 
-All tasks have comprehensive unit tests:
+| Suite | Tests | Covers |
+|-------|------:|--------|
+| `src/**` unit tests | 95 | tables, matching, HTML, command, config, TUI |
+| `main.rs` | 7 | flag parsing and the unknown-argument check |
+| `tests/readme_parser_tests.rs` | 20 | parser behaviour, case by case |
+| `tests/tasks_tests.rs` | 26 | task construction and dry-run |
+| `tests/audit_tasks_tests.rs` | 14 | the four independent audits |
+| `tests/app_config_tests.rs` | 9 | README discovery |
+| `tests/models_tests.rs` | 8 | data models |
+| `tests/corpus_tests.rs` | 2 | **every README fixture, snapshotted** |
+| `tests/ledger_sample.rs` | 1 | remediation-ledger rendering |
+| **Total** | **182** | |
 
-| Test File | Tests | Status |
-|-----------|-------|--------|
-| `ReadmeParserTests.cs` | 13 | ✅ |
-| `ModelsTests.cs` | 12 | ✅ |
-| `AppConfigTests.cs` | 8 | ✅ |
-| `TasksTests.cs` | 19 | ✅ |
-| `SharedFoldersAuditTaskTests.cs` | 2 | ✅ |
-| `HostsFileAuditTaskTests.cs` | 2 | ✅ |
-| `DnsSettingsAuditTaskTests.cs` | 2 | ✅ |
-| `SuspiciousScheduledTasksAuditTaskTests.cs` | 2 | ✅ |
-| `NewTasksTests.cs` | 22 | ✅ |
-| **Total** | **82** | ✅ |
+> The corpus suite counts as two tests but covers five whole documents, and it
+> is the one to extend: `cargo test --test corpus_tests` re-parses every README
+> in `rust/tests/corpus/` and diffs the entire result against its snapshot.
+> Adding a real competition README there is the highest-value thing anyone can
+> do for the parser — it found two bugs on its first run.
 
 ---
 
@@ -201,19 +205,19 @@ The scanner looks for files containing:
 
 ```powershell
 # Run all tasks
-dotnet run -- --all --readme "README.html"
+cargo run -- --all --readme "README.html"
 
 # Run specific tasks
-dotnet run -- --firewall --security-hardening
+cargo run -- --firewall --security-hardening
 
 # Scan for prohibited media only
-dotnet run -- --media-scan --readme "README.html"
+cargo run -- --media-scan --readme "README.html"
 
 # Dry run to preview changes
-dotnet run -- --all --dry-run
+cargo run -- --all --dry-run
 
 # Auto-find README in common locations
-dotnet run -- --auto-readme --all
+cargo run -- --auto-readme --all
 ```
 
 ---
@@ -237,6 +241,6 @@ followed to the end, bounded so a shortcut loop terminates. A remote target is
 downloaded. The URL is unique per image and changes every competition, so it is
 read from the shortcut at run time and never hard-coded.
 
-> Note: shortcut resolution is currently implemented in the Rust port
-> (`app_config::find_readme_file`). The C# `AppConfig.FindReadmeFile` still
+> Note: shortcut resolution is implemented
+> (`app_config::find_readme_file`). The archived C# `AppConfig.FindReadmeFile`
 > only checks the literal paths above.

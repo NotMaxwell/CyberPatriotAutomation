@@ -180,7 +180,10 @@ pub async fn execute_for_exit_code(
                 arguments,
                 None,
                 &output,
-                Some(&format!("Process timed out after {:.0}s", limit.as_secs_f64())),
+                Some(&format!(
+                    "Process timed out after {:.0}s",
+                    limit.as_secs_f64()
+                )),
                 started.elapsed(),
             );
             (None, output, Some("Process timed out".to_string()))

@@ -2,6 +2,7 @@
 
 use crate::command;
 use crate::impl_task_meta;
+use crate::knowledge::{FEATURES_TO_DISABLE, SERVICE_NAME_MAP};
 use crate::models::{ReadmeData, SystemInfo, TaskResult};
 use crate::service_ops::{self, ServiceState};
 use crate::tasks::Task;
@@ -98,34 +99,6 @@ const CRITICAL_SERVICES: &[(&str, &str)] = &[
     ("Spooler", "Print Spooler"),
 ];
 
-const SERVICE_NAME_MAPPINGS: &[(&str, &str)] = &[
-    ("CCS Client", "CCSClient"),
-    ("Remote Desktop", "TermService"),
-    ("Remote Desktop Services", "TermService"),
-    ("RDP", "TermService"),
-    ("FTP", "ftpsvc"),
-    ("Telnet", "TlntSvr"),
-    ("SSH", "sshd"),
-    ("OpenSSH", "sshd"),
-    ("OpenSSH SSH Server", "sshd"),
-    ("Remote Registry", "RemoteRegistry"),
-    ("Windows Update", "wuauserv"),
-    ("Windows Defender", "WinDefend"),
-    ("Windows Firewall", "MpsSvc"),
-    ("Print Spooler", "Spooler"),
-    ("ICS", "SharedAccess"),
-    ("Internet Connection Sharing", "SharedAccess"),
-];
-
-const FEATURES_TO_DISABLE: &[&str] = &[
-    "TelnetClient",
-    "TelnetServer",
-    "TFTP",
-    "SMB1Protocol",
-    "SMB1Protocol-Client",
-    "SMB1Protocol-Server",
-];
-
 /// A case-insensitive ordered set of service names.
 #[derive(Default)]
 struct ServiceSet {
@@ -174,7 +147,7 @@ impl ServiceManagementTask {
     }
 
     fn map_service_name(display_name: &str) -> String {
-        SERVICE_NAME_MAPPINGS
+        SERVICE_NAME_MAP
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(display_name))
             .map(|(_, v)| v.to_string())

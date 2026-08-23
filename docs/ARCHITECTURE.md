@@ -12,7 +12,7 @@ is the short version — start there if you only want to run the thing.
 
 - [1. What the tool is](#1-what-the-tool-is)
 - [2. Run pipeline](#2-run-pipeline)
-- [3. The two ports](#3-the-two-ports)
+- [3. The implementation, and the archived one](#3-the-implementation-and-the-archived-one)
 - [4. Tasks](#4-tasks)
   - [4.1 Password Policy](#41-password-policy)
   - [4.2 Account Permissions](#42-account-permissions)
@@ -23,13 +23,16 @@ is the short version — start there if you only want to run the thing.
   - [4.7 Security Hardening](#47-security-hardening)
   - [4.8 Prohibited Media](#48-prohibited-media)
   - [4.9 Software Management](#49-software-management)
-  - [4.10 Software Updates (Rust only)](#410-software-updates-rust-only)
+  - [4.10 Software Updates](#410-software-updates)
   - [4.11 Shared Folders Audit](#411-shared-folders-audit)
   - [4.12 Hosts File Audit](#412-hosts-file-audit)
   - [4.13 DNS Settings Audit](#413-dns-settings-audit)
   - [4.14 Suspicious Scheduled Tasks Audit](#414-suspicious-scheduled-tasks-audit)
   - [4.15 Group Policy](#415-group-policy)
 - [5. Utilities](#5-utilities)
+  - [5.2 ReadmeParser](#52-readmeparser)
+  - [5.8 knowledge — the tables](#58-knowledge--the-tables)
+  - [5.9 The README corpus](#59-the-readme-corpus)
 - [6. Native layer](#6-native-layer)
 - [7. Models](#7-models)
 - [8. The interactive menu](#8-the-interactive-menu)
@@ -111,41 +114,53 @@ instance.
 
 ---
 
-## 3. The two ports
+## 3. The implementation, and the archived one
 
-The repository holds two complete implementations of the same tool.
+The tool is the Rust program under `rust/`. A complete C# implementation lived
+alongside it until 2026-08-23 and is now frozen under
+[`archive/csharp/`](../archive/csharp/), where it still builds and passes its
+202 tests but is not shipped, wired into any script, or kept in step.
 
-| | C# | Rust |
+| | Rust (the tool) | C# (archived) |
 |---|---|---|
-| Location | `src/`, `tests/` | `rust/` |
-| Version | 1.8.0 | 1.13.0 |
-| Framework | .NET 10 (`net10.0` + `net10.0-windows`) | Rust 2021 |
-| Win32 bindings | CsWin32, generated from `NativeMethods.txt` | `windows` crate |
-| Console UI | Spectre.Console | hand-rolled `ui` module |
-| Tests | 202 (xUnit) | 155 (built-in) |
-| Published size | ~42 MB self-contained | ~2.1 MB |
+| Location | `rust/` | `archive/csharp/` |
+| Version | 1.15.0 | 1.8.0, frozen |
+| Framework | Rust 2021 | .NET 10 |
+| Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
+| Console UI | hand-rolled `ui` module | Spectre.Console |
+| HTML | `scraper` (html5ever) | regex |
+| Tests | 182 | 202, frozen |
+| Published size | ~2.7 MB | ~42 MB self-contained |
+| Startup | immediate, no runtime | JIT + runtime |
 
-They share the flag set, the task pipeline, the parser behaviour and the run-log
-format. The Rust port has run ahead in a few places — it has an extra task
-(Software Updates), it runs the four independent audits concurrently, and its
-scheduled-task audit parses per-task records rather than matching keywords line
-by line. Those differences are noted against each task below and listed in
-[rust/README.md](../rust/README.md#deliberate-divergences-from-the-c-original).
+**Why one was retired.** Keeping two implementations at parity meant every
+behavioural change landed twice, in two languages, and drift was silent — it
+surfaced only when someone read both files side by side. The last instance
+before the archive: security hardening consulted the README before denying
+Remote Desktop in C# and did not in Rust, so on an image whose scenario required
+RDP the Rust port denied it while service management kept the service running,
+and every connection to it was refused. The same duplication tax applied to the
+knowledge tables, which is why they now live in one module (§5.9).
 
-**Neither port is the "real" one.** The C# build is what `RUN.bat` launches and
-what most competitors will use; the Rust build is what you want when the image is
-slow, because it starts instantly and carries no runtime.
+The Rust port survived because it had already run ahead: an extra task
+(Software Updates), concurrent independent audits, and a scheduled-task audit
+that parses per-task records rather than matching keywords line by line. Those
+divergences are noted against each task below.
+
+The archive is kept as the reference the Rust port was written against. When
+Rust behaviour is unclear, that is what it was mirroring, and its comments
+record why several non-obvious decisions were made.
 
 ---
 
 ## 4. Tasks
 
-Thirteen tasks in the C# port, fourteen in Rust. Each section below covers: why
-the task exists, what it changes, how it does it, and what it refuses to touch.
+Fourteen tasks. Each section below covers: why the task exists, what it
+changes, how it does it, and what it refuses to touch.
 
 ### 4.1 Password Policy
 
-`--password-policy`, `-p` · `src/Core/Tasks/PasswordPolicyTask.cs`
+`--password-policy`, `-p` · `rust/src/tasks/password_policy.rs`
 
 **Why.** Password and lockout policy is scored on essentially every Windows
 image, and it is scored as individual settings — minimum length, maximum age,
@@ -201,7 +216,7 @@ otherwise pass a naive `<=` comparison.
 
 ### 4.2 Account Permissions
 
-`--account-permissions`, `-a` · `src/Core/Tasks/AccountPermissionsTask.cs`
+`--account-permissions`, `-a` · `rust/src/tasks/account_permissions.rs`
 
 **Why.** The per-account settings that are scored regardless of what the README
 says: Guest disabled, no blank-password accounts, passwords that expire, no
@@ -243,7 +258,7 @@ would change, then runs only the reporting steps.
 
 ### 4.3 User Management
 
-`--user-management`, `-u` · `src/Core/Tasks/UserManagementTask.cs` · **requires a README**
+`--user-management`, `-u` · `rust/src/tasks/user_management.rs` · **requires a README**
 
 The most destructive task in the tool, and the one most directly worth points.
 
@@ -301,7 +316,7 @@ create) and returns without touching anything.
 
 ### 4.4 Service Management
 
-`--service-management`, `-s` · `src/Core/Tasks/ServiceManagementTask.cs`
+`--service-management`, `-s` · `rust/src/tasks/service_management.rs`
 
 **Why.** Insecure services are scored individually — Remote Registry, Telnet,
 FTP, SNMP — and so is the *failure* to keep a critical service running. Disabling
@@ -374,7 +389,7 @@ must be stopped — all of them, from the same single bulk query.
 
 ### 4.5 Audit Policy
 
-`--audit-policy`, `-t` · `src/Core/Tasks/AuditPolicyTask.cs`
+`--audit-policy`, `-t` · `rust/src/tasks/audit_policy.rs`
 
 **Why.** "Audit policy is configured to log success and failure" is a scored
 item, usually per category. PowerShell logging and event-log sizing are scored
@@ -436,7 +451,7 @@ only when **no** subcategory is left unaudited.
 
 ### 4.6 Firewall Configuration
 
-`--firewall`, `-f` · `src/Core/Tasks/FirewallConfigurationTask.cs`
+`--firewall`, `-f` · `rust/src/tasks/firewall.rs`
 
 **Why.** "Firewall enabled on all profiles" is scored, and so are individual
 blocked ports on some images.
@@ -494,7 +509,7 @@ connections not logged. `netsh advfirewall` is the fallback.
 
 ### 4.7 Security Hardening
 
-`--security-hardening`, `-H` · `src/Core/Tasks/SecurityHardeningTask.cs`
+`--security-hardening`, `-H` · `rust/src/tasks/security_hardening.rs`
 
 > `-H`, not `-h`. `-h` is help. `--security-hardening` is unchanged.
 
@@ -539,7 +554,7 @@ needs judgement the tool does not have.
 
 ### 4.8 Prohibited Media
 
-`--media-scan`, `-m` · `src/Core/Tasks/ProhibitedMediaTask.cs`
+`--media-scan`, `-m` · `rust/src/tasks/prohibited_media.rs`
 
 **Why.** Removing prohibited media and hacking tools from user directories is
 scored per file on most images.
@@ -598,7 +613,7 @@ real numbers to the completion rate rather than a bare pass/fail.
 
 ### 4.9 Software Management
 
-`--software-management` · `src/Core/Tasks/SoftwareManagementTask.cs`
+`--software-management` · `rust/src/tasks/software_management.rs`
 
 **Why.** Prohibited software removal, required software installation and a
 malware scan are three separate scored items on most images.
@@ -724,7 +739,7 @@ remain — not that there was nothing to do.
 
 ---
 
-### 4.10 Software Updates (Rust only)
+### 4.10 Software Updates
 
 `--software-updates` · `rust/src/tasks/software_update.rs`
 
@@ -756,7 +771,7 @@ audit-policy task.
 
 ### 4.11 Shared Folders Audit
 
-`--shared-folders` · `src/Core/Tasks/SharedFoldersAuditTask.cs`
+`--shared-folders` · `rust/src/tasks/shared_folders_audit.rs`
 
 **Why.** "Only the default administrative shares exist" is a standard checklist
 item (`fsmgmt.msc`). Anything else is a file-sharing exposure.
@@ -783,7 +798,7 @@ when the task had found and fixed something.
 
 ### 4.12 Hosts File Audit
 
-`--hosts-file` · `src/Core/Tasks/HostsFileAuditTask.cs`
+`--hosts-file` · `rust/src/tasks/hosts_file_audit.rs`
 
 **Why.** A modified `hosts` file is a common planted misconfiguration: it can
 redirect update servers or security vendors to nowhere.
@@ -806,7 +821,7 @@ touch a system file for no change.
 
 ### 4.13 DNS Settings Audit
 
-`--dns-settings` · `src/Core/Tasks/DnsSettingsAuditTask.cs`
+`--dns-settings` · `rust/src/tasks/dns_settings_audit.rs`
 
 **Why.** A resolver pointed at an attacker-controlled or unexpected public server
 is a planted misconfiguration.
@@ -829,7 +844,7 @@ non-loopback adapter and compares each `IPAddress` against `8.8.8.8`, `8.8.4.4`,
 
 ### 4.14 Suspicious Scheduled Tasks Audit
 
-`--scheduled-tasks` · `src/Core/Tasks/SuspiciousScheduledTasksAuditTask.cs`
+`--scheduled-tasks` · `rust/src/tasks/suspicious_scheduled_tasks_audit.rs`
 
 **Why.** Scheduled tasks are a standard persistence mechanism, and a planted one
 is worth points to find.
@@ -840,7 +855,7 @@ Matching tasks are disabled with `schtasks /Change /TN "<name>" /Disable`.
 
 > **The C# version matches keywords against any line of output** and is therefore
 > noisy — `powershell` and `cmd.exe` appear in the command line of legitimate
-> built-in tasks. **The Rust port parses per-task records and skips anything
+> built-in tasks. **This parses per-task records and skips anything
 > under `\Microsoft\`**, which is the behaviour to prefer. Review this task's
 > output rather than trusting it.
 
@@ -851,7 +866,7 @@ case where there were none.
 
 ### 4.15 Group Policy
 
-`src/Core/Tasks/GroupPolicyTask.cs` — implemented and tested; not currently wired
+`rust/src/tasks/group_policy.rs` — implemented and tested; not currently wired
 to a CLI flag in either port. Its settings are covered by the audit-policy and
 security-hardening tasks, which is why it does not run separately.
 
@@ -888,7 +903,7 @@ Two details worth carrying over:
 
 ### 5.1 AppConfig — README discovery
 
-`src/Core/AppConfig.cs` · `rust/src/app_config.rs`
+`rust/src/app_config.rs`
 
 The single hardest thing the tool does, and the reason `--auto-readme` works at
 all.
@@ -941,11 +956,36 @@ and stamps the executable's build date.
 
 ### 5.2 ReadmeParser
 
-`src/Core/Utilities/ReadmeParser.cs` (1,813 lines) · `rust/src/readme_parser.rs`
+`rust/src/readme_parser.rs` · `rust/src/html.rs`
 
 Turns competition README HTML into the `ReadmeData` that drives every
-README-aware task. Regex-based, because the input is hand-written HTML that no
-strict parser survives.
+README-aware task.
+
+The work splits in two, and the split matters. **Structure** — the title, the
+`<h2>` sections, the paragraphs, the list items, where one line ends — is read
+by `html.rs` with a real HTML parser. **Prose** — "make a group called X and add
+the users …" — stays regex, because there is no parser for how a person writes
+English.
+
+> Both halves used to be regex, and the markup half kept losing. `<[^>]+>` does
+> not know that `<b>` inside `Windows <b>10</b>` is not a word boundary, that
+> `&nbsp;` is a space, that an unclosed `<p>` ends at the next one, or that an
+> unclosed `<li>` still ends where the next begins. Every one of those is
+> ordinary in hand-written HTML, and each was found the same way: a README
+> parsed to nothing and someone went looking. `scraper` (html5ever) applies the
+> HTML5 parsing algorithm including its error recovery, so malformed markup
+> produces the tree a browser would show. It costs ~470 KB in the shipped
+> binary — the largest single dependency, and deliberate.
+
+**`html.rs` answers exactly the structural questions the parser asks:**
+`text` (visible text, whitespace collapsed), `text_with_breaks` (block elements
+and `<br>` as line breaks), `title`, `headline_texts`, `sections`, `texts_of`.
+
+> `text_with_breaks` is what makes a user list parse whatever markup wrote it.
+> Only a `<pre>` block carries real newlines; a list written with `<br>`, or one
+> `<p>` per user, collapses to a single line if tags are simply removed — and
+> the whole block is then rejected as one over-long "username", so such a README
+> yielded no users at all.
 
 **What it extracts:**
 
@@ -1054,7 +1094,7 @@ capitalised if multi-word.
 
 ### 5.3 CommandExecutor
 
-`src/Core/Utilities/CommandExecutor.cs` · `rust/src/command.rs`
+`rust/src/command.rs`
 
 Every external process goes through here.
 
@@ -1117,7 +1157,7 @@ most hosts now refuse. `curl.exe` is the fallback; both follow redirects.
 
 ### 5.4 RunLog
 
-`src/Core/Utilities/RunLog.cs` · `rust/src/run_log.rs`
+`rust/src/run_log.rs`
 
 > The console narrative already describes the run in full — which services were
 > queued, which users were created, which passwords were set — but it scrolls
@@ -1129,12 +1169,11 @@ most hosts now refuse. `curl.exe` is the fallback; both follow redirects.
 name so logs from different builds are distinguishable without opening them.
 `--log <path>` overrides.
 
-**How it captures everything.** `AttachToConsole` replaces Spectre's
-`IAnsiConsoleOutput` with a tee that buffers to a newline, strips ANSI escapes,
-timestamps, and appends.
+**How it captures everything.** The `ui` module tees every line it prints into
+the log: buffered to a newline, ANSI escapes stripped, timestamped, appended.
 
-> Hooking the console once is far less error-prone than editing every one of the
-> hundreds of `MarkupLine` call sites, and it cannot fall out of sync as tasks
+> Hooking output once is far less error-prone than editing every one of the
+> hundreds of `markup_line` call sites, and it cannot fall out of sync as tasks
 > change. It captures the *rendered* text, from which markup has already been
 > resolved, so the log holds exactly what the operator saw — table contents
 > included.
@@ -1167,7 +1206,7 @@ Written on the normal exit path **and** on the `--parse-readme` path.
 
 ### 5.5 LocalAccounts
 
-`src/Core/Utilities/LocalAccounts.cs`
+`rust/src/account_ops.rs`
 
 Account and group operations, shared by the account-related tasks. **These go
 through PowerShell rather than `net`.**
@@ -1194,7 +1233,7 @@ through PowerShell rather than `net`.**
 
 ### 5.6 RegistryOps and ServiceOps
 
-`src/Core/Utilities/RegistryOps.cs`, `ServiceOps.cs` · `rust/src/registry_ops.rs`, `service_ops.rs`
+`rust/src/registry_ops.rs`, `rust/src/service_ops.rs`, `rust/src/policy_ops.rs`
 
 Thin façades that pick the native path where available and the shell-out path
 otherwise, so tasks read as plain intent and there is one place that knows about
@@ -1213,7 +1252,7 @@ installed is already in the state the caller wanted.
 
 ### 5.7 Chocolatey
 
-`src/Core/Utilities/Chocolatey.cs`
+`rust/src/chocolatey.rs`
 
 > Chocolatey is the default package source because it is scriptable without a
 > console prompt, installable onto every supported image, and its package names
@@ -1231,14 +1270,92 @@ installed is already in the state the caller wanted.
 **Success exit codes:** `0, 1605, 1614, 1641, 3010` — the last three mean
 "succeeded, reboot pending".
 
-`ListInstalledAsync` uses `--limit-output`, which prints `name|version` per line
+`list_installed` uses `--limit-output`, which prints `name|version` per line
 and nothing else, so there is no banner to skip and no localised text to match.
+
+---
+
+### 5.8 knowledge — the tables
+
+`rust/src/knowledge.rs`
+
+Everything the tool knows about Windows as *data* rather than logic: the 42
+hardening registry settings, the Windows features worth disabling, the display
+names a README might use for a service, the Chocolatey package for a given
+program, the software prohibited by default, and the registry values that turn
+Remote Desktop off.
+
+They live in one module because more than one task uses most of them, and a
+second copy is a second thing to keep right.
+
+> That is not hypothetical. The service-name table was written out twice — once
+> for the README readers and once inside service management — and the two had
+> already drifted: the service-management copy was missing `"Remote Desktop
+> Service"` and `"Terminal Services"`, so a README using either spelling was
+> understood by security hardening and group policy but **not** by the task
+> responsible for keeping the service running. The feature list had drifted the
+> same way, by two entries.
+
+**The tables are tested, which is the other reason to centralise them.** A table
+is the one kind of code where a typo compiles perfectly. The checks: no registry
+value set twice, every row applicable (hive-qualified path, non-empty
+description, a value that parses as a DWORD), every name in the Remote Desktop
+skip list actually present in the settings table, no display name mapping to two
+services, no package name mapping to two ids, package ids shaped like Chocolatey
+ids, and every default prohibition having a package id.
+
+> The last one failed the moment it was written. `ALWAYS_PROHIBITED` lists
+> Python, CCleaner and Jellyfin; only Python had a package id. The update step
+> excluded prohibited software from `choco upgrade` by resolving it to an id, so
+> CCleaner and Jellyfin resolved to nothing and the `choco upgrade all` guard —
+> which exists precisely to avoid upgrading software that survived removal — saw
+> an empty exclusion list and ran anyway. Fixed on both sides: the ids were
+> added, and the guard now asks the post-removal inventory whether anything
+> prohibited survived rather than trusting the table to be complete.
+
+---
+
+### 5.9 The README corpus
+
+`rust/tests/corpus/` · `rust/tests/corpus_tests.rs` · `rust/tests/snapshots/`
+
+Every README in `tests/corpus/` is parsed and the whole result snapshotted with
+[`insta`](https://insta.rs). The unit of test is a *document*, not an assertion.
+
+```bash
+cargo test --test corpus_tests                       # check
+INSTA_UPDATE=always cargo test --test corpus_tests   # accept new output
+cargo insta review                                   # or step through diffs
+```
+
+> The parser is a pile of heuristics about how a person writes English and
+> always will be. What it lacked was any way to tell whether a change to one
+> heuristic quietly broke another — the phrasings are only discovered by reading
+> real documents, and each fix had been made against a single sentence with
+> nothing checking the rest. Now any change that alters what a README produces
+> is a reviewable diff instead of silence.
+
+**Adding a README is the highest-value contribution to this parser.** Real
+documents have found bugs that no amount of reading the code did.
+
+The five seeded fixtures each pin a distinct path: the real training-round
+README; a `<br>`-separated user list; both phrasings of the group sentence;
+malformed markup (unclosed `<p>`, `<li>` and `<h2>`, a stray close tag, an
+unquoted attribute, no `<html>`); and software named in prose alongside a
+"do not disable" sentence.
+
+> The corpus found two real bugs on its first run. `Notepad++` parsed as
+> `Notepad`, because the software-name pattern was `[A-Za-z0-9]+` — which also
+> made `7-Zip` into `7` — and the truncated name resolves to the wrong
+> Chocolatey package or none at all. And an unclosed `<h2>` swallowed its entire
+> section: HTML5 nests the following paragraphs *inside* the heading, so the
+> heading came out as the whole section and the scenario came out empty.
 
 ---
 
 ## 6. Native layer
 
-`src/Core/Native/` (CsWin32) · `rust/src/native/` (`windows` crate)
+`rust/src/native/` (the `windows` crate)
 
 Windows-only; compiled for `net10.0-windows` / `#[cfg(windows)]`. The non-Windows
 build falls back to shell-out paths, which is what lets the parser and model
@@ -1278,7 +1395,7 @@ and the shell-out path remains as the fallback.
 
 ## 7. Models
 
-`src/Core/Models/` · `rust/src/models/`
+`rust/src/models/`
 
 | Type | Purpose |
 |---|---|
@@ -1307,7 +1424,7 @@ per-item counts were reported.
 
 ## 8. The interactive menu
 
-`src/Core/Tui.cs` · `rust/src/tui.rs` — `--tui`, `-i`
+`rust/src/tui.rs` — `--tui`, `-i`
 
 A guided menu for people who would rather not memorise flags. It opens when
 `--tui` is passed, and also on a **bare launch at a real terminal** — which is
@@ -1368,10 +1485,8 @@ what double-clicking the executable does.
   otherwise is a long run in which every change is denied, which reads as the
   tool not working.
 
-**Presentation differs by port.** C# uses Spectre.Console's arrow-key selection
-and multi-select prompts (everything pre-selected). Rust uses numbered prompts —
-no raw terminal mode, no extra dependency — where entering nothing keeps all
-tasks. The questions and their order match.
+**Presentation.** Numbered prompts — no raw terminal mode, no extra dependency —
+where entering nothing keeps all tasks selected.
 
 Adding the menu is also what prompted giving `--software-management`,
 `--shared-folders`, `--hosts-file`, `--dns-settings` and `--scheduled-tasks`
@@ -1442,50 +1557,21 @@ every account on the image as unauthorised.
 
 ## 11. Build, test, publish
 
-### C#
-
 ```bash
-dotnet build src/PinnacleCyPat.csproj              # both TFMs
-dotnet test  tests/PinnacleCyPat.Tests.csproj      # 172 tests
-dotnet csharpier .                                  # format (scripts/format.ps1)
+./scripts/check.sh      # fmt, clippy, tests, and the Windows type-check
+./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
 
-**Why it multi-targets.** `net10.0-windows` is the real build. Plain `net10.0`
-exists so the parser, model and reporting tests run on a Linux dev box — which is
-why `Core/Native/**` is excluded from that TFM and every native call site is
-`#if WINDOWS`.
+`check.sh` is everything CI runs, ordered so it fails fastest. Run it before
+committing; `check.ps1` is the same on Windows.
 
-**Publish:**
-
-```bash
-dotnet publish src/PinnacleCyPat.csproj -c Release \
-  -f net10.0-windows -o publish-win-x64
-```
-
-Self-contained, single-file, ReadyToRun, English resources only. The framework
-must be named explicitly because the project multi-targets.
-
-`RuntimeIdentifier` is gated on `_IsPublishing` so `build` and `test` stay
-RID-agnostic — the test project references this one, and a global RID would make
-the test assemblies win-x64 and therefore unrunnable on the host the suite runs
-on.
-
-> **Trimming is deliberately off**, despite being the single largest size win
-> available (38 MB → 12 MB, with no IL2xxx warnings today). Spectre.Console 0.47
-> and System.CommandLine both resolve types by reflection and neither is fully
-> trim-annotated, so an absence of warnings is weak evidence rather than proof. A
-> trimmed build that loses Spectre's markup rendering fails at run time, during a
-> scored round, with nothing said at build time. Enable it once it has been
-> exercised end to end on a real Windows host.
-
-Release builds run the test suite automatically, skipped during publish.
-
-### Rust
+### By hand
 
 ```bash
 cd rust
-cargo test                              # 139 tests
-cargo clippy --all-targets
+cargo test                              # 182 tests
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
 cargo build --release
 ```
 
@@ -1506,14 +1592,18 @@ cargo build --release --target x86_64-pc-windows-gnu
 > proves nothing about them.
 
 Release profile: LTO, one codegen unit, `opt-level = "z"`, `panic = "abort"`,
-symbols stripped — 2.50 MB → 2.12 MB. Optimising for size rather than speed costs
-nothing measurable, because the run is dominated by process spawns, network
-fetches and Defender scans.
+symbols stripped. Optimising for size rather than speed costs nothing
+measurable, because the run is dominated by process spawns, network fetches and
+Defender scans.
+
+> The shipped binary is ~2.7 MB, of which about 470 KB is `scraper`/html5ever.
+> That is a deliberate trade against a profile tuned to save 900 KB by choosing
+> `opt-level = "z"` over `3`: README parsing is where this tool is most often
+> wrong, and disk is the cheapest thing a competition image has.
 
 ### Versioning
 
-Bump `<Version>` in the csproj / `version` in `Cargo.toml` with **every**
-behavioural change, and record it in `rust/CHANGELOG.md`. The version is stamped
+Bump `version` in `rust/Cargo.toml` with **every** behavioural change, and record it in `rust/CHANGELOG.md`. The version is stamped
 into the run log's header *and* its file name, so a log always identifies the
 build that produced it. The build date distinguishes two builds of the same
 version. Check a binary with `--version`.

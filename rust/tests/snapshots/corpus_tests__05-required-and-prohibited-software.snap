@@ -1,0 +1,31 @@
+---
+source: tests/corpus_tests.rs
+expression: rendered
+---
+title:            Round 3 Windows 10 README
+operating system: Windows 10
+scenario:         This machine is administered remotely, so Remote Desktop must keep working. Google Chrome and Notepa...
+administrators:
+  - admin1 (primary: true, password: -)
+users:
+  - netops
+groups:
+users to create:
+required software:
+prohibited software:
+  - hacking tools
+  - hacking tool
+  - non-work related media
+  - games
+critical services:
+  - X
+  - CCS Client
+prohibited services:
+  - FTP
+guidelines:
+actionable items:
+  - [EnableService] Critical service (do NOT disable): CCS Client
+  - [DisableService] Disable service: FTP
+sections:
+  - Authorized Administrators and Users
+  - Competition Scenario

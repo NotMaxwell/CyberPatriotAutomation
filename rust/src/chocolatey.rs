@@ -148,7 +148,11 @@ pub async fn upgrade(package: &str) -> Option<String> {
 
 /// Upgrade every managed package. Returns `None` on success.
 pub async fn upgrade_all() -> Option<String> {
-    run("upgrade all -y --no-progress --limit-output", UPGRADE_ALL_TIMEOUT).await
+    run(
+        "upgrade all -y --no-progress --limit-output",
+        UPGRADE_ALL_TIMEOUT,
+    )
+    .await
 }
 
 /// Uninstall one package. Returns `None` on success, else the reason.
@@ -199,7 +203,9 @@ async fn run(arguments: &str, timeout: Duration) -> Option<String> {
         command::execute_for_exit_code(&choco, Some(arguments), timeout).await;
 
     let Some(code) = exit_code else {
-        return Some(error.unwrap_or_else(|| "the Chocolatey command did not complete".to_string()));
+        return Some(
+            error.unwrap_or_else(|| "the Chocolatey command did not complete".to_string()),
+        );
     };
 
     if SUCCESS_EXIT_CODES.contains(&code) {

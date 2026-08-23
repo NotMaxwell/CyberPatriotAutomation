@@ -1,9 +1,8 @@
 # PinnacleCyPat
 
-[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4)](https://dotnet.microsoft.com/)
 [![Rust](https://img.shields.io/badge/Rust-2021-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-172%20C%23%20%2B%20139%20Rust-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-182-brightgreen)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick, all rights reserved
 
@@ -83,8 +82,8 @@ run log records exactly what it did and you can repeat it non-interactively.
 
 - Windows 10/11 or Windows Server 2016+
 - **Administrator privileges** — nearly everything needs them
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), unless you
-  use the self-contained published build
+- Nothing to install — the shipped `pinnacle-cypat.exe` is self-contained and
+  carries no runtime. (Building from source needs [Rust](https://rustup.rs).)
 - Network access, if you want `--auto-readme` (the README lives on the web) or
   software installation (Chocolatey)
 
@@ -229,44 +228,40 @@ from the command echo.
 
 ---
 
-## Two implementations
+## Implementation
 
-| | C# | Rust |
-|---|---|---|
-| Location | `src/`, `tests/` | `rust/` |
-| Version | 1.8.0 | 1.13.0 |
-| Tests | 202 | 155 |
-| Published size | ~42 MB self-contained | ~2.1 MB |
-
-Same flags, same tasks, same run-log format. The Rust port additionally has a
-`--software-updates` task, runs the four independent audits concurrently, and has
-a more precise scheduled-task audit. See [rust/README.md](rust/README.md).
+One Rust program, `rust/`. A complete C# implementation lived alongside it until
+2026-08-23 and is now frozen under [`archive/csharp/`](archive/csharp/) — it
+still builds and passes its 202 tests, but it is not shipped and not kept in
+step. Keeping two implementations at parity meant every change landed twice and
+drift was silent; [the archive README](archive/csharp/README.md) has the full
+reasoning.
 
 ---
 
 ## Building
 
 ```bash
-# C#
-dotnet build src/PinnacleCyPat.csproj
-dotnet test  tests/PinnacleCyPat.Tests.csproj
+./scripts/check.sh      # fmt, clippy, 182 tests, and the Windows type-check
+./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
+```
 
-dotnet publish src/PinnacleCyPat.csproj -c Release \
-  -f net10.0-windows -o publish-win-x64
+`check.sh` is everything CI runs, ordered so it fails fastest; `check.ps1` is the
+same on Windows. By hand:
 
-# Rust
+```bash
 cd rust
 cargo test
 cargo build --release
 ```
 
-The C# project multi-targets `net10.0` and `net10.0-windows` on purpose: the
-Windows TFM is the real build, and the plain one exists so the parser, model and
-reporting tests run on a non-Windows dev box.
+Cross-compiling the Windows binary from Linux needs the GNU target
+(`x86_64-pc-windows-msvc` requires Microsoft's linker) — `publish.sh` handles it.
+A Linux build never compiles the `#[cfg(windows)]` branches, so run
+`cargo clippy --target x86_64-pc-windows-gnu` after touching any of them; a clean
+`cargo test` on Linux proves nothing about those paths.
 
-Details — including why trimming is deliberately disabled and how to
-cross-compile the Rust binary — are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
+Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
 
 ---
 
@@ -277,19 +272,23 @@ PinnacleCyPat/
 ├── RUN.bat / RUN.ps1              Double-click launchers → the built-in menu
 ├── LICENSE                        Proprietary licence
 ├── NOTICE                         Attribution, trademark, third-party components
-├── src/                           C# implementation
-│   ├── Program.cs                 Entry point, flag parsing, run pipeline
-│   ├── NativeMethods.txt          CsWin32 P/Invoke manifest
-│   └── Core/
-│       ├── AppConfig.cs           README discovery, defaults, version
-│       ├── Tui.cs                 Interactive menu
-│       ├── Models/                Data models
-│       ├── Tasks/                 The thirteen tasks
-│       ├── Utilities/             Command execution, parsing, logging, packages
-│       └── Native/                Win32 APIs (Windows TFM only)
-├── tests/                         xUnit suite
-├── rust/                          Rust implementation
-├── scripts/                       Build, test and format helpers
+├── rust/
+│   ├── src/
+│   │   ├── main.rs                Entry point, flag parsing, run pipeline
+│   │   ├── tui.rs                 Interactive menu
+│   │   ├── app_config.rs          README discovery, defaults, version
+│   │   ├── knowledge.rs           The tables: registry, packages, services
+│   │   ├── html.rs                HTML structure, via html5ever
+│   │   ├── readme_parser.rs       README prose -> ReadmeData
+│   │   ├── remediation.rs         Prove-and-record wrapper for every change
+│   │   ├── models/                Data models
+│   │   ├── tasks/                 The fourteen tasks
+│   │   └── native/                Win32 APIs (Windows only)
+│   └── tests/
+│       ├── corpus/                README fixtures — add real ones here
+│       └── snapshots/             What each fixture parses to
+├── archive/csharp/                The retired C# port, frozen
+├── scripts/                       check.sh / check.ps1 / publish.sh
 └── docs/
     ├── ARCHITECTURE.md            Full reference — every task and utility
     ├── CONTRIBUTING.md            Coding standards

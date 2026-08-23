@@ -8,9 +8,9 @@
 ::  The menu this used to duplicate now lives inside the tool
 ::  itself (--tui), so this script only checks the two things
 ::  the tool cannot check for itself - that it is elevated, and
-::  that there is a .NET SDK to run it with - and then hands
-::  over. Keeping the task list in one place is what stops the
-::  script from offering a task the tool no longer has.
+::  that there is something to run - and then hands over.
+::  Keeping the task list in one place is what stops the script
+::  from offering a task the tool no longer has.
 :: ============================================================
 
 title PinnacleCyPat
@@ -36,30 +36,40 @@ if %errorLevel% neq 0 (
 
 echo  [+] Running with Administrator privileges
 
-:: A published build needs no SDK. Prefer it when it is there.
-if exist "%~dp0publish-win-x64\PinnacleCyPat.exe" (
+:: The shipping artefact. It is a single self-contained exe with no
+:: runtime to install, which is the whole point of shipping it.
+if exist "%~dp0publish-win-x64\pinnacle-cypat.exe" (
     echo  [+] Using the published build
     echo.
-    "%~dp0publish-win-x64\PinnacleCyPat.exe" --tui
+    "%~dp0publish-win-x64\pinnacle-cypat.exe" --tui
     goto done
 )
 
-:: Check if .NET is installed
-dotnet --version >nul 2>&1
+:: A local release build, for anyone running from a clone.
+if exist "%~dp0rust\target\release\pinnacle-cypat.exe" (
+    echo  [+] Using the local release build
+    echo.
+    "%~dp0rust\target\release\pinnacle-cypat.exe" --tui
+    goto done
+)
+
+:: Nothing built. Fall back to cargo if the toolchain is here.
+cargo --version >nul 2>&1
 if %errorLevel% neq 0 (
-    echo  [!] No published build found, and the .NET SDK is not installed.
-    echo  [!] Install the .NET 10.0 SDK from:
-    echo      https://dotnet.microsoft.com/download/dotnet/10.0
+    echo  [!] No build found, and Rust is not installed.
+    echo  [!] Either copy a published pinnacle-cypat.exe into:
+    echo         %~dp0publish-win-x64\
+    echo  [!] or install Rust from https://rustup.rs and re-run this script.
     echo.
     pause
     exit /b 1
 )
 
-echo  [+] .NET SDK found
+echo  [+] Rust toolchain found - building (first run takes a minute)
 echo.
 
-cd /d "%~dp0src"
-dotnet run -f net10.0-windows -- --tui
+cd /d "%~dp0rust"
+cargo run --release -- --tui
 
 :done
 echo.

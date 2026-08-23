@@ -7,6 +7,7 @@
 use std::future::Future;
 use std::time::Duration;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use pinnacle_cypat::app_config;
 use pinnacle_cypat::models::{FixOutcome, ReadmeData, TaskResult};
 use pinnacle_cypat::readme_parser;
@@ -14,7 +15,6 @@ use pinnacle_cypat::run_log;
 use pinnacle_cypat::tasks::*;
 use pinnacle_cypat::tui;
 use pinnacle_cypat::ui::{self, BarColor};
-use indicatif::{ProgressBar, ProgressStyle};
 
 #[tokio::main]
 async fn main() {
@@ -46,12 +46,32 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
 const FLAGS: &[(&str, &str, &str)] = &[
     ("--help", "-h", "Show this help and exit"),
     ("--tui", "-i", "Open the interactive menu"),
-    ("--version", "-V", "Print the version and build date, then exit"),
-    ("--readme <path>", "-r", "Read the competition README at <path>"),
+    (
+        "--version",
+        "-V",
+        "Print the version and build date, then exit",
+    ),
+    (
+        "--readme <path>",
+        "-r",
+        "Read the competition README at <path>",
+    ),
     ("--auto-readme", "-R", "Find the README automatically"),
-    ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
-    ("--dry-run", "-d", "Report what would change without changing it"),
-    ("--all", "", "Run every task (the default when no task is named)"),
+    (
+        "--parse-readme",
+        "",
+        "Show what the parser extracted, then exit (read-only)",
+    ),
+    (
+        "--dry-run",
+        "-d",
+        "Report what would change without changing it",
+    ),
+    (
+        "--all",
+        "",
+        "Run every task (the default when no task is named)",
+    ),
     ("--password-policy", "-p", "Password and lockout policy"),
     (
         "--account-permissions",
@@ -77,12 +97,28 @@ const FLAGS: &[(&str, &str, &str)] = &[
     ("--security-hardening", "-H", "General security hardening"),
     ("--media-scan", "-m", "Find and remove prohibited media"),
     ("--software-updates", "", "Update installed software"),
-    ("--software-management", "", "Remove prohibited and install required software"),
-    ("--shared-folders", "", "Remove shares beyond ADMIN$, C$ and IPC$"),
+    (
+        "--software-management",
+        "",
+        "Remove prohibited and install required software",
+    ),
+    (
+        "--shared-folders",
+        "",
+        "Remove shares beyond ADMIN$, C$ and IPC$",
+    ),
     ("--hosts-file", "", "Remove unauthorised hosts file entries"),
     ("--dns-settings", "", "Report public DNS resolvers"),
-    ("--scheduled-tasks", "", "Disable suspicious scheduled tasks"),
-    ("--group-policy", "-g", "Local Security Policy: SMB signing, logon, RDP"),
+    (
+        "--scheduled-tasks",
+        "",
+        "Disable suspicious scheduled tasks",
+    ),
+    (
+        "--group-policy",
+        "-g",
+        "Local Security Policy: SMB signing, logon, RDP",
+    ),
     ("--log <path>", "", "Write the run log to <path>"),
 ];
 
@@ -121,10 +157,7 @@ fn first_unknown_argument(args: &[String]) -> Option<String> {
 }
 
 fn print_help() {
-    println!(
-        "PinnacleCyPat {}\n",
-        app_config::version_string()
-    );
+    println!("PinnacleCyPat {}\n", app_config::version_string());
     println!("USAGE:");
     println!("    pinnacle-cypat [OPTIONS]\n");
     println!("Run as Administrator. Name a task, or pass --all to run every task.");
@@ -174,7 +207,8 @@ async fn run_automation() {
     // prompt would wait forever for an answer that never comes. Whatever the
     // menu returns is a command line, so everything below is unchanged by it.
     let mut cli_args = cli_args;
-    if has_flag(&cli_args, &["--tui", "-i"]) || (cli_args.is_empty() && tui::is_interactive_console())
+    if has_flag(&cli_args, &["--tui", "-i"])
+        || (cli_args.is_empty() && tui::is_interactive_console())
     {
         match tui::build_arguments() {
             Some(chosen) => cli_args = chosen,
@@ -198,10 +232,7 @@ async fn run_automation() {
 
     // Answer "which build is this?" without needing a log or a file listing.
     if has_flag(&cli_args, &["--version", "-V"]) {
-        println!(
-            "PinnacleCyPat {}",
-            app_config::version_string()
-        );
+        println!("PinnacleCyPat {}", app_config::version_string());
         return;
     }
 

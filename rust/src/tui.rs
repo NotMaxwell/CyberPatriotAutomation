@@ -452,7 +452,11 @@ mod tests {
     fn task_flags_are_well_formed_and_unique() {
         let mut seen: Vec<&str> = Vec::new();
         for task in TASKS {
-            assert!(task.flag.starts_with("--"), "{} is not long-form", task.flag);
+            assert!(
+                task.flag.starts_with("--"),
+                "{} is not long-form",
+                task.flag
+            );
             assert!(!task.label.is_empty());
             assert!(!seen.contains(&task.flag), "{} listed twice", task.flag);
             seen.push(task.flag);

@@ -153,8 +153,18 @@ impl Task for GroupPolicyTask {
         // require it. Setting only the "always" pair leaves the negotiated case
         // unsigned and two of the four scored items unset.
         for (key, label, value, qualifier) in [
-            (LANMAN_WORKSTATION, "client", "RequireSecuritySignature", "always"),
-            (LANMAN_SERVER, "server", "RequireSecuritySignature", "always"),
+            (
+                LANMAN_WORKSTATION,
+                "client",
+                "RequireSecuritySignature",
+                "always",
+            ),
+            (
+                LANMAN_SERVER,
+                "server",
+                "RequireSecuritySignature",
+                "always",
+            ),
             (
                 LANMAN_WORKSTATION,
                 "client",
@@ -198,7 +208,10 @@ impl Task for GroupPolicyTask {
         } else {
             for (key, label) in [
                 (TERMINAL_SERVER, "Remote desktop sharing turned off"),
-                (TERMINAL_SERVICES_POLICY, "Remote desktop sharing denied by policy"),
+                (
+                    TERMINAL_SERVICES_POLICY,
+                    "Remote desktop sharing denied by policy",
+                ),
             ] {
                 let error = registry_ops::set_dword(key, "fDenyTSConnections", 1)
                     .await

@@ -1,0 +1,74 @@
+---
+source: tests/corpus_tests.rs
+expression: rendered
+---
+title:            CyberPatriot Training Round Windows 10 README
+operating system: Windows 10
+scenario:         You work for a new board game development company. This company's security policies require that all...
+administrators:
+  - eleven (primary: true, password: niNApr0je(t)
+  - mwheeler (primary: false, password: p4Lac|In11)
+  - dhenderson (primary: false, password: w@teRG/\t3)
+  - lsinclair (primary: false, password: ne\/er3ND5try)
+  - nwheeler (primary: false, password: inn3r5tRE|\|gth)
+  - sharrington (primary: false, password: ahoy)
+users:
+  - jhopper
+  - jbyers
+  - kwheeler
+  - mbrenner
+  - wbyers
+  - mmayfield
+  - bhargrove
+  - bnewby
+  - sowens
+  - rbuckley
+  - mbauman
+  - argyle
+  - emunson
+  - gareth
+  - jeff
+  - cpowell
+  - hwheeler
+  - ocallahan
+  - sbingham
+  - dantonov
+  - alexei
+groups:
+  - dragonfire: emunson, gareth, jeff, mwheeler, dhenderson, lsinclair, esinclair
+users to create:
+  - esinclair
+required software:
+  - Firefox (latest: true)
+  - GIMP (latest: true)
+  - Inkscape (latest: true)
+  - Tiled (latest: true)
+prohibited software:
+  - hacking tools
+  - hacking tool
+  - non-work related media
+critical services:
+  - CCS Client
+prohibited services:
+guidelines:
+  - In order to provide a better competition experience, you are NOT required to change the password of the primary, auto-login, user account. Changing the password of a user that is set to automatically log in may lock you out of your computer.
+  - Authorized administrator passwords were correct the last time you did a password audit, but are not guaranteed to be currently accurate.
+  - Do not stop or disable the CCS Client service or process.
+  - Do not remove any authorized users or their home directories.
+  - The time zone of this image is set to UTC. Please do not change the time zone, date, or time on this image.
+  - You can view your current scoring report by double-clicking the "CyberPatriot Scoring Report" desktop icon.
+  - JavaScript is required for some error messages that appear on the "CyberPatriot Scoring Report." To ensure that you only receive correct error messages, please do not disable JavaScript.
+  - Some security settings may prevent the Stop Scoring application from running. If this happens, the safest way to stop scoring is to suspend the virtual machine. You should NOT power on the VM again before deleting.
+actionable items:
+  - [SecurityPolicy] Configure password expiration policy
+  - [SecurityPolicy] Configure Windows Action Center
+  - [CreateUser] Create user account: esinclair
+  - [CreateGroup] Create group: dragonfire
+sections:
+  - ANSWER KEY
+  - Authorized Administrators and Users
+  - Competition Guidelines
+  - Competition Scenario
+  - Forensics Questions
+  - Unique Identifier
+  - Windows 10 LTSC 2019

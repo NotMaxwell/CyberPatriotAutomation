@@ -18,30 +18,10 @@
 //! ("TermService"), and is inconsistent about which - the same document may say
 //! "Remote Desktop Services" in one line and "RDP" in another.
 
+use crate::knowledge::SERVICE_NAME_MAP;
 use crate::models::ReadmeData;
 
 /// Display names a README might use, mapped to the Windows service name.
-pub const SERVICE_NAME_MAP: &[(&str, &str)] = &[
-    ("CCS Client", "CCSClient"),
-    ("Remote Desktop", "TermService"),
-    ("Remote Desktop Services", "TermService"),
-    ("Remote Desktop Service", "TermService"),
-    ("RDP", "TermService"),
-    ("Terminal Services", "TermService"),
-    ("FTP", "ftpsvc"),
-    ("Telnet", "TlntSvr"),
-    ("SSH", "sshd"),
-    ("OpenSSH", "sshd"),
-    ("OpenSSH SSH Server", "sshd"),
-    ("Remote Registry", "RemoteRegistry"),
-    ("Windows Update", "wuauserv"),
-    ("Windows Defender", "WinDefend"),
-    ("Windows Firewall", "MpsSvc"),
-    ("Print Spooler", "Spooler"),
-    ("ICS", "SharedAccess"),
-    ("Internet Connection Sharing", "SharedAccess"),
-];
-
 /// The Windows service name for a README's display name, or the name unchanged
 /// when it is not one this table knows.
 pub fn resolve(display_name: &str) -> String {
@@ -106,7 +86,12 @@ mod tests {
 
     #[test]
     fn remote_desktop_is_recognised_however_the_readme_spells_it() {
-        for entry in ["Remote Desktop", "Remote Desktop Services", "RDP", "TermService"] {
+        for entry in [
+            "Remote Desktop",
+            "Remote Desktop Services",
+            "RDP",
+            "TermService",
+        ] {
             assert!(
                 is_remote_desktop_required(Some(&readme_with(&[entry]))),
                 "{entry} was not recognised"
@@ -116,7 +101,9 @@ mod tests {
 
     #[test]
     fn remote_desktop_is_not_required_by_default() {
-        assert!(!is_remote_desktop_required(Some(&readme_with(&["CCS Client"]))));
+        assert!(!is_remote_desktop_required(Some(&readme_with(&[
+            "CCS Client"
+        ]))));
         assert!(!is_remote_desktop_required(None));
     }
 }

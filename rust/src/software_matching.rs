@@ -63,11 +63,7 @@ pub fn normalize(display_name: &str) -> String {
     const ARCH_WORDS: [&str; 7] = ["x64", "x86", "amd64", "32-bit", "64-bit", "win64", "win32"];
     let kept: Vec<&str> = text
         .split_whitespace()
-        .filter(|word| {
-            !ARCH_WORDS
-                .iter()
-                .any(|a| word.eq_ignore_ascii_case(a))
-        })
+        .filter(|word| !ARCH_WORDS.iter().any(|a| word.eq_ignore_ascii_case(a)))
         .collect();
 
     kept.join(" ").trim().to_lowercase()
@@ -343,7 +339,10 @@ mod tests {
             resolve_package_id("Mozilla Firefox (x64 en-US)", &PACKAGE_IDS).as_deref(),
             Some("firefox")
         );
-        assert_eq!(resolve_package_id("Bespoke Internal Tool", &PACKAGE_IDS), None);
+        assert_eq!(
+            resolve_package_id("Bespoke Internal Tool", &PACKAGE_IDS),
+            None
+        );
     }
 
     #[test]

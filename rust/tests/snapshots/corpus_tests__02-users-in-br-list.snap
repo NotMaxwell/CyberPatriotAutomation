@@ -1,0 +1,29 @@
+---
+source: tests/corpus_tests.rs
+expression: rendered
+---
+title:            Practice Round Windows 11 README
+operating system: Windows 11
+scenario:         You are the newly hired system administrator for Allsafe Cybersecurity. Management has asked you to ...
+administrators:
+  - elliot (primary: true, password: -)
+  - darlene (primary: false, password: -)
+users:
+  - angela
+  - tyrell
+groups:
+users to create:
+required software:
+prohibited software:
+critical services:
+  - CCS Client
+prohibited services:
+guidelines:
+  - Do not disable the CCS Client service.
+  - Firefox should be updated to the latest version.
+  - Remote Desktop is a critical service for this machine.
+actionable items:
+sections:
+  - Authorized Administrators and Users
+  - Competition Guidelines
+  - Competition Scenario

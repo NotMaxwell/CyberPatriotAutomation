@@ -47,32 +47,41 @@ if (-not (Test-Admin)) {
 Write-Success "Running with Administrator privileges"
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-$published = Join-Path $scriptPath "publish-win-x64\PinnacleCyPat.exe"
+$published = Join-Path $scriptPath "publish-win-x64\pinnacle-cypat.exe"
+$release   = Join-Path $scriptPath "rust\target\release\pinnacle-cypat.exe"
 
-# A published build needs no SDK. Prefer it when it is there.
+# The shipping artefact: one self-contained exe, no runtime to install.
 if (Test-Path $published) {
     Write-Success "Using the published build"
     Write-Host ""
     & $published --tui
 }
+elseif (Test-Path $release) {
+    Write-Success "Using the local release build"
+    Write-Host ""
+    & $release --tui
+}
 else {
     try {
-        $dotnetVersion = dotnet --version 2>$null
+        $cargoVersion = cargo --version 2>$null
         if ($LASTEXITCODE -ne 0) { throw }
-        Write-Success ".NET SDK found: $dotnetVersion"
+        Write-Success "Rust toolchain found: $cargoVersion"
     }
     catch {
-        Write-Failure "No published build found, and the .NET SDK is not installed."
-        Write-Failure "Install the .NET 10.0 SDK from:"
-        Write-Host "       https://dotnet.microsoft.com/download/dotnet/10.0" -ForegroundColor White
+        Write-Failure "No build found, and Rust is not installed."
+        Write-Failure "Either copy a published pinnacle-cypat.exe into:"
+        Write-Host "       $(Join-Path $scriptPath 'publish-win-x64')" -ForegroundColor White
+        Write-Failure "or install Rust and re-run this script:"
+        Write-Host "       https://rustup.rs" -ForegroundColor White
         Write-Host ""
         Read-Host "Press Enter to exit"
         exit 1
     }
 
     Write-Host ""
-    Set-Location (Join-Path $scriptPath "src")
-    dotnet run -f net10.0-windows -- --tui
+    Write-Host "  Building (the first run takes a minute)..." -ForegroundColor Gray
+    Set-Location (Join-Path $scriptPath "rust")
+    cargo run --release -- --tui
 }
 
 Write-Host ""

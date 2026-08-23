@@ -1,0 +1,30 @@
+---
+source: tests/corpus_tests.rs
+expression: rendered
+---
+title:            Round 2 Windows Server 2022 README
+operating system: Windows Server 2022
+scenario:         Please make a group called allsafe and add the users ggoddard, ealderson, amoss, and lchong into the...
+administrators:
+  - ggoddard (primary: true, password: N0tAR3alP@ss1)
+users:
+  - ealderson
+  - amoss
+  - lchong
+  - pprice
+  - wsheldern
+groups:
+  - allsafe: ggoddard, ealderson, amoss, lchong
+  - auditors: pprice, wsheldern
+users to create:
+required software:
+prohibited software:
+critical services:
+prohibited services:
+guidelines:
+actionable items:
+  - [CreateGroup] Create group: allsafe
+  - [CreateGroup] Create group: auditors
+sections:
+  - Authorized Administrators and Users
+  - Competition Scenario

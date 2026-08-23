@@ -51,31 +51,39 @@ If you submit any suggestion, patch, code or other material relating to this pro
 
 ### Prerequisites
 
-- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
-- Visual Studio 2022, VS Code, or JetBrains Rider
+- [Rust](https://rustup.rs) (2021 edition, stable)
 - Git
+- For the Windows binary from a Linux host: `rustup target add
+  x86_64-pc-windows-gnu` and `mingw-w64`
 
-### Building
+### Building and testing
 
-```powershell
-# Restore dependencies
-dotnet restore
-
-# Build
-dotnet build
-
-# Run tests
-dotnet test
+```bash
+./scripts/check.sh      # fmt, clippy, tests, and the Windows type-check
+./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
+
+`check.sh` is everything CI runs, ordered so it fails fastest. Run it before
+committing; `check.ps1` is the same on Windows. By hand:
+
+```bash
+cd rust
+cargo build
+cargo test
+```
+
+> The Windows type-check in `check.sh` is not optional. A Linux build never
+> compiles the `#[cfg(windows)]` branches — which is the whole of `src/native`
+> plus several call sites — so a clean `cargo test` on Linux proves nothing
+> about them.
 
 ### Running
 
-```powershell
-# Run with dry-run mode
-dotnet run -- --all --dry-run
-
-# Run specific task
-dotnet run -- --password-policy
+```bash
+cd rust
+cargo run -- --all --dry-run        # preview everything, change nothing
+cargo run -- --password-policy      # one task
+cargo run -- --parse-readme -r path/to/README.html   # read-only
 ```
 
 ## Making Changes
@@ -91,9 +99,9 @@ dotnet run -- --password-policy
 
 3. **Write tests** for new functionality
 
-4. **Run tests** to ensure nothing is broken:
-   ```powershell
-   dotnet test
+4. **Run the checks** to ensure nothing is broken:
+   ```bash
+   ./scripts/check.sh
    ```
 
 5. **Commit** your changes with a meaningful message:
@@ -110,53 +118,67 @@ dotnet run -- --password-policy
 
 All new features and bug fixes must include tests.
 
-### Running Tests
+### Running tests
 
-```powershell
-# Run all tests
-dotnet test
-
-# Run with verbose output
-dotnet test -v n
-
-# Run specific test class
-dotnet test --filter "ClassName"
-
-# Run specific test method
-dotnet test --filter "MethodName"
+```bash
+./scripts/check.sh            # everything CI runs
+cargo test                    # just the suite
+cargo test group_members      # by name
+cargo test --test corpus_tests
 ```
 
-### Writing Tests
+### The README corpus
 
-```csharp
-using Xunit;
-using FluentAssertions;
+Parser changes go through `rust/tests/corpus/`: every fixture is parsed and the
+whole result snapshotted, so a change that alters any of them shows as a diff.
 
-public class MyFeatureTests
-{
-    [Fact]
-    public void MethodName_Scenario_ExpectedBehavior()
-    {
-        // Arrange
-        var sut = new MyClass();
+```bash
+INSTA_UPDATE=always cargo test --test corpus_tests   # accept new output
+cargo insta review                                   # step through diffs
+```
 
-        // Act
-        var result = sut.DoSomething();
+**Read the diff before accepting it** — the snapshot is the only record of what
+the parser does. And if you have a real competition README, adding it to
+`tests/corpus/` is the single most valuable contribution you can make to the
+parser: real documents have found bugs that reading the code did not.
 
-        // Assert
-        result.Should().NotBeNull();
-        result.Value.Should().Be(expected);
+### Writing tests
+
+Name the test after the behaviour, not the function. `test_parse_groups` says
+nothing when it fails; `group_members_exclude_the_connective_prose` says exactly
+what broke.
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sentence is verbatim from a competition README, and the run it
+    /// produced recorded `Members: users, ggoddard, ..., group`.
+    #[test]
+    fn group_members_exclude_the_connective_prose() {
+        assert_eq!(
+            extract_group_members("the users ggoddard, ealderson into the group"),
+            ["ggoddard", "ealderson"]
+        );
     }
 
-    [Theory]
-    [InlineData("input1", "expected1")]
-    [InlineData("input2", "expected2")]
-    public void MethodName_WithVariousInputs_ReturnsExpected(string input, string expected)
-    {
-        // Test with multiple data sets
+    #[test]
+    fn a_table_driven_case() {
+        for (input, expected) in [("Notepad++ (64-bit x64)", "notepadplusplus.install")] {
+            assert_eq!(
+                resolve_package_id(input, PACKAGE_IDS).as_deref(),
+                Some(expected),
+                "input: {input}"
+            );
+        }
     }
 }
 ```
+
+A doc comment on a regression test saying *what went wrong in the field* is
+worth more than the assertion itself — it is what stops the next person
+"simplifying" the fix away.
 
 ## Pull Request Process
 
@@ -180,193 +202,177 @@ public class MyFeatureTests
 
 ### General
 
-- Use C# 12 features where appropriate
-- Follow [Microsoft C# Coding Conventions](https://docs.microsoft.com/en-us/dotnet/csharp/fundamentals/coding-style/coding-conventions)
-- Use meaningful names for variables, methods, and classes
-- Keep methods small and focused
-- Use `async/await` for I/O operations
+- Rust 2021; `cargo fmt` and `clippy -D warnings` both gate the build
+- Comments explain *why*, and name the failure that motivated the code
+- Meaningful names for variables, functions and types
+- Small, focused functions
+- `async`/`await` for I/O
 
-### File Organization
+### File organisation
 
-```csharp
-// 1. Using statements (sorted alphabetically)
-using System;
-using System.Collections.Generic;
-using PinnacleCyPat.Models;
+```rust
+//! Module doc: what this file is for, and the failure that shaped it.
 
-// 2. Namespace
-namespace PinnacleCyPat.Tasks;
+use crate::command;          // 1. crate imports
+use crate::models::*;
+use async_trait::async_trait; // 2. external crates
+use std::time::Duration;      // 3. std
 
-// 3. Class declaration
-public class MyTask : BaseTask
-{
-    // 4. Constants and static fields
-    private const int MaxRetries = 3;
+const MAX_RETRIES: u32 = 3;   // 4. constants
 
-    // 5. Instance fields
-    private readonly List<string> _items = new();
+pub struct MyTask {           // 5. types
+    name: String,
+}
 
-    // 6. Constructor
-    public MyTask()
-    {
-        Name = "My Task";
-        Description = "What this task does";
-    }
+impl MyTask {                 // 6. inherent impls
+    pub fn new() -> Self { /* ... */ }
+}
 
-    // 7. Public methods
-    public override async Task<TaskResult> ExecuteAsync()
-    {
-        // Implementation
-    }
+#[async_trait]
+impl Task for MyTask { /* ... */ }   // 7. trait impls
 
-    // 8. Private methods
-    private void HelperMethod()
-    {
-        // Implementation
+#[cfg(test)]
+mod tests { /* ... */ }              // 8. tests, last
+```
+
+### Naming
+
+| Item | Convention | Example |
+|------|------------|---------|
+| Types, traits | `PascalCase` | `UserManagementTask` |
+| Functions, methods | `snake_case` | `read_system_state` |
+| Fields, locals | `snake_case` | `readme_data` |
+| Constants, statics | `SCREAMING_SNAKE_CASE` | `MAX_RETRIES` |
+| Modules, files | `snake_case` | `software_management.rs` |
+
+### Console output
+
+```rust
+ui::markup_line("[green]✓ Operation completed[/]");
+ui::markup_line("[red]✗ Operation failed[/]");
+ui::markup_line("[yellow]⚠ Warning message[/]");
+ui::markup_line("[cyan]ℹ Information[/]");
+```
+
+Anything that came from the machine or the README goes through `ui::escape`
+first — a program whose display name contains `[` is otherwise read as markup:
+
+```rust
+ui::markup_line(&format!("[green]✓ Removed: {}[/]", ui::escape(&program.name)));
+```
+
+## Adding a task
+
+### Step 1: The task
+
+Create a file in `rust/src/tasks/` and register it in `rust/src/tasks/mod.rs`:
+
+```rust
+//! What this task does, and why it exists.
+
+use crate::impl_task_meta;
+use crate::models::{SystemInfo, TaskResult};
+use crate::tasks::Task;
+use crate::ui;
+use async_trait::async_trait;
+
+pub struct MyNewTask {
+    name: String,
+    description: String,
+    dry_run: bool,
+}
+
+impl MyNewTask {
+    pub fn new() -> Self {
+        Self {
+            name: "My New Task".to_string(),
+            description: "What this task does".to_string(),
+            dry_run: false,
+        }
     }
 }
-```
 
-### Naming Conventions
+#[async_trait]
+impl Task for MyNewTask {
+    impl_task_meta!();
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Classes | PascalCase | `UserManagementTask` |
-| Interfaces | IPascalCase | `ICommandExecutor` |
-| Methods | PascalCase | `ExecuteAsync` |
-| Properties | PascalCase | `TaskName` |
-| Private fields | _camelCase | `_readmeData` |
-| Local variables | camelCase | `userList` |
-| Constants | PascalCase | `MaxRetries` |
-
-### Console Output
-
-Use Spectre.Console for all console output:
-
-```csharp
-// Success message
-AnsiConsole.MarkupLine("[green]✓ Operation completed[/]");
-
-// Error message
-AnsiConsole.MarkupLine("[red]✗ Operation failed[/]");
-
-// Warning message
-AnsiConsole.MarkupLine("[yellow]⚠ Warning message[/]");
-
-// Info message
-AnsiConsole.MarkupLine("[cyan]ℹ Information[/]");
-```
-
-## Adding New Tasks
-
-### Step 1: Create the Task Class
-
-Create a new file in `Tasks/` directory:
-
-```csharp
-using PinnacleCyPat.Models;
-using PinnacleCyPat.Utilities;
-using Spectre.Console;
-
-namespace PinnacleCyPat.Tasks;
-
-public class MyNewTask : BaseTask
-{
-    public MyNewTask()
-    {
-        Name = "My New Task";
-        Description = "Description of what this task does";
+    async fn read_system_state(&mut self) -> SystemInfo {
+        SystemInfo::new()
     }
 
-    public override async Task<SystemInfo> ReadSystemStateAsync()
-    {
-        var systemInfo = new SystemInfo();
-        // Read current system state
-        return systemInfo;
-    }
-
-    public override async Task<TaskResult> ExecuteAsync()
-    {
-        var result = new TaskResult
-        {
-            TaskName = Name,
-            Success = true,
-            Message = "Task completed"
+    async fn execute(&mut self) -> TaskResult {
+        let mut result = TaskResult {
+            task_name: self.name.clone(),
+            success: true,
+            ..Default::default()
         };
 
-        try
-        {
-            // Perform the task
-            AnsiConsole.MarkupLine("[green]✓ Task completed successfully[/]");
-        }
-        catch (Exception ex)
-        {
-            result.Success = false;
-            result.ErrorDetails = ex.Message;
+        if self.dry_run {
+            result.message = "DRY RUN: nothing was changed.".to_string();
+            return result;
         }
 
-        return result;
+        // Route every write through the *_ops wrappers so it is proved and
+        // lands in the remediation ledger. See CLAUDE.md, "Every Change Must
+        // Prove Itself".
+        result
     }
 
-    public override async Task<bool> VerifyAsync()
-    {
-        // Verify changes were applied
-        return true;
-    }
-}
-```
-
-### Step 2: Add CLI Flag
-
-In `Program.cs`, add the command line argument:
-
-```csharp
-var runMyTask = cliArgs.Contains("--my-task") || cliArgs.Contains("-x");
-```
-
-And in the task registration section:
-
-```csharp
-if (runAll || runMyTask)
-{
-    tasks.Add(new MyNewTask());
-}
-```
-
-### Step 3: Add Unit Tests
-
-Create tests in `Tests/` directory:
-
-```csharp
-public class MyNewTaskTests
-{
-    [Fact]
-    public void Constructor_ShouldInitializeNameAndDescription()
-    {
-        var task = new MyNewTask();
-
-        task.Name.Should().Be("My New Task");
-        task.Description.Should().NotBeNullOrEmpty();
-    }
-
-    [Fact]
-    public async Task ExecuteAsync_ShouldReturnTaskResult()
-    {
-        var task = new MyNewTask();
-
-        var result = await task.ExecuteAsync();
-
-        result.Should().NotBeNull();
-        result.TaskName.Should().Be("My New Task");
+    async fn verify(&mut self) -> bool {
+        // Read the machine back. Returning true because the write returned
+        // success is the failure mode the ledger exists to catch.
+        true
     }
 }
 ```
 
-### Step 4: Update Documentation
+### Step 2: The flag
 
-1. Update `README.md` with new command line flag
-2. Update `TASK_ANALYSIS.md` with new task details
-3. Add any new configuration to `CLAUDE.md`
+In `main.rs`, add it to the `FLAGS` table — the single source of truth for both
+the help text and the unknown-argument check, so a flag cannot be accepted
+without also being documented:
+
+```rust
+("--my-task", "-x", "What this task does"),
+```
+
+Then read it and register the task:
+
+```rust
+let run_my_task = has_flag(&cli_args, &["--my-task", "-x"]);
+
+if run_my_task || run_all {
+    tasks.push(Box::new(MyNewTask::new()));
+}
+```
+
+### Step 3: The menu
+
+Add it to the task list in `rust/src/tui.rs`. A task reachable from the CLI but
+not the menu is invisible to anyone who double-clicks `RUN.bat`, which is most
+users.
+
+### Step 4: Tests
+
+```rust
+#[tokio::test]
+async fn my_new_task_dry_run_changes_nothing() {
+    let mut task = MyNewTask::new();
+    task.set_dry_run(true);
+    let result = task.execute().await;
+    assert!(result.success);
+}
+```
+
+Test the decisions, not the plumbing. `should_have_correct_name_and_description`
+passes forever and catches nothing.
+
+### Step 5: Documentation
+
+1. `README.md` — the flag table and the task table
+2. `docs/ARCHITECTURE.md` — the detailed entry: why, what it changes, what it
+   refuses to touch
+3. `docs/TASK_ANALYSIS.md` — the implemented-tasks list
 
 ## Questions?
 

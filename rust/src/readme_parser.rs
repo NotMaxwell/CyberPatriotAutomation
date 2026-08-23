@@ -4,6 +4,7 @@
 //! so the handful of patterns that relied on `(?=<h2|$)` lookahead or a
 //! `(?<!do not )` lookbehind are reproduced with explicit scanning instead.
 
+use crate::html;
 use crate::models::*;
 use crate::ui;
 use regex::Regex;
@@ -94,15 +95,7 @@ pub async fn parse_html_readme_async(file_path: &str) -> ReadmeData {
 }
 
 fn extract_title(content: &str) -> String {
-    let h1 = re(r"(?is)<h1[^>]*>(.*?)</h1>");
-    if let Some(caps) = h1.captures(content) {
-        return strip_html_tags(&caps[1]).trim().to_string();
-    }
-    let title = re(r"(?is)<title[^>]*>(.*?)</title>");
-    if let Some(caps) = title.captures(content) {
-        return strip_html_tags(&caps[1]).trim().to_string();
-    }
-    "Unknown".to_string()
+    html::title(content).unwrap_or_else(|| "Unknown".to_string())
 }
 
 /// Operating systems recognised in a README, most specific first.
@@ -154,9 +147,8 @@ fn detect_operating_system(content: &str) -> String {
     // README ("Training Round Windows 10 README"). Consulting them first avoids
     // misreading prose such as "do not upgrade from Windows 10" in a Windows 11
     // image, which a whole-document scan would match.
-    let headline = re(r"(?is)<(?:title|h1)[^>]*>(.*?)</(?:title|h1)>");
-    for caps in headline.captures_iter(content) {
-        if let Some(os) = match_operating_system(&normalize_for_os_match(&caps[1])) {
+    for headline in html::headline_texts(content) {
+        if let Some(os) = match_operating_system(&headline.to_lowercase()) {
             return os.to_string();
         }
     }
@@ -169,31 +161,12 @@ fn detect_operating_system(content: &str) -> String {
 /// Extract all sections (h2 headers and their content). The C# version used a
 /// `(?=<h2|$)` lookahead; here we locate each `<h2>...</h2>` and take everything
 /// up to the next `<h2` as the section body.
+/// Every `<h2>` heading and the markup that follows it, up to the next one.
 fn extract_sections(content: &str) -> std::collections::HashMap<String, String> {
-    let mut sections = std::collections::HashMap::new();
-    let h2 = re(r"(?is)<h2[^>]*>(.*?)</h2>");
-
-    let items: Vec<(usize, usize, String)> = h2
-        .captures_iter(content)
-        .map(|caps| {
-            let whole = caps.get(0).unwrap();
-            let header = strip_html_tags(&caps[1]).trim().to_string();
-            (whole.start(), whole.end(), header)
-        })
-        .collect();
-
-    for i in 0..items.len() {
-        let content_start = items[i].1;
-        let content_end = if i + 1 < items.len() {
-            items[i + 1].0
-        } else {
-            content.len()
-        };
-        let section_content = &content[content_start..content_end];
-        sections.insert(items[i].2.clone(), section_content.to_string());
-    }
-
-    sections
+    html::sections(content)
+        .into_iter()
+        .map(|section| (section.heading, section.html))
+        .collect()
 }
 
 fn parse_authorized_users(content: &str, data: &mut ReadmeData) {
@@ -218,17 +191,13 @@ fn parse_authorized_users(content: &str, data: &mut ReadmeData) {
 }
 
 fn parse_user_block(content: &str, data: &mut ReadmeData) {
-    // The C# original stripped every tag to "" and then split on newlines, which
-    // only works when the user list is inside a <pre> block. READMEs that
-    // separate entries with <br> or list/table markup instead would collapse
-    // into a single long line and yield no users at all. Convert the tags that
-    // represent a line break into newlines first so both layouts parse.
-    let line_break = re(r"(?is)<\s*(?:br\s*/?|/p|/li|/div|/tr|/h[1-6])\s*>");
-    let content = line_break.replace_all(content, "\n");
-
-    let tag = re(r"<[^>]+>");
-    let cleaned = tag.replace_all(&content, "");
-    let cleaned = html_decode(&cleaned);
+    // Only a <pre> block carries real newlines. A list written with <br>, or
+    // one <p> per user, collapses to a single line if tags are simply removed -
+    // and the whole block is then rejected as one over-long "username", so such
+    // a README yields no users at all. `text_with_breaks` renders the element
+    // boundaries a reader would see as line breaks, whatever markup produced
+    // them, so every layout parses the same way.
+    let cleaned = html::text_with_breaks(content);
 
     let annotation = re(r"\s*\([^)]*\)\s*");
 
@@ -407,17 +376,33 @@ fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
         }
     }
 
+    // Real software names are not alphanumeric. `[A-Za-z0-9]+` truncated
+    // "Notepad++" to "Notepad" and "7-Zip" to "7" - and the truncated name then
+    // resolves to the wrong Chocolatey package, or to none at all.
+    //
+    // Rust's regex has no lookahead, so "punctuation inside a name" is spelled
+    // as "punctuation followed by more alphanumerics". That is what keeps the
+    // full stop at the end of a sentence out of the name, while still allowing
+    // Node.js. Trailing + and # are allowed outright, for C++ and C#.
+    const NAME: &str = r"[A-Za-z0-9]+(?:[-.+#]+[A-Za-z0-9]+)*[+#]*";
+
     let patterns = [
-        r"(?is)latest\s+(?:stable\s+)?version\s+of\s+([A-Za-z0-9]+)",
-        r"(?is)access\s+to\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?([A-Za-z0-9,\s]+?)(?:\s+for\s+company|\s+for\s+use|\.)",
-        r"(?is)should\s+(?:be\s+)?(?:using|have|install)\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?([A-Za-z0-9]+)",
-        r"(?is)default\s+(?:web\s+)?browser.*?should\s+be\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?([A-Za-z0-9]+)",
+        format!(r"(?is)latest\s+(?:stable\s+)?version\s+of\s+({NAME})"),
+        // The list form keeps its own class because it spans several names and
+        // ends at a full stop; a '.' inside the class would swallow that.
+        r"(?is)access\s+to\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?([A-Za-z0-9,+#\s-]+?)(?:\s+for\s+company|\s+for\s+use|\.)".to_string(),
+        format!(
+            r"(?is)should\s+(?:be\s+)?(?:using|have|install)\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?({NAME})"
+        ),
+        format!(
+            r"(?is)default\s+(?:web\s+)?browser.*?should\s+be\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?({NAME})"
+        ),
     ];
 
     let splitter = re(r"(?i)\s*,\s*and\s+|\s*,\s*|\s+and\s+");
     let mut found: HashSet<String> = HashSet::new();
 
-    for pat in patterns {
+    for pat in &patterns {
         let regex = re(pat);
         for caps in regex.captures_iter(content) {
             // The phrase this match came from, used to decide "latest" below.
@@ -610,7 +595,8 @@ pub fn extract_group_members(members_text: &str) -> Vec<String> {
     // again. Only strip it at the end of the capture, so a lead-in like "the
     // following users to the allsafe group: a, b, c" is left for the word
     // filter rather than taking the whole list with it.
-    let trailing = re(r#"(?is)\b(?:in|into|on|onto|to)\s+(?:the\s+)?["']?\w*["']?\s*group\s*[.,]?\s*$"#);
+    let trailing =
+        re(r#"(?is)\b(?:in|into|on|onto|to)\s+(?:the\s+)?["']?\w*["']?\s*group\s*[.,]?\s*$"#);
     let text = trailing.replace(members_text, "");
 
     // "the users", "the following users:", "these accounts" - lead-ins to the
@@ -704,10 +690,10 @@ fn is_common_word(word: &str) -> bool {
 }
 
 fn parse_actionable_items(content: &str, data: &mut ReadmeData) {
-    let p = re(r"(?is)<p[^>]*>(.*?)</p>");
-    for caps in p.captures_iter(content) {
-        let paragraph_text = strip_html_tags(&caps[1]).trim().to_string();
-        if paragraph_text.is_empty() || paragraph_text.chars().count() < 10 {
+    // An unclosed <p> - which a browser ends at the next one - used to swallow
+    // the rest of the document into a single "paragraph".
+    for paragraph_text in html::texts_of(content, "p") {
+        if paragraph_text.chars().count() < 10 {
             continue;
         }
         let lower = paragraph_text.to_lowercase();
@@ -1154,28 +1140,20 @@ fn parse_guidelines(content: &str, data: &mut ReadmeData) {
 }
 
 fn extract_guidelines_from_html(html_content: &str, data: &mut ReadmeData) {
-    let li = re(r"(?is)<li[^>]*>(.*?)</li>");
-    for caps in li.captures_iter(html_content) {
-        let guideline = strip_html_tags(&caps[1]).trim().to_string();
-        if !guideline.is_empty() {
-            data.guidelines.push(guideline);
-        }
-    }
+    // Unclosed <li> is the norm in hand-written lists; each ends at the next.
+    data.guidelines.extend(html::texts_of(html_content, "li"));
 }
 
 /// Extract the competition scenario. The C# version used a `(?=<h2|$)` lookahead;
 /// here we take everything after the `Competition Scenario</h2>` prefix up to the
 /// next `<h2`.
+/// The competition scenario: the body of the section that names it.
 fn extract_scenario(content: &str) -> String {
-    if !contains_ci(content, "Competition Scenario") {
-        return String::new();
-    }
-    let prefix = re(r"(?is)Competition\s+Scenario\s*</h2>\s*");
-    if let Some(m) = prefix.find(content) {
-        let end = index_of_ci(content, "<h2", m.end()).unwrap_or(content.len());
-        return strip_html_tags(&content[m.end()..end]).trim().to_string();
-    }
-    String::new()
+    html::sections(content)
+        .into_iter()
+        .find(|section| contains_ci(&section.heading, "Competition Scenario"))
+        .map(|section| html::text(&section.html))
+        .unwrap_or_default()
 }
 
 /// Remove HTML tags from a string.
@@ -1183,17 +1161,7 @@ pub fn strip_html_tags(html: &str) -> String {
     if html.is_empty() {
         return String::new();
     }
-    let script = re(r"(?is)<script[^>]*>.*?</script>");
-    let style = re(r"(?is)<style[^>]*>.*?</style>");
-    let tag = re(r"<[^>]+>");
-    let ws = re(r"\s+");
-
-    let s = script.replace_all(html, "");
-    let s = style.replace_all(&s, "");
-    let s = tag.replace_all(&s, " ");
-    let s = html_decode(&s);
-    let s = ws.replace_all(&s, " ");
-    s.trim().to_string()
+    html::text(html)
 }
 
 /// Display parsed README data in a formatted way.

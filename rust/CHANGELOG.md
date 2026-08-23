@@ -10,6 +10,74 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.15.0
+
+### Changed
+
+- **This is now the only implementation.** The C# port is frozen under
+  `archive/csharp/`, where it still builds and passes its 202 tests but is not
+  shipped or kept in step. Keeping two implementations at parity meant every
+  behavioural change landed twice, in two languages, and drift was silent - it
+  surfaced only when someone read both files side by side. `RUN.bat`, `RUN.ps1`
+  and the scripts now build and launch this crate.
+- **HTML is parsed with `scraper` (html5ever), not regex.** Structure - the
+  title, the `<h2>` sections, the paragraphs, the list items, where one line
+  ends - moves to the new `html` module; prose stays regex, because there is no
+  parser for how a person writes English.
+
+  `<[^>]+>` does not know that `<b>` inside `Windows <b>10</b>` is not a word
+  boundary, that `&nbsp;` is a space, that an unclosed `<p>` ends at the next
+  one, or that an unclosed `<li>` still ends where the next begins. Every one of
+  those is ordinary in hand-written HTML. Output on the real training-round
+  README is byte-identical; malformed markup is where the difference shows.
+
+  Costs ~470 KB in the shipped binary (2.16 -> 2.71 MB), which is a deliberate
+  trade against a release profile tuned to save 900 KB.
+- **The knowledge tables live in one module** (`knowledge`): the 42 hardening
+  registry settings, the features to disable, the README service-name map, the
+  Chocolatey package ids, the default prohibitions, the Remote Desktop skip
+  list. They are tested as tables - duplicate keys, contradictory mappings,
+  malformed paths, values that do not parse.
+- The `wmic product` inventory fallback is gone. It was deprecated and absent on
+  current Windows 11 images, blind to everything not installed by MSI, minutes
+  slow because enumerating `Win32_Product` reconfigures every installed product,
+  and it yielded no uninstall string - so a program it did find could not then
+  be removed. A partial MSI-only list also looks like a successful read, so
+  verification would pass judgement on an inventory missing most of the machine.
+
+### Added
+
+- **A README corpus with snapshot tests** (`tests/corpus/`, `insta`). Every
+  fixture is parsed and the whole result snapshotted, so a parser change that
+  alters any document shows as a reviewable diff instead of silence. Five
+  fixtures seeded: the real training-round README, a `<br>`-separated user list,
+  both phrasings of the group sentence, malformed markup, and software named in
+  prose. Adding a real README is the highest-value contribution to the parser.
+- `scripts/check.sh` and `check.ps1` - fmt, clippy, tests and the Windows
+  type-check, in the order that fails fastest - and `scripts/publish.sh`.
+
+### Fixed
+
+- **The service-name table had drifted.** It was written out twice, and the copy
+  inside service management was missing `"Remote Desktop Service"` and
+  `"Terminal Services"`, so a README using either spelling was understood by
+  security hardening and group policy but *not* by the task responsible for
+  keeping the service running. The feature list had drifted the same way, by two
+  entries. Both now have one definition.
+- **`choco upgrade all` could upgrade software the run had just removed.** The
+  guard excluded prohibited software by resolving it to a package id, and
+  CCleaner and Jellyfin had no id - so the exclusion list came back empty and
+  the guard passed. It now asks the post-removal inventory whether anything
+  prohibited survived, rather than trusting the package table to be complete;
+  the missing ids were added as well.
+- **`Notepad++` parsed as `Notepad`** - and `7-Zip` as `7`. The software-name
+  pattern was `[A-Za-z0-9]+`, and a truncated name resolves to the wrong
+  Chocolatey package or to none at all. Found by the corpus on its first run.
+- **An unclosed `<h2>` swallowed its whole section.** HTML5 nests the following
+  paragraphs inside the heading, so the heading came out as the entire section
+  and the scenario came out empty. Also found by the corpus on its first run.
+- `cargo fmt --check` now passes and gates the build; it had never been enforced.
+
 ## 1.14.0
 
 ### Added

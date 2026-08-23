@@ -4,6 +4,7 @@
 use crate::chocolatey;
 use crate::command;
 use crate::impl_task_meta;
+use crate::knowledge::{ALWAYS_PROHIBITED, PACKAGE_IDS};
 use crate::models::{ReadmeData, SoftwareRequirement, SystemInfo, TaskResult};
 use crate::run_log;
 use crate::software_matching;
@@ -22,38 +23,12 @@ const UNINSTALL_SUCCESS_CODES: [i32; 4] = [0, 1605, 1641, 3010];
 /// A full or quick Defender scan runs for many minutes.
 const SCAN_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
-/// `wmic product` is notoriously slow - minutes on a populated machine.
-const INVENTORY_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-
 /// Windows display names mapped to the Chocolatey package that installs them.
 ///
 /// The `.install` packages run the vendor installer, which puts the program
 /// under Program Files. The bare ids are portable packages that unpack under
 /// ProgramData instead - and the CP19 answer key deducts points when 7-Zip,
 /// Notepad++, Chrome or Wireshark are "not installed at the default location".
-pub const PACKAGE_IDS: &[(&str, &str)] = &[
-    ("Mozilla Firefox", "firefox"),
-    ("Firefox", "firefox"),
-    ("Google Chrome", "googlechrome"),
-    ("Chrome", "googlechrome"),
-    ("7-Zip", "7zip.install"),
-    ("7Zip", "7zip.install"),
-    ("Notepad++", "notepadplusplus.install"),
-    ("VLC", "vlc"),
-    ("VLC media player", "vlc"),
-    ("Wireshark", "wireshark"),
-    ("PuTTY", "putty"),
-    ("Python", "python"),
-    ("Adobe Acrobat Reader DC", "adobereader"),
-    ("Adobe Reader", "adobereader"),
-    ("Microsoft Edge", "microsoft-edge"),
-    ("Thunderbird", "thunderbird"),
-    ("Mozilla Thunderbird", "thunderbird"),
-    ("LibreOffice", "libreoffice-fresh"),
-    ("Git", "git"),
-    ("Malwarebytes", "malwarebytes"),
-];
-
 /// The Chocolatey package id to install for a requirement.
 pub fn package_id_for(requirement: &SoftwareRequirement) -> String {
     if let Some((_, id)) = PACKAGE_IDS
@@ -106,23 +81,13 @@ impl SoftwareManagementTask {
         task
     }
 
-    /// Software treated as prohibited even when the README does not name it.
-    ///
-    /// Scoring images routinely include software that is not a hacking tool but
-    /// is not authorised either - a media player, a scripting runtime, a
-    /// registry cleaner. The CP19 exhibition answer key scored removing Jellyfin
-    /// Media Player and Python 3 as separate items and the README named neither,
-    /// so they are prohibited by default and only spared when the README
-    /// explicitly requires them.
-    pub const ALWAYS_PROHIBITED: [&str; 3] = ["Python", "CCleaner", "Jellyfin"];
-
     pub fn set_readme_data(&mut self, readme: &ReadmeData) {
         self.required_software = readme.required_software.clone();
         self.prohibited_software = readme.prohibited_software.clone();
         self.apply_default_prohibitions();
     }
 
-    /// Add [`Self::ALWAYS_PROHIBITED`] unless the README requires that software.
+    /// Add [`ALWAYS_PROHIBITED`] unless the README requires that software.
     ///
     /// Called from `new` as well as from `set_readme_data`. It used to live only
     /// in the latter, which the caller invokes only when a README parsed - so a
@@ -131,7 +96,7 @@ impl SoftwareManagementTask {
     /// because no README names them, so the defaults have to survive the README
     /// being absent.
     fn apply_default_prohibitions(&mut self) {
-        for candidate in Self::ALWAYS_PROHIBITED {
+        for candidate in ALWAYS_PROHIBITED {
             // A README that requires something wins over the default list: an
             // image that legitimately needs Python must not have it removed.
             let required = self
@@ -151,52 +116,49 @@ impl SoftwareManagementTask {
     /// The installed-software inventory, with uninstall commands where Windows
     /// records them.
     ///
-    /// `wmic product get name` is the fallback only: it is deprecated, absent on
-    /// current Windows 11 images, sees only MSI installs, and reconfigures every
-    /// installed product just to list them. It also yields no uninstall command,
-    /// so removal has nothing to work with.
+    /// Returns `None` when it could not be read - which is different from an
+    /// empty machine, and every caller has to keep treating it that way.
+    ///
+    /// There is no `wmic product` fallback any more. It was wrong on every axis
+    /// that matters here: deprecated and absent on current Windows 11 images;
+    /// blind to everything not installed by MSI, which is most of what a
+    /// competition asks you to remove; minutes slow, because enumerating
+    /// `Win32_Product` makes the installer service *reconfigure every installed
+    /// product*; and it yields no uninstall string, so a program it did find
+    /// could not then be removed. Worse than useless: a partial MSI-only list
+    /// looks like a successful read, so verification would pass judgement on an
+    /// inventory missing most of the machine.
     async fn read_installed() -> Option<Vec<software_matching::InstalledSoftware>> {
         #[cfg(windows)]
         {
-            if let Some(programs) = crate::native::installed_software::enumerate() {
-                return Some(
-                    programs
-                        .into_iter()
-                        .map(|p| software_matching::InstalledSoftware {
-                            name: p.name,
-                            version: p.version,
-                            uninstall_string: p.uninstall_string,
-                            uninstall_is_quiet: p.uninstall_is_quiet,
-                        })
-                        .collect(),
-                );
-            }
-            run_log::diagnostic(
-                "software",
-                "the uninstall registry could not be read; falling back to wmic",
-            );
+            let programs = crate::native::installed_software::enumerate().or_else(|| {
+                run_log::diagnostic("software", "the uninstall registry could not be read");
+                None
+            })?;
+            Some(
+                programs
+                    .into_iter()
+                    .map(|p| software_matching::InstalledSoftware {
+                        name: p.name,
+                        version: p.version,
+                        uninstall_string: p.uninstall_string,
+                        uninstall_is_quiet: p.uninstall_is_quiet,
+                    })
+                    .collect(),
+            )
         }
 
-        let (success, output, error) =
-            command::execute_with_timeout("wmic", Some("product get name"), INVENTORY_TIMEOUT)
-                .await;
-        if !success {
+        // The uninstall keys are a Windows concept; off Windows there is no
+        // inventory to read, and saying so is better than reporting an empty
+        // machine.
+        #[cfg(not(windows))]
+        {
             run_log::diagnostic(
                 "software",
-                &format!(
-                    "wmic inventory failed: {}",
-                    error.unwrap_or_else(|| "no reason reported".to_string())
-                ),
+                "not running on Windows; there is no installed-software inventory to read",
             );
-            return None;
+            None
         }
-
-        Some(
-            Self::parse_installed(&output)
-                .into_iter()
-                .map(software_matching::InstalledSoftware::named)
-                .collect(),
-        )
     }
 
     /// Uninstall one program. Returns `None` on success, or the reason.
@@ -250,7 +212,10 @@ impl SoftwareManagementTask {
 
         run_log::diagnostic(
             "software",
-            &format!("{}: running {} {}", software.name, command.program, command.arguments),
+            &format!(
+                "{}: running {} {}",
+                software.name, command.program, command.arguments
+            ),
         );
 
         let (exit_code, output, error) = command::execute_for_exit_code(
@@ -277,14 +242,6 @@ impl SoftwareManagementTask {
             ),
             None => Some("the uninstaller did not finish within the time limit".to_string()),
         }
-    }
-
-    fn parse_installed(output: &str) -> Vec<String> {
-        output
-            .split(['\n', '\r'])
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty() && l != "Name")
-            .collect()
     }
 
     /// Runs a Windows Defender malware scan and returns (success, threats_found, message).
@@ -426,8 +383,7 @@ impl Task for SoftwareManagementTask {
                 success: false,
                 message: "Could not read the installed software inventory".to_string(),
                 error_details: Some(
-                    "Neither the uninstall registry nor `wmic product` returned an inventory."
-                        .to_string(),
+                    "The Windows uninstall registry could not be read.".to_string(),
                 ),
                 ..Default::default()
             };
@@ -456,7 +412,10 @@ impl Task for SoftwareManagementTask {
         // What matched what, and why. Reconstructing this after a run used to be
         // impossible: the console said "Failed to remove: X" and nothing said
         // whether X was matched at all, or what the uninstaller returned.
-        run_log::diagnostic("software", &format!("inventory: {} programs", installed.len()));
+        run_log::diagnostic(
+            "software",
+            &format!("inventory: {} programs", installed.len()),
+        );
         run_log::diagnostic(
             "software",
             &format!("prohibited terms: {}", self.prohibited_software.join(", ")),
@@ -467,7 +426,9 @@ impl Task for SoftwareManagementTask {
                 &format!(
                     "matched for removal: {} (uninstall string: {})",
                     item.name,
-                    item.uninstall_string.as_deref().unwrap_or("none registered")
+                    item.uninstall_string
+                        .as_deref()
+                        .unwrap_or("none registered")
                 ),
             );
         }
@@ -475,9 +436,16 @@ impl Task for SoftwareManagementTask {
         let mut details: Vec<String> = Vec::new();
         details.push(format!(
             "Installed software checked: {}",
-            installed.iter().map(|i| i.name.clone()).collect::<Vec<_>>().join(", ")
+            installed
+                .iter()
+                .map(|i| i.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
-        details.push(format!("Prohibited software list: {}", self.prohibited_software.join(", ")));
+        details.push(format!(
+            "Prohibited software list: {}",
+            self.prohibited_software.join(", ")
+        ));
         details.push(format!(
             "Required software list: {}",
             self.required_software
@@ -490,7 +458,11 @@ impl Task for SoftwareManagementTask {
         if !to_remove.is_empty() {
             details.push(format!(
                 "To remove: {}",
-                to_remove.iter().map(|i| i.name.clone()).collect::<Vec<_>>().join(", ")
+                to_remove
+                    .iter()
+                    .map(|i| i.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         } else {
             details.push("No prohibited software found to remove.".to_string());
@@ -535,9 +507,10 @@ impl Task for SoftwareManagementTask {
         // Confirm removals against a fresh inventory rather than trusting exit
         // codes. An uninstaller that exits 0 having shown a dialog nobody
         // answered, or that needs a reboot to finish, both report success.
+        let mut survivors: Vec<String> = Vec::new();
         if !to_remove.is_empty() {
             if let Some(after) = Self::read_installed().await {
-                let survivors: Vec<String> = after
+                survivors = after
                     .iter()
                     .filter(|i| {
                         self.prohibited_software
@@ -547,7 +520,10 @@ impl Task for SoftwareManagementTask {
                     .map(|i| i.name.clone())
                     .collect();
                 for name in &survivors {
-                    run_log::diagnostic("software", &format!("still present after removal: {name}"));
+                    run_log::diagnostic(
+                        "software",
+                        &format!("still present after removal: {name}"),
+                    );
                     if !removal_failures.iter().any(|f| f.starts_with(name)) {
                         removal_failures
                             .push(format!("{name}: reported removed but still installed"));
@@ -614,10 +590,16 @@ impl Task for SoftwareManagementTask {
         }
 
         if !installed_now.is_empty() {
-            details.push(format!("Installed via Chocolatey: {}", installed_now.join(", ")));
+            details.push(format!(
+                "Installed via Chocolatey: {}",
+                installed_now.join(", ")
+            ));
         }
         if !install_failures.is_empty() {
-            details.push(format!("Failed to install: {}", install_failures.join("; ")));
+            details.push(format!(
+                "Failed to install: {}",
+                install_failures.join("; ")
+            ));
         }
 
         // Bring already-installed software up to date.
@@ -708,7 +690,10 @@ impl Task for SoftwareManagementTask {
                 match chocolatey::upgrade(package).await {
                     None => {
                         updated_now.push(package.clone());
-                        ui::markup_line(&format!("[green]✓ Up to date: {}[/]", ui::escape(package)));
+                        ui::markup_line(&format!(
+                            "[green]✓ Up to date: {}[/]",
+                            ui::escape(package)
+                        ));
                     }
                     Some(failure) => {
                         update_failures.push(format!("{package}: {failure}"));
@@ -725,14 +710,25 @@ impl Task for SoftwareManagementTask {
             // misses. Skipped when prohibited software is still installed:
             // `upgrade all` would happily bring the survivor to its latest
             // version, which is the opposite of what this task is for.
-            if prohibited_ids.is_empty() {
+            //
+            // The question is "did anything prohibited survive", so it is asked
+            // of the post-removal inventory rather than of `prohibited_ids`.
+            // Keying it on the ids meant the guard depended on the package
+            // table being complete: CCleaner and Jellyfin had no entry, so on
+            // an image where either survived removal the list came back empty
+            // and `upgrade all` ran anyway - exactly the case the guard exists
+            // to prevent.
+            if survivors.is_empty() {
                 if let Some(upgrade_error) = chocolatey::upgrade_all().await {
                     details.push(format!("choco upgrade all reported: {upgrade_error}"));
                 }
             } else {
                 run_log::diagnostic(
                     "software",
-                    "skipped `choco upgrade all`: prohibited software is still installed and it would upgrade it",
+                    &format!(
+                        "skipped `choco upgrade all`: {} is still installed and it would upgrade it",
+                        survivors.join(", ")
+                    ),
                 );
             }
         }
@@ -846,8 +842,14 @@ mod tests {
 
     #[test]
     fn a_named_requirement_uses_its_table_entry() {
-        assert_eq!(package_id_for(&requirement("Notepad++")), "notepadplusplus.install");
-        assert_eq!(package_id_for(&requirement("Google Chrome")), "googlechrome");
+        assert_eq!(
+            package_id_for(&requirement("Notepad++")),
+            "notepadplusplus.install"
+        );
+        assert_eq!(
+            package_id_for(&requirement("Google Chrome")),
+            "googlechrome"
+        );
         // The table is matched without regard to case.
         assert_eq!(package_id_for(&requirement("mozilla firefox")), "firefox");
     }
@@ -856,7 +858,10 @@ mod tests {
     /// slugified rather than passed through with its spaces intact.
     #[test]
     fn an_unlisted_requirement_falls_back_to_a_slug() {
-        assert_eq!(package_id_for(&requirement("Some Bespoke Tool")), "somebespoketool");
+        assert_eq!(
+            package_id_for(&requirement("Some Bespoke Tool")),
+            "somebespoketool"
+        );
         assert_eq!(package_id_for(&requirement("Node.js")), "node.js");
     }
 
@@ -886,7 +891,7 @@ mod tests {
     #[test]
     fn default_prohibitions_apply_without_a_readme() {
         let task = SoftwareManagementTask::new();
-        for name in SoftwareManagementTask::ALWAYS_PROHIBITED {
+        for name in ALWAYS_PROHIBITED {
             assert!(
                 task.prohibited_software.iter().any(|p| p == name),
                 "{name} missing from {:?}",

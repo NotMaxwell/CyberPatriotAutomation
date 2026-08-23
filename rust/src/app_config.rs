@@ -327,7 +327,13 @@ fn read_text_lenient(path: &Path) -> Option<String> {
 }
 
 fn decode_utf16(bytes: &[u8], to_u16: fn([u8; 2]) -> u16) -> String {
-    let units: Vec<u16> = bytes.as_chunks::<2>().0.iter().copied().map(to_u16).collect();
+    let units: Vec<u16> = bytes
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .copied()
+        .map(to_u16)
+        .collect();
     String::from_utf16_lossy(&units)
 }
 

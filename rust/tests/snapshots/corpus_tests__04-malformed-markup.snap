@@ -1,0 +1,30 @@
+---
+source: tests/corpus_tests.rs
+expression: rendered
+---
+title:            Training Round Windows 10 README
+operating system: Windows 10
+scenario:         You have been hired to secure the file server. Create a new account named jsmith for this employee. ...
+administrators:
+users:
+groups:
+users to create:
+  - jsmith
+required software:
+  - Notepad++ (latest: true)
+prohibited software:
+  - prohibited software
+critical services:
+  - CCS Client
+prohibited services:
+  - Telnet
+guidelines:
+  - Do not disable the CCS Client service
+  - Install the latest version of Notepad++
+  - Remove any prohibited software
+actionable items:
+  - [CreateUser] Create user account: jsmith
+  - [DisableService] Disable service: Telnet
+sections:
+  - Competition Guidelines
+  - Competition Scenario

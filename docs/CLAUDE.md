@@ -7,12 +7,14 @@ This file provides guidance for AI assistants (Claude, GitHub Copilot, ChatGPT, 
 **PinnacleCyPat** automates Windows security hardening for CyberPatriot
 competition images, driven by the round's own README.
 
-There are **two complete implementations**: C# (.NET 10) under `src/` and Rust
-under `rust/`. A behavioural change generally belongs in both.
+**The tool is the Rust program under `rust/`.** A C# implementation lived
+alongside it until 2026-08-23 and is now frozen under `archive/csharp/`. Do not
+change it, do not mirror changes into it, and do not treat it as a second
+target — it is kept only as the reference the Rust port was written against.
 
 **The project is proprietary — see [LICENSE](../LICENSE).** It is not open
-source. Both projects are deliberately marked unpublishable (`IsPackable=false`,
-`publish = false`); do not suggest publishing them.
+source. The crate is deliberately marked unpublishable (`publish = false`); do
+not suggest publishing it.
 
 The full reference — every task, why it exists, what it changes and how — is
 [ARCHITECTURE.md](ARCHITECTURE.md). Read it before changing a task.
@@ -20,133 +22,158 @@ The full reference — every task, why it exists, what it changes and how — is
 ## Architecture
 
 ```
-PinnacleCyPat/
-├── Program.cs              # Entry point, CLI parsing, run pipeline
-├── Tui.cs                  # Interactive menu (--tui)
-├── AppConfig.cs            # README discovery, defaults, version
-├── Models/                 # Data transfer objects
-│   ├── SystemInfo.cs       # System state information
-│   ├── TaskResult.cs       # Task execution results
-│   └── ReadmeData models   # Parsed README data structures
-├── Tasks/                  # Security remediation tasks
-│   ├── BaseTask.cs         # Abstract base class for all tasks
-│   ├── PasswordPolicyTask.cs
-│   ├── AccountPermissionsTask.cs
-│   ├── UserManagementTask.cs
-│   ├── ServiceManagementTask.cs
-│   ├── AuditPolicyTask.cs
-│   ├── FirewallConfigurationTask.cs
-│   ├── SecurityHardeningTask.cs
-│   └── ProhibitedMediaTask.cs
-├── Utilities/              # Helper classes
-│   ├── CommandExecutor.cs  # Execute system commands
-│   └── ReadmeParser.cs     # Parse HTML README files
-└── Tests/                  # Unit tests (xUnit)
+rust/
+├── src/
+│   ├── main.rs             # Entry point, CLI parsing, run pipeline
+│   ├── tui.rs              # Interactive menu (--tui)
+│   ├── app_config.rs       # README discovery, defaults, version
+│   ├── knowledge.rs        # The tables: registry settings, packages, services
+│   ├── html.rs             # HTML structure, via html5ever
+│   ├── readme_parser.rs    # README prose -> ReadmeData
+│   ├── remediation.rs      # Prove-and-record wrapper for every change
+│   ├── run_log.rs          # Transcript, diagnostics, remediation ledger
+│   ├── command.rs          # Process execution
+│   ├── chocolatey.rs       # Package installs and upgrades
+│   ├── models/             # Data models
+│   ├── tasks/              # The fourteen tasks
+│   ├── native/             # Win32 APIs (#[cfg(windows)] only)
+│   └── {account,policy,registry,service}_ops.rs   # Native-or-shell wrappers
+└── tests/
+    ├── corpus/             # README fixtures
+    └── snapshots/          # What each fixture parses to
 ```
 
 ## Coding Standards
 
 ### General
-- Use C# 12 features (file-scoped namespaces, records, pattern matching)
-- Follow Microsoft C# coding conventions
-- Use `async/await` for all I/O operations
-- Use meaningful variable and method names
+- Rust 2021. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` both
+  gate the build; `./scripts/check.sh` runs everything CI does.
+- `async`/`await` for all I/O
+- Comments explain *why*, and name the failure that motivated the code. A
+  comment restating what the line does is noise.
 
 ### Tasks
 All security tasks must:
-1. Inherit from `BaseTask`
-2. Implement `ReadSystemStateAsync()` - gather current state
-3. Implement `ExecuteAsync()` - perform remediation
-4. Implement `VerifyAsync()` - confirm changes were applied
+1. Implement the `Task` trait
+2. `read_system_state()` - gather current state
+3. `execute()` - perform remediation
+4. `verify()` - confirm changes were applied
 5. Return `TaskResult` with success/failure and message
 
-### Example Task Structure
-```csharp
-public class MyNewTask : BaseTask
-{
-    public MyNewTask()
-    {
-        Name = "My New Task";
-        Description = "What this task does";
+### Example task structure
+```rust
+pub struct MyNewTask {
+    name: String,
+    description: String,
+    dry_run: bool,
+}
+
+impl MyNewTask {
+    pub fn new() -> Self {
+        Self {
+            name: "My New Task".to_string(),
+            description: "What this task does".to_string(),
+            dry_run: false,
+        }
+    }
+}
+
+#[async_trait]
+impl Task for MyNewTask {
+    impl_task_meta!();
+
+    async fn read_system_state(&mut self) -> SystemInfo {
+        SystemInfo::new()
     }
 
-    public override async Task<SystemInfo> ReadSystemStateAsync()
-    {
-        // Gather current system state
-        return new SystemInfo();
+    async fn execute(&mut self) -> TaskResult {
+        if self.dry_run {
+            // Preview only. Honour this: a task that ignores it and writes
+            // anyway is the worst bug this codebase can have.
+            return TaskResult { /* ... */ ..Default::default() };
+        }
+        TaskResult { task_name: self.name.clone(), success: true, ..Default::default() }
     }
 
-    public override async Task<TaskResult> ExecuteAsync()
-    {
-        var result = new TaskResult { TaskName = Name, Success = true };
-        // Perform remediation
-        return result;
-    }
-
-    public override async Task<bool> VerifyAsync()
-    {
-        // Verify changes were applied
-        return true;
+    async fn verify(&mut self) -> bool {
+        // Read the machine back. Returning true because the write returned
+        // success is what the remediation ledger exists to stop.
+        true
     }
 }
 ```
 
-### Command Execution
-Use `CommandExecutor` for running system commands:
-```csharp
-var (success, output, error) = await CommandExecutor.ExecuteAsync("net", "user");
+### Command execution
+```rust
+let (success, output, error) = command::execute("net", Some("user")).await;
 ```
 
-### UI Output
-Use Spectre.Console for all console output:
-```csharp
-AnsiConsole.MarkupLine("[green]✓ Success[/]");
-AnsiConsole.MarkupLine("[red]✗ Failed[/]");
-AnsiConsole.MarkupLine("[yellow]⚠ Warning[/]");
+Prefer the `*_ops` wrappers over shelling out — see **Windows-Specific** below.
+
+### Console output
+```rust
+ui::markup_line("[green]✓ Success[/]");
+ui::markup_line("[red]✗ Failed[/]");
+ui::markup_line(&format!("[yellow]⚠ {}[/]", ui::escape(untrusted)));
 ```
+
+`ui::escape` anything that came from the machine or the README — a display name
+containing `[` is otherwise read as markup.
 
 ## Testing Requirements
 
-### All new features must have unit tests
-- Place tests in `Tests/` directory
-- Use xUnit framework
-- Use FluentAssertions for assertions
-- Test file naming: `{ClassName}Tests.cs`
+### All new behaviour must have tests
+- Unit tests live beside the code in `#[cfg(test)] mod tests`
+- Cross-module tests live in `rust/tests/`
+- Name the test after the behaviour, not the function:
+  `group_members_exclude_the_connective_prose`, not `test_parse_groups`
 
-### Test Structure
-```csharp
-[Fact]
-public void MethodName_Scenario_ExpectedBehavior()
-{
-    // Arrange
-    var task = new MyTask();
+### Parser changes go through the corpus
 
-    // Act
-    var result = task.DoSomething();
+`rust/tests/corpus/` holds README fixtures; every one is parsed and snapshotted.
+A parser change that alters any fixture's output shows as a diff to review.
 
-    // Assert
-    result.Should().NotBeNull();
-}
+```bash
+cargo test --test corpus_tests                       # check
+INSTA_UPDATE=always cargo test --test corpus_tests   # accept new output
+cargo insta review                                   # step through diffs
 ```
 
-### Running Tests
-```powershell
-dotnet test                           # Run all tests
-dotnet test -v n                      # Verbose output with test names
-dotnet test --filter "ClassName"      # Run specific test class
+**Read the diff before accepting it.** The snapshot is the record of what the
+parser does; accepting a diff without reading it discards the only check there
+is. Adding a real competition README to `tests/corpus/` is the single most
+valuable contribution to the parser.
+
+### Table changes are tested too
+
+`knowledge.rs` holds the registry settings, package ids and service-name
+mappings, with tests over the tables themselves — duplicate keys, contradictory
+mappings, malformed paths. A table is the one kind of code where a typo compiles
+perfectly.
+
+### Running tests
+```bash
+./scripts/check.sh                    # everything CI runs
+cargo test                            # just the suite
+cargo test group_members              # by name
 ```
 
 ## Adding New Tasks
 
-1. Create the task file in `Tasks/` (C#) or `src/tasks/` (Rust)
-2. Inherit `BaseTask` / implement the `Task` trait
-3. Add the flag to the `Flags` / `FLAGS` table - it is the single source of truth
-   for both the help text and the unknown-argument check, so a flag cannot be
-   accepted without also being documented
+1. Create the task file in `rust/src/tasks/`
+2. Implement the `Task` trait
+3. Add the flag to the `FLAGS` table in `main.rs` - it is the single source of
+   truth for both the help text and the unknown-argument check, so a flag cannot
+   be accepted without also being documented
 4. Register the task in the task-list builder
-5. Add it to the menu's task list in `Core/Tui.cs` and `rust/src/tui.rs`
-6. Create unit tests
+5. Add it to the menu's task list in `rust/src/tui.rs`
+6. Write tests
 7. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
+
+> Steps 3-5 are three places for one fact, and that is a known wart: the flag,
+> the registration and the menu entry can disagree. Making each task declare its
+> own metadata, with the parser and the menu both reading from that, is the
+> obvious fix and has not been done.
 
 ## Important Considerations
 
@@ -219,54 +246,56 @@ Two rules for the `readState` callback:
 
 ## Common Patterns
 
-### Reading README Data
-```csharp
-private ReadmeData? _readmeData;
+### Reading README data
+```rust
+pub struct MyTask {
+    readme_data: Option<ReadmeData>,
+}
 
-public void SetReadmeData(ReadmeData data)
-{
-    _readmeData = data;
+pub fn set_readme_data(&mut self, data: ReadmeData) {
+    self.readme_data = Some(data);
 }
 ```
 
-### Progress Reporting
+Register the call in `main.rs` too. A task with a `set_readme_data` that nobody
+invokes silently behaves as if no README was given — which is exactly how
+security hardening came to deny Remote Desktop on an image that required it.
 
-Only from code that is *not* already inside one. `Program.cs` runs every task's
-`ExecuteAsync` inside an `AnsiConsole.Progress()`, and Spectre throws on a second
-concurrent dynamic display — an exception the task's own catch reports as a
-plain failure, having applied nothing.
+Ask the README questions through `readme_services`, never by matching strings:
+`is_remote_desktop_required`, `is_critical`, `resolve`. Two tasks that parse the
+same README differently is a bug class this codebase has already had twice.
 
-```csharp
-await AnsiConsole.Progress()
-    .StartAsync(async ctx =>
-    {
-        var task = ctx.AddTask("[cyan]Processing...[/]", maxValue: items.Count);
-        foreach (var item in items)
-        {
-            // Process item
-            task.Increment(1);
-        }
-    });
+### Progress reporting
+
+Only from code that is *not* already inside one. `main.rs` runs every task
+inside a progress bar; a task that opens a second one draws over it.
+
+```rust
+let bar = ProgressBar::new(items.len() as u64);
+for item in items {
+    // process
+    bar.inc(1);
+}
+bar.finish_and_clear();
 ```
 
-### Error Handling
-```csharp
-try
-{
-    // Risky operation
-}
-catch (Exception ex)
-{
-    result.Success = false;
-    result.ErrorDetails = ex.Message;
-    AnsiConsole.WriteException(ex);
+### Error handling
+```rust
+match registry_ops::set_dword(key, name, value).await {
+    Ok(()) => fixes.push(format!("Set {description}")),
+    Err(e) => {
+        // Record it. A failure counted for the on-screen tally but never
+        // pushed into `issues` never reaches the summary or the run log.
+        issues.push(format!("Failed to set {description} ({key}\\{name}): {e}"));
+    }
 }
 ```
+
 
 ## Files to Update When Adding Features
 
-1. `Program.cs` / `main.rs` - CLI flags and task registration
-2. `Core/Tui.cs` / `src/tui.rs` - the menu's task list, if it is a task
+1. `main.rs` - CLI flags and task registration
+2. `src/tui.rs` - the menu's task list, if it is a task
 3. `README.md` - the flag table and the task table
 4. `docs/ARCHITECTURE.md` - the detailed entry
 5. `docs/TASK_ANALYSIS.md` - the implemented-tasks list
@@ -278,8 +307,9 @@ catch (Exception ex)
 - Compute a task's success from the *pre*-remediation state - "found nothing to
   fix" and "fixed everything" are both successes; "failed to fix" is not
 - Return a bare boolean from an operation that can fail for different reasons
-- Modify files in `bin/` or `obj/` directories
+- Modify anything under `archive/` — the C# port is frozen
+- Accept a corpus snapshot diff without reading it
 - Disable Windows Update or Windows Defender (unless explicitly required)
 - Make changes without dry-run support
-- Skip unit tests for new features
+- Skip tests for new behaviour
 - Ignore README data when available

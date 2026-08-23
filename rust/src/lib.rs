@@ -11,6 +11,8 @@ pub mod account_ops;
 pub mod app_config;
 pub mod chocolatey;
 pub mod command;
+pub mod html;
+pub mod knowledge;
 pub mod models;
 pub mod native;
 pub mod policy_ops;

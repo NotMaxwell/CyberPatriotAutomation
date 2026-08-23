@@ -393,7 +393,10 @@ fn extract_group_members_keeps_only_the_names() {
             &["ggoddard", "ealderson"],
         ),
         // Other shapes of the same prose.
-        ("the following users: amoss and lchong", &["amoss", "lchong"]),
+        (
+            "the following users: amoss and lchong",
+            &["amoss", "lchong"],
+        ),
         (
             "these accounts amoss, lchong to the group",
             &["amoss", "lchong"],

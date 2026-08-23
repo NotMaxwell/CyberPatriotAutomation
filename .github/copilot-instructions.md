@@ -3,7 +3,8 @@
 ## Project Context
 
 PinnacleCyPat: a Windows security-hardening tool for CyberPatriot competition
-images. Two complete implementations of the same tool — C# (.NET 10) under `src/`,
+images. One Rust implementation under `rust/`; the retired C# port is frozen
+under `archive/csharp/` and must not be changed. Formerly written as
 Rust under `rust/`. Changes to behaviour generally belong in both.
 
 **This project is proprietary (see LICENSE).** Do not add code copied from
@@ -46,14 +47,15 @@ the run log automatically — do not add separate logging calls.
 2. Add its flag to `Program.Flags` / `FLAGS` — the single source of truth for
    both the help text and the unknown-argument check
 3. Register it in the task-list builder
-4. Add it to the menu's task list in `Core/Tui.cs` / `src/tui.rs`
+4. Add it to the menu's task list in `rust/src/tui.rs`
 5. Add tests
 6. Update `README.md` and `docs/ARCHITECTURE.md`
 
 ## Testing
 
 - xUnit + FluentAssertions (C#), built-in test harness (Rust)
-- Test file naming: `{ClassName}Tests.cs`
+- Unit tests live beside the code in `#[cfg(test)] mod tests`; cross-module
+  tests in `rust/tests/`. Parser changes go through the corpus snapshots.
 - Tests run on Linux, so anything under `Core/Native/` (`#if WINDOWS`) is not
   covered by them — check Windows paths with
   `cargo check --target x86_64-pc-windows-gnu` on the Rust side
