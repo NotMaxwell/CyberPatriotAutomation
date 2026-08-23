@@ -13,6 +13,8 @@ is the short version — start there if you only want to run the thing.
 - [1. What the tool is](#1-what-the-tool-is)
 - [2. Run pipeline](#2-run-pipeline)
 - [3. The implementation, and the archived one](#3-the-implementation-and-the-archived-one)
+- [3.1 The workspace, and the platform seam](#31-the-workspace-and-the-platform-seam)
+- [3.2 Linux](#32-linux)
 - [4. Tasks](#4-tasks)
   - [4.1 Password Policy](#41-password-policy)
   - [4.2 Account Permissions](#42-account-permissions)
@@ -123,13 +125,13 @@ alongside it until 2026-08-23 and is now frozen under
 
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
-| Location | `rust/` | `archive/csharp/` |
-| Version | 1.15.0 | 1.8.0, frozen |
+| Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
+| Version | 1.16.0 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |
-| Tests | 182 | 202, frozen |
+| Tests | 303 | 202, frozen |
 | Published size | ~2.7 MB | ~42 MB self-contained |
 | Startup | immediate, no runtime | JIT + runtime |
 
@@ -153,6 +155,223 @@ record why several non-obvious decisions were made.
 
 ---
 
+## 3.1 The workspace, and the platform seam
+
+`rust/` is a Cargo workspace of four crates, split along the line that already
+existed in the code:
+
+```
+rust/
+├── Cargo.toml                     workspace root; the release profile lives here
+└── crates/
+    ├── core/                      pinnacle-core - no operating system named
+    │   ├── src/
+    │   │   ├── platform.rs        the seam: TaskSpec, Concurrency, Platform
+    │   │   ├── task.rs            the Task trait and impl_task_meta!
+    │   │   ├── readme_parser.rs   README prose -> ReadmeData
+    │   │   ├── html.rs            HTML structure, via html5ever
+    │   │   ├── readme_services.rs "is this service critical?", table as a parameter
+    │   │   ├── remediation.rs     prove-and-record wrapper for every change
+    │   │   ├── run_log.rs         transcript, diagnostics, remediation ledger
+    │   │   ├── software_matching.rs
+    │   │   ├── app_config.rs      README discovery, defaults, version
+    │   │   ├── command.rs         process execution
+    │   │   ├── ui.rs              console output
+    │   │   └── models/            data models
+    │   └── tests/                 corpus fixtures and snapshots
+    ├── windows/                   pinnacle-windows
+    │   ├── src/
+    │   │   ├── platform.rs        the fifteen Windows tasks, one row each
+    │   │   ├── readme_services.rs the Windows service-name table
+    │   │   ├── native/            Win32 APIs (#[cfg(windows)] only)
+    │   │   ├── {account,policy,registry,service}_ops.rs   proved writes
+    │   │   ├── knowledge.rs       registry settings, packages, service names
+    │   │   ├── chocolatey.rs
+    │   │   └── tasks/
+    │   └── tests/
+    ├── linux/                     pinnacle-linux
+    │   └── src/
+    │       ├── platform.rs        the thirteen Linux tasks, one row each
+    │       ├── file_ops.rs        proved writes to /etc - see §3.2
+    │       ├── systemd_ops.rs     proved systemctl operations
+    │       ├── user_ops.rs        /etc/passwd, shadow, group; useradd, chage
+    │       ├── apt.rs             package installs and upgrades
+    │       ├── knowledge.rs       sysctl and sshd settings, units, packages
+    │       ├── readme_services.rs the unit-name table
+    │       └── tasks/
+    └── cli/                       pinnacle-cypat - the binary
+        └── src/
+            ├── main.rs            argument parsing and the run pipeline
+            └── tui.rs             the interactive menu
+```
+
+**Why a workspace rather than `#[cfg]` inside one crate.** Two implementations
+kept in one place drift silently — that is exactly how the C# port came to
+disagree with the Rust one about Remote Desktop, and it is the lesson §3 records.
+`#[cfg(windows)]` and `#[cfg(unix)]` arms of the same function are the same
+mistake in miniature: they sit next to each other, they look symmetrical, and
+nothing checks that they still mean the same thing. Two crates cannot pretend to
+be one, and each is compiled and tested on its own.
+
+It is also what keeps the binaries honest. The platform crates are `cfg`-gated
+dependencies of the CLI, so a Windows build never compiles the Linux tasks and a
+Linux build never compiles the Win32 bindings.
+
+### The seam
+
+A platform crate's entire public surface is one implementation of
+`pinnacle_core::platform::Platform`:
+
+```rust
+pub trait Platform {
+    const NAME: &'static str;               // "Windows" / "Linux"
+    const PRIVILEGED_ROLE: &'static str;    // "Administrator" / "root"
+    fn tasks() -> &'static [TaskSpec];
+    fn is_privileged() -> bool;
+}
+```
+
+and `TaskSpec` describes one task **once**: its flag, its short flag, its
+`--help` line, its menu label and detail, whether it needs a README, whether it
+may run concurrently, and how to construct it.
+
+That single-row rule closed a known wart. Adding a task used to mean editing a
+flag table in `main.rs`, a registration block a few hundred lines below it, and a
+menu table in `tui.rs` — three places for one fact, free to disagree, and they
+did: a task could reach the CLI without reaching the menu, which made it
+invisible to anyone who double-clicks `RUN.bat`. That state is now
+unrepresentable, and two tests pin it (`every_platform_task_is_accepted_by_the_validator`,
+`no_task_flag_shadows_a_global_one`).
+
+`main.rs` and `tui.rs` name no operating system. They read `Host::tasks()`, where
+`Host` is selected by one `cfg` at the top of `main.rs`.
+
+---
+
+## 3.2 Linux
+
+The Linux platform ships **thirteen tasks**, built on the same contract as the
+Windows ones: read the state, skip if it is already right, write, read it back
+as proof.
+
+A task appears in `crates/linux/src/platform.rs` only once it is implemented and
+proved. An entry whose task did nothing would be worse than its absence: the run
+would report success having changed nothing, which is the single failure mode
+this codebase is built to prevent. Group Policy has no Linux analogue, so there
+is no row for it — and a test asserts that.
+
+| Flag | Task | Mechanism |
+|---|---|---|
+| `--password-policy`, `-p` | Password Policy | `pwquality.conf`, `faillock.conf`, PAM |
+| `--account-permissions`, `-a` | Account Permissions | `/etc/shadow`, `chage`, uid-0 audit |
+| `--user-management`, `-u` | User Management | `useradd`, `userdel`, `gpasswd` |
+| `--service-management`, `-s` | Service Management | `systemctl` mask/enable |
+| `--audit-policy`, `-t` | Audit Policy | `auditd`, `rsyslog`, `rules.d` |
+| `--firewall`, `-f` | Firewall | `ufw` |
+| `--security-hardening`, `-H` | Security Hardening | `sysctl.d`, `sshd_config.d`, `login.defs` |
+| `--media-scan`, `-m` | Prohibited Media | filesystem scan of `/home`, `/root` |
+| `--software-updates` | Software Updates | `apt upgrade`, `unattended-upgrades` |
+| `--software-management` | Software Management | `apt purge` / `apt install` |
+| `--hosts-file` | Hosts File Audit | `/etc/hosts` |
+| `--dns-settings` | DNS Settings Audit | `resolv.conf`, `resolvectl` |
+| `--scheduled-tasks` | Scheduled Tasks Audit | six cron locations, systemd timers |
+
+The flags and short flags match the Windows ones wherever the concept exists, so
+a run log from a Linux round reads next to a Windows one and muscle memory does
+not become a hazard. Two tests pin that.
+
+**What carried over unchanged.** The README parser and its corpus, the
+remediation ledger, the run log, the models, the console layer, the CLI, the
+menu, `--dry-run`, and the whole run pipeline. The hardest component in the
+project needed no work at all: CyberPatriot's Ubuntu READMEs are the same HTML
+in the same shape, and the parser already recognised `ubuntu`, `debian`,
+`fedora` and `linux` as operating systems.
+
+**What is deliberately reported rather than fixed.** Three findings are surfaced
+and left alone, each because acting automatically would be worse than not:
+
+- **A second uid 0 account.** It may be the only account anyone can log in as.
+- **Suspicious cron jobs.** A cron line's meaning depends entirely on context —
+  `apt-get update` at 3am is routine, and the same line under a rewritten `PATH`
+  is not. The task's job is making sure all six cron locations are seen.
+- **The resolvers in use.** What the *correct* resolver is depends on the
+  network the image is on; rewriting it to a public one breaks a corporate
+  scenario that scores internal name resolution.
+
+Media files are also reported rather than deleted unless the README's scenario
+text actually prohibits them — a round set at a media production company does
+not, and deleting the company's files there loses points.
+
+**`file_ops` — what `registry_ops` is on Windows.** Almost every Linux hardening
+setting is a keyword and a value in a text file under `/etc`, in one of two
+spellings:
+
+```text
+PermitRootLogin no                 # sshd_config, login.defs — separated by space
+net.ipv4.ip_forward = 0            # sysctl.conf — separated by '='
+```
+
+Two details make writing those by hand unreliable, and both are handled in one
+place:
+
+- **Duplicates change the meaning, and the rule differs per file.** `sshd` takes
+  the *first* value for a keyword and ignores the rest; `sysctl` applies them in
+  order, so the *last* wins. A tool that appends its setting to the end of the
+  file is therefore correct for one and silently wrong for the other. A write
+  replaces the first active definition and comments out every later one, leaving
+  exactly one — after which both rules agree.
+- **A file with two active definitions is already broken**, whichever way the
+  parser resolves it. Reading reports *every* active value rather than picking
+  one, so a duplicate reads as non-compliant and gets cleaned up.
+
+Writes are atomic — a temporary file in the same directory, renamed over the
+original, with the original's mode preserved. The naive path leaves a
+zero-length `/etc/shadow` or `sshd_config` if it is interrupted, which locks the
+machine out of the very thing being hardened. The pre-change contents are kept
+once per file as `<path>.pinnacle.bak`.
+
+**`systemd_ops` — what `service_ops` is on Windows.** `systemctl` is the whole
+interface; unlike `net` and `sc` its query subcommands answer in stable,
+unlocalised tokens (`active`, `enabled`, `masked`), so the parsing problem that
+forced the Win32 path on Windows does not arise. Disabling is stop, disable
+*and mask*: disable alone is not enough, because socket activation and a
+`Wants=` from another unit will both start a disabled service again.
+
+**Two ordering hazards, both of which end a round if got backwards.**
+
+- **The firewall opens ports before it is enabled.** `ufw enable` with a
+  default-deny policy and no allow rule drops the SSH connection the run is
+  happening over, and no further command reaches the machine. Port 22 is opened
+  whether or not the README mentions SSH, and the task refuses to enable the
+  firewall at all if no allow rule landed.
+- **Service protection runs before anything is masked.** The prohibited list and
+  the README's critical list overlap by design — a round may require Apache or
+  Samba — and resolving that after the fact means the service is masked and then
+  unmasked, with a window in between where a scored check sees it down.
+
+**Where the platforms differ in substance**, rather than in mechanism:
+
+| Windows | Linux |
+|---|---|
+| Registry (`registry_ops`) | `/etc` config files, `sysctl` (`file_ops`) |
+| Service control manager (`sc`, netapi32) | systemd (`systemctl`) |
+| `net user`, `net localgroup` | `/etc/passwd`, `/etc/group`, `useradd`, `usermod` |
+| `net accounts`, `secedit` | `/etc/login.defs`, PAM (`pam_pwquality`, `faillock`) |
+| `auditpol` | `auditd` |
+| `netsh advfirewall` | `ufw` / `nftables` |
+| Chocolatey, uninstall registry | `apt` / `dpkg` |
+| Local Security Policy | *no equivalent — deliberately absent* |
+
+That last row is the seam earning its keep: Group Policy has no Linux analogue,
+and rather than a stub that reports success, the Linux task list simply does not
+contain the row.
+
+**Two thousand lines that did not need porting.** `crates/windows/src/native/` is
+Win32 FFI. Linux has no counterpart to write: configuration is files and
+`systemctl`, both reachable without bindings.
+
+---
+
 ## 4. Tasks
 
 Fourteen tasks. Each section below covers: why the task exists, what it
@@ -160,7 +379,7 @@ changes, how it does it, and what it refuses to touch.
 
 ### 4.1 Password Policy
 
-`--password-policy`, `-p` · `rust/src/tasks/password_policy.rs`
+`--password-policy`, `-p` · `rust/crates/windows/src/tasks/password_policy.rs`
 
 **Why.** Password and lockout policy is scored on essentially every Windows
 image, and it is scored as individual settings — minimum length, maximum age,
@@ -216,7 +435,7 @@ otherwise pass a naive `<=` comparison.
 
 ### 4.2 Account Permissions
 
-`--account-permissions`, `-a` · `rust/src/tasks/account_permissions.rs`
+`--account-permissions`, `-a` · `rust/crates/windows/src/tasks/account_permissions.rs`
 
 **Why.** The per-account settings that are scored regardless of what the README
 says: Guest disabled, no blank-password accounts, passwords that expire, no
@@ -258,7 +477,7 @@ would change, then runs only the reporting steps.
 
 ### 4.3 User Management
 
-`--user-management`, `-u` · `rust/src/tasks/user_management.rs` · **requires a README**
+`--user-management`, `-u` · `rust/crates/windows/src/tasks/user_management.rs` · **requires a README**
 
 The most destructive task in the tool, and the one most directly worth points.
 
@@ -316,7 +535,7 @@ create) and returns without touching anything.
 
 ### 4.4 Service Management
 
-`--service-management`, `-s` · `rust/src/tasks/service_management.rs`
+`--service-management`, `-s` · `rust/crates/windows/src/tasks/service_management.rs`
 
 **Why.** Insecure services are scored individually — Remote Registry, Telnet,
 FTP, SNMP — and so is the *failure* to keep a critical service running. Disabling
@@ -389,7 +608,7 @@ must be stopped — all of them, from the same single bulk query.
 
 ### 4.5 Audit Policy
 
-`--audit-policy`, `-t` · `rust/src/tasks/audit_policy.rs`
+`--audit-policy`, `-t` · `rust/crates/windows/src/tasks/audit_policy.rs`
 
 **Why.** "Audit policy is configured to log success and failure" is a scored
 item, usually per category. PowerShell logging and event-log sizing are scored
@@ -451,7 +670,7 @@ only when **no** subcategory is left unaudited.
 
 ### 4.6 Firewall Configuration
 
-`--firewall`, `-f` · `rust/src/tasks/firewall.rs`
+`--firewall`, `-f` · `rust/crates/windows/src/tasks/firewall.rs`
 
 **Why.** "Firewall enabled on all profiles" is scored, and so are individual
 blocked ports on some images.
@@ -509,7 +728,7 @@ connections not logged. `netsh advfirewall` is the fallback.
 
 ### 4.7 Security Hardening
 
-`--security-hardening`, `-H` · `rust/src/tasks/security_hardening.rs`
+`--security-hardening`, `-H` · `rust/crates/windows/src/tasks/security_hardening.rs`
 
 > `-H`, not `-h`. `-h` is help. `--security-hardening` is unchanged.
 
@@ -554,7 +773,7 @@ needs judgement the tool does not have.
 
 ### 4.8 Prohibited Media
 
-`--media-scan`, `-m` · `rust/src/tasks/prohibited_media.rs`
+`--media-scan`, `-m` · `rust/crates/windows/src/tasks/prohibited_media.rs`
 
 **Why.** Removing prohibited media and hacking tools from user directories is
 scored per file on most images.
@@ -613,7 +832,7 @@ real numbers to the completion rate rather than a bare pass/fail.
 
 ### 4.9 Software Management
 
-`--software-management` · `rust/src/tasks/software_management.rs`
+`--software-management` · `rust/crates/windows/src/tasks/software_management.rs`
 
 **Why.** Prohibited software removal, required software installation and a
 malware scan are three separate scored items on most images.
@@ -741,7 +960,7 @@ remain — not that there was nothing to do.
 
 ### 4.10 Software Updates
 
-`--software-updates` · `rust/src/tasks/software_update.rs`
+`--software-updates` · `rust/crates/windows/src/tasks/software_update.rs`
 
 A dedicated version-checking task with no C# equivalent. Out-of-date third-party
 software is scored separately from missing software, and answering it needs two
@@ -771,7 +990,7 @@ audit-policy task.
 
 ### 4.11 Shared Folders Audit
 
-`--shared-folders` · `rust/src/tasks/shared_folders_audit.rs`
+`--shared-folders` · `rust/crates/windows/src/tasks/shared_folders_audit.rs`
 
 **Why.** "Only the default administrative shares exist" is a standard checklist
 item (`fsmgmt.msc`). Anything else is a file-sharing exposure.
@@ -798,7 +1017,7 @@ when the task had found and fixed something.
 
 ### 4.12 Hosts File Audit
 
-`--hosts-file` · `rust/src/tasks/hosts_file_audit.rs`
+`--hosts-file` · `rust/crates/windows/src/tasks/hosts_file_audit.rs`
 
 **Why.** A modified `hosts` file is a common planted misconfiguration: it can
 redirect update servers or security vendors to nowhere.
@@ -821,7 +1040,7 @@ touch a system file for no change.
 
 ### 4.13 DNS Settings Audit
 
-`--dns-settings` · `rust/src/tasks/dns_settings_audit.rs`
+`--dns-settings` · `rust/crates/windows/src/tasks/dns_settings_audit.rs`
 
 **Why.** A resolver pointed at an attacker-controlled or unexpected public server
 is a planted misconfiguration.
@@ -844,7 +1063,7 @@ non-loopback adapter and compares each `IPAddress` against `8.8.8.8`, `8.8.4.4`,
 
 ### 4.14 Suspicious Scheduled Tasks Audit
 
-`--scheduled-tasks` · `rust/src/tasks/suspicious_scheduled_tasks_audit.rs`
+`--scheduled-tasks` · `rust/crates/windows/src/tasks/suspicious_scheduled_tasks_audit.rs`
 
 **Why.** Scheduled tasks are a standard persistence mechanism, and a planted one
 is worth points to find.
@@ -866,7 +1085,7 @@ case where there were none.
 
 ### 4.15 Group Policy
 
-`rust/src/tasks/group_policy.rs` — implemented and tested; not currently wired
+`rust/crates/windows/src/tasks/group_policy.rs` — implemented and tested; not currently wired
 to a CLI flag in either port. Its settings are covered by the audit-policy and
 security-hardening tasks, which is why it does not run separately.
 
@@ -903,7 +1122,7 @@ Two details worth carrying over:
 
 ### 5.1 AppConfig — README discovery
 
-`rust/src/app_config.rs`
+`rust/crates/core/src/app_config.rs`
 
 The single hardest thing the tool does, and the reason `--auto-readme` works at
 all.
@@ -956,7 +1175,7 @@ and stamps the executable's build date.
 
 ### 5.2 ReadmeParser
 
-`rust/src/readme_parser.rs` · `rust/src/html.rs`
+`rust/crates/core/src/readme_parser.rs` · `rust/crates/core/src/html.rs`
 
 Turns competition README HTML into the `ReadmeData` that drives every
 README-aware task.
@@ -1094,7 +1313,7 @@ capitalised if multi-word.
 
 ### 5.3 CommandExecutor
 
-`rust/src/command.rs`
+`rust/crates/core/src/command.rs`
 
 Every external process goes through here.
 
@@ -1157,7 +1376,7 @@ most hosts now refuse. `curl.exe` is the fallback; both follow redirects.
 
 ### 5.4 RunLog
 
-`rust/src/run_log.rs`
+`rust/crates/core/src/run_log.rs`
 
 > The console narrative already describes the run in full — which services were
 > queued, which users were created, which passwords were set — but it scrolls
@@ -1206,7 +1425,7 @@ Written on the normal exit path **and** on the `--parse-readme` path.
 
 ### 5.5 LocalAccounts
 
-`rust/src/account_ops.rs`
+`rust/crates/windows/src/account_ops.rs`
 
 Account and group operations, shared by the account-related tasks. **These go
 through PowerShell rather than `net`.**
@@ -1233,7 +1452,7 @@ through PowerShell rather than `net`.**
 
 ### 5.6 RegistryOps and ServiceOps
 
-`rust/src/registry_ops.rs`, `rust/src/service_ops.rs`, `rust/src/policy_ops.rs`
+`rust/crates/windows/src/registry_ops.rs`, `rust/crates/windows/src/service_ops.rs`, `rust/crates/windows/src/policy_ops.rs`
 
 Thin façades that pick the native path where available and the shell-out path
 otherwise, so tasks read as plain intent and there is one place that knows about
@@ -1252,7 +1471,7 @@ installed is already in the state the caller wanted.
 
 ### 5.7 Chocolatey
 
-`rust/src/chocolatey.rs`
+`rust/crates/windows/src/chocolatey.rs`
 
 > Chocolatey is the default package source because it is scriptable without a
 > console prompt, installable onto every supported image, and its package names
@@ -1277,7 +1496,7 @@ and nothing else, so there is no banner to skip and no localised text to match.
 
 ### 5.8 knowledge — the tables
 
-`rust/src/knowledge.rs`
+`rust/crates/windows/src/knowledge.rs`
 
 Everything the tool knows about Windows as *data* rather than logic: the 42
 hardening registry settings, the Windows features worth disabling, the display
@@ -1317,7 +1536,7 @@ ids, and every default prohibition having a package id.
 
 ### 5.9 The README corpus
 
-`rust/tests/corpus/` · `rust/tests/corpus_tests.rs` · `rust/tests/snapshots/`
+`rust/crates/core/tests/corpus/` · `rust/crates/core/tests/corpus_tests.rs` · `rust/crates/core/tests/snapshots/`
 
 Every README in `tests/corpus/` is parsed and the whole result snapshotted with
 [`insta`](https://insta.rs). The unit of test is a *document*, not an assertion.
@@ -1355,7 +1574,7 @@ unquoted attribute, no `<html>`); and software named in prose alongside a
 
 ## 6. Native layer
 
-`rust/src/native/` (the `windows` crate)
+`rust/crates/windows/src/native/` (the `windows` crate)
 
 Windows-only; compiled for `net10.0-windows` / `#[cfg(windows)]`. The non-Windows
 build falls back to shell-out paths, which is what lets the parser and model
@@ -1395,7 +1614,7 @@ and the shell-out path remains as the fallback.
 
 ## 7. Models
 
-`rust/src/models/`
+`rust/crates/core/src/models/`
 
 | Type | Purpose |
 |---|---|
@@ -1424,7 +1643,7 @@ per-item counts were reported.
 
 ## 8. The interactive menu
 
-`rust/src/tui.rs` — `--tui`, `-i`
+`rust/crates/cli/src/tui.rs` — `--tui`, `-i`
 
 A guided menu for people who would rather not memorise flags. It opens when
 `--tui` is passed, and also on a **bare launch at a real terminal** — which is
@@ -1481,12 +1700,17 @@ what double-clicking the executable does.
   act, *before* the run starts — otherwise the run reports "No README data
   provided" part-way through, by which point other tasks have already made
   changes.
-- Not being Administrator is reported up front, because the failure mode
-  otherwise is a long run in which every change is denied, which reads as the
-  tool not working.
+- Not being Administrator (or root) is reported up front, because the failure
+  mode otherwise is a long run in which every change is denied, which reads as
+  the tool not working. Which privilege that is, and how it is checked, comes
+  from the platform: a machine-policy write probe on Windows, the effective uid
+  on Linux.
 
 **Presentation.** Numbered prompts — no raw terminal mode, no extra dependency —
-where entering nothing keeps all tasks selected.
+where entering nothing keeps all tasks selected. The list of tasks, their labels
+and which of them need a README all come from `Host::tasks()` (§3.1), so the
+menu on a Linux build offers the Linux tasks with no code in common beyond the
+prompt itself.
 
 Adding the menu is also what prompted giving `--software-management`,
 `--shared-folders`, `--hosts-file`, `--dns-settings` and `--scheduled-tasks`
@@ -1569,11 +1793,20 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test                              # 182 tests
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace                  # 303 tests
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
-cargo build --release
+cargo build --release -p pinnacle-cypat
 ```
+
+`--workspace` matters: without it cargo builds only the crate whose directory
+you are in, and a change to `pinnacle-core` that breaks a platform crate goes
+unnoticed. Individual crates are addressable with `-p pinnacle-linux` and so on.
+
+**Which crates a host actually compiles.** A Linux host builds `pinnacle-core`,
+`pinnacle-linux` and the CLI in full, and `pinnacle-windows` only against its
+non-Windows fallbacks — the whole of `crates/windows/src/native` is
+`#[cfg(windows)]` and is never seen. A Windows host is the mirror image.
 
 **Cross-compiling from Linux** needs the GNU target — `x86_64-pc-windows-msvc`
 requires Microsoft's linker:
@@ -1581,15 +1814,13 @@ requires Microsoft's linker:
 ```bash
 rustup target add x86_64-pc-windows-gnu
 sudo apt install -y mingw-w64
-cargo build --release --target x86_64-pc-windows-gnu
+cargo build --release -p pinnacle-cypat --target x86_64-pc-windows-gnu
 ```
 
-> A Linux build never compiles the `#[cfg(windows)]` branches — which is the
-> whole of `src/native`, plus `raw_arg` in `command.rs`, `file_attributes` in
-> `tasks/prohibited_media.rs` and `USERPROFILE` in `app_config.rs`. Run
-> `cargo check --target x86_64-pc-windows-gnu` after touching any of it; it
-> type-checks those paths and needs no linker. A clean `cargo test` on Linux
-> proves nothing about them.
+> Run `cargo clippy --target x86_64-pc-windows-gnu -p pinnacle-windows -p pinnacle-cypat`
+> after touching any Windows code; it type-checks the `#[cfg(windows)]` paths
+> and needs no linker. `check.sh` does this and it is not optional — a clean
+> `cargo test` on Linux proves nothing about them.
 
 Release profile: LTO, one codegen unit, `opt-level = "z"`, `panic = "abort"`,
 symbols stripped. Optimising for size rather than speed costs nothing

@@ -2,64 +2,101 @@
 
 ## Project Context
 
-PinnacleCyPat: a Windows security-hardening tool for CyberPatriot competition
-images. One Rust implementation under `rust/`; the retired C# port is frozen
-under `archive/csharp/` and must not be changed. Formerly written as
-Rust under `rust/`. Changes to behaviour generally belong in both.
+PinnacleCyPat: a security-hardening tool for CyberPatriot competition images,
+targeting **Windows and Linux**. One Rust implementation under `rust/`, built as
+a four-crate Cargo workspace. The retired C# port is frozen under
+`archive/csharp/` and must not be changed, mirrored into, or treated as a second
+target.
 
 **Apache 2.0 (see LICENSE).** Contributions are covered by Section 5 of the
-licence. Do not add code copied from
-elsewhere without checking its licence, and do not suggest publishing the package
-to NuGet or crates.io — both projects are deliberately marked unpublishable.
+licence. Do not add code copied from elsewhere without checking its licence, and
+do not suggest publishing to crates.io — the crates are deliberately marked
+`publish = false`.
+
+## The workspace
+
+| Crate | Holds | Rule |
+|---|---|---|
+| `crates/core` | README parser, remediation ledger, run log, models, console, the `Task` trait, the platform seam | **Nothing here may name an operating system** |
+| `crates/windows` | Win32 `native/`, `*_ops.rs`, `knowledge.rs`, `chocolatey.rs`, fifteen tasks | Windows only |
+| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, thirteen tasks | Linux only |
+| `crates/cli` | `main.rs`, `tui.rs` | Names no OS; reads `Host::tasks()` |
+
+**Do not suggest `#[cfg(windows)] / #[cfg(unix)]` arms of the same function**
+where a platform crate would do. Two implementations sitting next to each other
+look symmetrical and nothing checks that they still agree — that is exactly how
+the C# port came to disagree with the Rust one, and it is why the workspace
+exists.
+
+Where logic is shared but its *data* is not, put the logic in core and take the
+table as a parameter — `core::readme_services::resolve` is the model.
 
 ## Key Patterns
 
 ### Task implementation
 
-All tasks inherit `BaseTask` (C#) / implement the `Task` trait (Rust) and provide:
+Tasks implement `pinnacle_core::Task`:
 
-- `ReadSystemStateAsync()` — read current state, display it, change nothing
-- `ExecuteAsync()` — apply remediation, return a `TaskResult`
-- `VerifyAsync()` — **re-read the machine** and confirm; never trust `Execute`'s report
+- `read_system_state()` — read current state, display it, change nothing
+- `execute()` — apply remediation, return a `TaskResult`
+- `verify()` — **re-read the machine** and confirm; never trust `execute`'s report
 
-### Command execution
+### Every change must prove itself
 
-```csharp
-var (success, output, error) = await CommandExecutor.ExecuteAsync("command", "args");
-await CommandExecutor.PowerShellAsync(script);       // state changes; errors surface
-await CommandExecutor.PowerShellQueryAsync(script);  // reads; absence is not failure
+Never call a write API directly from a task. Route it through
+`pinnacle_core::remediation::apply`, which reads the state, skips if it is
+already right, writes, then reads it back as the evidence. Use the `*_ops`
+wrappers, which already do this:
+
+| Windows | Linux |
+|---|---|
+| `registry_ops::set_dword` | `file_ops::set` |
+| `service_ops` | `systemd_ops::disable` / `enable` |
+| `account_ops` | `user_ops` |
+| `chocolatey` | `apt` |
+
+If a result genuinely cannot be read back — setting a password — use
+`remediation::apply_unprovable` and say why, rather than claiming a proof that
+was never taken. Audit-only conclusions use `remediation::record_finding`.
+
+### Console output
+
+```rust
+ui::markup_line("[green]✓ Success[/]");
+ui::markup_line(&format!("[yellow]⚠ {}[/]", ui::escape(untrusted)));
 ```
 
-Interpolated values go through `CommandExecutor.PsQuote`.
-
-### Console output (Spectre.Console)
-
-```csharp
-AnsiConsole.MarkupLine("[green]✓ Success[/]");
-AnsiConsole.MarkupLine("[red]✗ Failed[/]");
-```
-
-Escape untrusted text with `Markup.Escape`. Everything printed is mirrored into
-the run log automatically — do not add separate logging calls.
+Escape anything from the machine or the README with `ui::escape` — a name
+containing `[` is otherwise read as markup. Everything printed is mirrored into
+the run log automatically; do not add separate logging calls.
 
 ## Adding a task
 
-1. Create the task under `Core/Tasks/` (C#) or `src/tasks/` (Rust)
-2. Add its flag to `Program.Flags` / `FLAGS` — the single source of truth for
-   both the help text and the unknown-argument check
-3. Register it in the task-list builder
-4. Add it to the menu's task list in `rust/src/tui.rs`
-5. Add tests
-6. Update `README.md` and `docs/ARCHITECTURE.md`
+**One row, in one file.**
+
+1. Create the task under `crates/<platform>/src/tasks/`, register it in that
+   directory's `mod.rs`
+2. Add one `TaskSpec` row to that crate's `platform.rs` — it supplies the flag,
+   the `--help` line, the menu label and the constructor
+3. Add tests
+4. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
+
+Nothing changes in `main.rs` or `tui.rs`. Keep the flag spelling identical to the
+other platform's where the concept exists; a test enforces it. If there is no
+counterpart — Group Policy on Linux — leave the row out rather than adding a stub
+that reports success.
 
 ## Testing
 
-- xUnit + FluentAssertions (C#), built-in test harness (Rust)
 - Unit tests live beside the code in `#[cfg(test)] mod tests`; cross-module
-  tests in `rust/tests/`. Parser changes go through the corpus snapshots.
-- Tests run on Linux, so anything under `Core/Native/` (`#if WINDOWS`) is not
-  covered by them — check Windows paths with
-  `cargo check --target x86_64-pc-windows-gnu` on the Rust side
+  tests in `crates/*/tests/`
+- Name tests after the behaviour: `group_members_exclude_the_connective_prose`,
+  not `test_parse_groups`
+- Parser changes go through the corpus snapshots in `crates/core/tests/corpus/`
+- `cargo test --workspace` — without `--workspace`, a change to core that breaks
+  a platform crate goes unnoticed
+- A Linux host never compiles `crates/windows/src/native/`. Check it with
+  `cargo clippy --target x86_64-pc-windows-gnu -p pinnacle-windows -p pinnacle-cypat`
 
 ## Important rules
 
@@ -69,3 +106,8 @@ the run log automatically — do not add separate logging calls.
 4. A service named critical must never also be queued for disabling
 5. Return the *reason* for a failure, not a bare boolean
 6. Prefer the native Win32 path over parsing localised command output
+7. On Linux, write SSH and sysctl settings to the drop-in directories, never the
+   main file — `sshd_config` reads its `Include` first, so editing the main file
+   is silently overridden
+8. Open firewall ports **before** enabling `ufw`, and protect critical services
+   **before** masking anything — both orderings end a round if reversed

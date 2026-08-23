@@ -1,0 +1,27 @@
+# =============================================================================
+# pinnacle-linux - the Linux platform for PinnacleCyPat
+# Copyright 2026 Maxwell McCormick
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
+[package]
+name = "pinnacle-linux"
+description = "Linux hardening tasks for PinnacleCyPat: /etc configuration, systemd, PAM and apt, behind the same proved-write contract as the Windows platform."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pinnacle_linux"
+path = "src/lib.rs"
+
+[dependencies]
+pinnacle-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+regex.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -10,6 +10,136 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.16.0
+
+Linux support, and the restructure that made it possible.
+
+### Added
+
+- **A Linux platform: thirteen tasks.** Password Policy (`pam_pwquality`,
+  `faillock`), Account Permissions, User Management, Service Management
+  (systemd), Audit Policy (`auditd` and `rsyslog`), Firewall (`ufw`), Security
+  Hardening (36 settings across `sysctl.d`, `sshd_config.d` and `login.defs`),
+  Prohibited Media, Software Updates and Software Management (`apt`), and the
+  Hosts File, DNS Settings and Scheduled Tasks audits.
+
+  The flags and short flags match the Windows ones wherever the concept exists,
+  so a run log from a Linux round reads next to a Windows one. Group Policy has
+  no Linux analogue and deliberately has no task - a stub that reported success
+  would be worse than its absence, and a test asserts the row is not there.
+
+- **`file_ops` - proved writes to `/etc`, the counterpart of `registry_ops`.**
+  Two details make hand-editing these files unreliable, and both are handled in
+  one place:
+
+  - **Duplicate definitions mean opposite things depending on the file.** `sshd`
+    obeys the *first* value for a keyword; `sysctl` applies them in order so the
+    *last* wins. A tool that appends its setting to the end is therefore correct
+    for one and silently wrong for the other. A write replaces the first active
+    definition and comments out every later one, leaving exactly one - after
+    which both rules agree.
+  - **Writes are atomic**: a temporary file in the same directory, renamed over
+    the original, with the original's mode preserved. The naive path leaves a
+    zero-length `/etc/shadow` or `sshd_config` if interrupted, which locks the
+    machine out of the very thing being hardened. The pre-change contents are
+    kept once per file as `<path>.pinnacle.bak`.
+
+  SSH and sysctl settings go to drop-in files rather than the main config.
+  Ubuntu 22.04+ puts `Include /etc/ssh/sshd_config.d/*.conf` as the first line
+  of `sshd_config` and sshd obeys the first definition it sees, so editing the
+  main file is overridden by any drop-in already present - the run looks applied
+  and changes nothing.
+
+- **`systemd_ops`, `user_ops` and `apt`** - the counterparts of `service_ops`,
+  `account_ops` and `chocolatey`. Three notes:
+
+  - Disabling a unit is stop, disable **and mask**. Disable alone is not enough:
+    socket activation and a `Wants=` from another unit both restart it, and the
+    audit that follows would then find it running with no explanation.
+  - Account *reads* go straight to `/etc/passwd` and `/etc/group`. Unlike
+    Windows, where localised `net` output forced the move to netapi32, these are
+    POSIX-fixed colon records with no locale near them. Writes still go through
+    `useradd`/`usermod`/`gpasswd`, which take the lock and keep `/etc/shadow` in
+    step.
+  - `apt` runs with `DEBIAN_FRONTEND=noninteractive` (or it opens a full-screen
+    dialog and hangs until the timeout) and `--force-confold` (or an upgrade
+    silently reverts the hardening applied earlier in the same run). It purges
+    rather than removes, so a package's configuration and unit file go too.
+
+- **Two orderings that end a round if reversed**, both now enforced:
+
+  - The firewall opens ports **before** enabling `ufw`. Enabling a default-deny
+    firewall with no allow rule drops the SSH session the run is happening over,
+    and no further command reaches the machine. Port 22 is opened whether or not
+    the README mentions SSH, and the task refuses to enable the firewall at all
+    if no allow rule landed.
+  - Service protection runs **before** anything is masked. The prohibited list
+    and the README's critical list overlap by design - a round may require Apache
+    or Samba - and resolving that afterwards leaves a window where a scored check
+    sees the service down.
+
+### Changed
+
+- **`rust/` is now a Cargo workspace of four crates**: `pinnacle-core` (the
+  OS-agnostic half), `pinnacle-windows`, `pinnacle-linux`, and `pinnacle-cypat`
+  (the binary). The platform crates are `cfg`-gated dependencies, so a Windows
+  build never compiles the Linux tasks and a Linux build never compiles the
+  Win32 bindings.
+
+  A workspace rather than `#[cfg]` branches inside one crate, deliberately: two
+  implementations kept in one place drift silently, which is precisely how the
+  C# port came to disagree with the Rust one about Remote Desktop. Two crates
+  cannot pretend to be one.
+
+  No task behaviour changed. The corpus snapshots are byte-identical and all 182
+  pre-existing tests still pass.
+
+- **A task is now described in one place.** `TaskSpec` carries the flag, the
+  short flag, the `--help` line, the menu label and detail, whether it needs a
+  README, whether it may run concurrently, and how to construct the task.
+  `main.rs` and `tui.rs` name no operating system - they read `Host::tasks()`.
+
+  This closed a wart that had been recorded in `CLAUDE.md` since the menu was
+  added: a flag table in `main.rs`, a registration block a few hundred lines
+  below it, and a menu table in `tui.rs` were three places for one fact, free to
+  disagree. A task could reach the CLI without reaching the menu, making it
+  invisible to anyone who double-clicks `RUN.bat` - which is most users. Two
+  tests now pin it (`every_platform_task_is_accepted_by_the_validator`,
+  `no_task_flag_shadows_a_global_one`).
+
+- **`readme_services` takes its name table as a parameter.** The matching logic
+  is identical on both platforms; only the table differs. Each platform crate
+  wraps it with its own, so the existing `is_remote_desktop_required` API is
+  unchanged for the Windows tasks.
+
+- **The privilege check moved onto the platform seam.** `Platform::is_privileged`
+  is a machine-policy write probe on Windows and the effective uid on Linux, and
+  `PRIVILEGED_ROLE` / `ELEVATION_HINT` supply the wording - telling a Linux user
+  to right-click an executable is worse than saying nothing.
+
+- **`command::execute_for_exit_code_with_env`**, for child processes that decide
+  whether to prompt from the environment rather than from a switch. The
+  variables are deliberately not written to the run log: they are process
+  configuration, and one of them will eventually hold something that should not
+  be recorded.
+
+### Fixed
+
+- **`nologin` was matched by full path, not by file name.** Debian and Ubuntu
+  ship `/usr/sbin/nologin`; Arch and Fedora `/usr/bin/nologin`. The account
+  audit reported *every* system account on the wrong distribution as able to log
+  in - fourteen false positives in a single run, which is exactly how a reader
+  learns to ignore a finding. Found by running the audit, not by reading it.
+
+### Documentation
+
+- `docs/ARCHITECTURE.md` gains §3.1 (the workspace and the platform seam) and
+  §3.2 (Linux: what carried over unchanged, what is reported rather than fixed,
+  and where the platforms differ in substance rather than mechanism).
+- `docs/CONTRIBUTING.md`'s licence section no longer says forking and
+  redistribution are prohibited. That text predated the return to Apache 2.0 and
+  contradicted the licence it linked to.
+
 ## 1.15.2
 
 ### Changed

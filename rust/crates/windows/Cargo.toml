@@ -1,0 +1,58 @@
+# =============================================================================
+# pinnacle-windows - the Windows platform for PinnacleCyPat
+# Copyright 2026 Maxwell McCormick
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
+[package]
+name = "pinnacle-windows"
+description = "Windows hardening tasks for PinnacleCyPat: Win32 bindings, the proved-write wrappers, and the settings tables."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "pinnacle_windows"
+path = "src/lib.rs"
+
+[dependencies]
+pinnacle-core.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+regex.workspace = true
+chrono.workspace = true
+indicatif.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Microsoft's official Windows bindings. Everything under `src/native` is built
+# on these rather than on parsing the output of `net`, `auditpol` and `netsh`,
+# mirroring how the C# port uses CsWin32. One binding crate for the whole
+# platform, so there is a single place to add an API.
+windows = { version = "0.59", features = [
+    "Win32_Foundation",
+    # Local accounts and password policy (netapi32).
+    "Win32_NetworkManagement_NetManagement",
+    # Audit policy, and the token privilege it requires (advapi32).
+    "Win32_Security",
+    "Win32_Security_Authentication_Identity",
+    "Win32_System_Threading",
+    # Windows Firewall configuration, which is a COM object.
+    "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_System_Com",
+    # Service control manager.
+    "Win32_System_Services",
+    # Installed-software inventory from the uninstall keys.
+    "Win32_System_Registry",
+    # Shared folders. The Win32 metadata files NetShareEnum and NetShareDel
+    # under Storage rather than with the rest of netapi32.
+    "Win32_Storage_FileSystem",
+    # DNS server addresses per interface, from the IP helper API.
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+] }
+
+[dev-dependencies]
+tokio = { workspace = true }

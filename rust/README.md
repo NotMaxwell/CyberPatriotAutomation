@@ -1,7 +1,7 @@
 # PinnacleCyPat
 
-Automates CyberPatriot Windows security-hardening tasks, driven by the round's
-own README.
+Automates CyberPatriot security-hardening tasks on **Windows and Linux**, driven
+by the round's own README.
 
 This began as a port of a C# implementation, which is now frozen under
 [`../archive/csharp/`](../archive/csharp/). It did not reproduce that
@@ -10,12 +10,16 @@ fixed rather than carried over, and those are listed under
 [Fixes made during the port](#fixes-made-during-the-port) — worth reading, since
 several are the kind of mistake that is easy to reintroduce.
 
-> This is a **Windows** tool: it shells out to `net`,
-> `secedit`, `netsh`, `reg`, `auditpol`, `schtasks`, `sc`, `wmic`, and
-> PowerShell. It builds and its parser/model logic is unit-tested on any
-> platform, but the hardening tasks only do real work on Windows (as
-> Administrator). On non-Windows hosts the underlying commands simply fail
-> gracefully.
+> **Two platforms, one binary shape.** The build targets whichever host it runs
+> on and carries only that platform's tasks: Win32 and `net`/`secedit`/`netsh`
+> on Windows, `/etc` and systemd and `apt` on Linux. Everything above the
+> platform line — the README parser, the remediation ledger, the run log, the
+> CLI and the menu — is shared and identical.
+>
+> The split is a Cargo workspace rather than `#[cfg]` branches inside one crate,
+> deliberately: two implementations kept in one place drift silently, which is
+> the same lesson that retired the C# port. See
+> [Layout](#layout).
 
 ## Build & test
 
@@ -27,21 +31,25 @@ Or by hand:
 
 ```bash
 cd rust
-cargo test                 # 182 tests
-cargo clippy --all-targets -- -D warnings
+cargo test --workspace     # 303 tests
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-**Parser changes go through the corpus.** Every README in `tests/corpus/` is
+`--workspace` matters: without it cargo builds only the crate whose directory
+you are in, so a change to `pinnacle-core` that breaks a platform crate goes
+unnoticed. Individual crates take `-p pinnacle-linux` and so on.
+
+**Parser changes go through the corpus.** Every README in `crates/core/tests/corpus/` is
 parsed and the whole result snapshotted, so a change that alters any of them
 shows as a reviewable diff:
 
 ```bash
-INSTA_UPDATE=always cargo test --test corpus_tests   # accept new output
-cargo insta review                                   # step through diffs
+INSTA_UPDATE=always cargo test -p pinnacle-core --test corpus_tests   # accept new output
+cargo insta review                                                    # step through diffs
 ```
 
-Adding a real competition README to `tests/corpus/` is the most useful thing you
+Adding a real competition README to `crates/core/tests/corpus/` is the most useful thing you
 can do for the parser — it found two bugs on its first run.
 
 ### Producing a Windows `.exe`
@@ -54,7 +62,7 @@ are not available on Linux:
 ```bash
 rustup target add x86_64-pc-windows-gnu
 sudo apt install -y mingw-w64                        # Debian/Ubuntu
-cargo build --release --target x86_64-pc-windows-gnu
+cargo build --release -p pinnacle-cypat --target x86_64-pc-windows-gnu
 # -> target/x86_64-pc-windows-gnu/release/pinnacle-cypat.exe
 ```
 
@@ -67,12 +75,12 @@ Two things to know when cross-compiling:
 - `cargo test --target x86_64-pc-windows-gnu` builds test binaries a Linux host
   cannot execute. Run the suite on the host; use the cross build only for the
   artefact.
-- A Linux build never compiles the `#[cfg(windows)]` branches — which now
-  includes **the whole of `src/native`**, plus `raw_arg` in `command.rs`,
-  `file_attributes` in `tasks/prohibited_media.rs` and `USERPROFILE` in
-  `app_config.rs`. `cargo check --target x86_64-pc-windows-gnu` type-checks them
-  and needs no linker, so run it after touching any of that; a clean `cargo test`
-  on Linux proves nothing about those paths.
+- A Linux host builds `pinnacle-core`, `pinnacle-linux` and the CLI in full, but
+  checks `pinnacle-windows` only against its non-Windows fallbacks — **the whole
+  of `crates/windows/src/native`** is `#[cfg(windows)]` and is never seen. Run
+  `cargo clippy --target x86_64-pc-windows-gnu -p pinnacle-windows -p pinnacle-cypat`
+  after touching any of it; it type-checks those paths and needs no linker. A
+  clean `cargo test` on Linux proves nothing about them.
 
 ## Windows APIs
 
@@ -327,20 +335,34 @@ The build date comes from `build.rs` and distinguishes two builds of the same
 version. Check a binary directly with `--version`. Bump the version with every
 behavioural change and record it in [CHANGELOG.md](CHANGELOG.md).
 
-## Layout (mirrors the C# `Core` namespace)
+## Layout
 
-| Rust | C# |
-|------|----|
-| `src/main.rs` | `Program.cs` |
-| `src/app_config.rs` | `Core/AppConfig.cs` |
-| `src/command.rs` | `Core/Utilities/CommandExecutor.cs` |
-| `src/readme_parser.rs` | `Core/Utilities/ReadmeParser.cs` |
-| `src/models/` | `Core/Models/` |
-| `src/tasks/` | `Core/Tasks/` |
-| `src/ui.rs` | Spectre.Console replacement |
-| `src/run_log.rs` | *(new)* run log written at end of execution |
-| `src/tasks/software_update.rs` | *(new)* version checking and updating |
-| `src/tui.rs` | `Core/Tui.cs` — interactive menu |
+A Cargo workspace of four crates. `pinnacle-core` holds everything that does not
+name an operating system; each platform crate implements
+`pinnacle_core::platform::Platform` and is selected by one `cfg` in the binary.
+
+| Crate | Holds |
+|---|---|
+| `crates/core` | `platform.rs` (the seam), `task.rs`, `readme_parser.rs`, `html.rs`, `remediation.rs`, `run_log.rs`, `app_config.rs`, `command.rs`, `ui.rs`, `software_matching.rs`, `models/`, the README corpus |
+| `crates/windows` | `native/` (Win32), `{account,policy,registry,service}_ops.rs`, `knowledge.rs`, `chocolatey.rs`, `tasks/` — fifteen tasks |
+| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — thirteen tasks |
+| `crates/cli` | `main.rs` (flags and the run pipeline), `tui.rs` (the menu) |
+
+Where the C# port's files ended up:
+
+| C# | Rust |
+|----|------|
+| `Program.cs` | `crates/cli/src/main.rs` |
+| `Core/AppConfig.cs` | `crates/core/src/app_config.rs` |
+| `Core/Utilities/CommandExecutor.cs` | `crates/core/src/command.rs` |
+| `Core/Utilities/ReadmeParser.cs` | `crates/core/src/readme_parser.rs` |
+| `Core/Models/` | `crates/core/src/models/` |
+| `Core/Tasks/` | `crates/windows/src/tasks/` |
+| `Core/Tui.cs` | `crates/cli/src/tui.rs` |
+| Spectre.Console | `crates/core/src/ui.rs` |
+| *(new)* | `crates/core/src/run_log.rs` — run log and remediation ledger |
+| *(new)* | `crates/core/src/platform.rs` — the per-OS task table |
+| *(new)* | `crates/linux/` — the Linux platform |
 
 ## Notable porting decisions
 

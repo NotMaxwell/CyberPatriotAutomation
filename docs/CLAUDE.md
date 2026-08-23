@@ -4,8 +4,10 @@ This file provides guidance for AI assistants (Claude, GitHub Copilot, ChatGPT, 
 
 ## Project Overview
 
-**PinnacleCyPat** automates Windows security hardening for CyberPatriot
-competition images, driven by the round's own README.
+**PinnacleCyPat** automates security hardening for CyberPatriot competition
+images, driven by the round's own README. It targets **Windows and Linux**: one
+binary, one pipeline, one README parser, with a per-platform task set selected
+at compile time (see **The platform seam** below).
 
 **The tool is the Rust program under `rust/`.** A C# implementation lived
 alongside it until 2026-08-23 and is now frozen under `archive/csharp/`. Do not
@@ -26,27 +28,79 @@ The full reference — every task, why it exists, what it changes and how — is
 
 ## Architecture
 
+`rust/` is a Cargo workspace of four crates. The split is along the line that
+already existed in the code, and it is what makes a second operating system
+additive rather than a set of `#[cfg]` branches threaded through every task.
+
 ```
 rust/
-├── src/
-│   ├── main.rs             # Entry point, CLI parsing, run pipeline
-│   ├── tui.rs              # Interactive menu (--tui)
-│   ├── app_config.rs       # README discovery, defaults, version
-│   ├── knowledge.rs        # The tables: registry settings, packages, services
-│   ├── html.rs             # HTML structure, via html5ever
-│   ├── readme_parser.rs    # README prose -> ReadmeData
-│   ├── remediation.rs      # Prove-and-record wrapper for every change
-│   ├── run_log.rs          # Transcript, diagnostics, remediation ledger
-│   ├── command.rs          # Process execution
-│   ├── chocolatey.rs       # Package installs and upgrades
-│   ├── models/             # Data models
-│   ├── tasks/              # The fourteen tasks
-│   ├── native/             # Win32 APIs (#[cfg(windows)] only)
-│   └── {account,policy,registry,service}_ops.rs   # Native-or-shell wrappers
-└── tests/
-    ├── corpus/             # README fixtures
-    └── snapshots/          # What each fixture parses to
+├── Cargo.toml                     workspace root; the release profile lives here
+└── crates/
+    ├── core/          pinnacle-core     — no operating system named
+    │   ├── platform.rs                  the seam: TaskSpec, Concurrency, Platform
+    │   ├── task.rs                      the Task trait and impl_task_meta!
+    │   ├── readme_parser.rs · html.rs   README prose -> ReadmeData
+    │   ├── readme_services.rs           service-name matching, table as a parameter
+    │   ├── remediation.rs               prove-and-record wrapper for every change
+    │   ├── run_log.rs                   transcript, diagnostics, remediation ledger
+    │   ├── app_config.rs · command.rs · ui.rs · software_matching.rs
+    │   ├── models/                      data models
+    │   └── tests/                       README corpus and snapshots
+    ├── windows/       pinnacle-windows  — fifteen tasks
+    │   ├── platform.rs                  the task table
+    │   ├── native/                      Win32 APIs (#[cfg(windows)] only)
+    │   ├── {account,policy,registry,service}_ops.rs   proved writes
+    │   ├── knowledge.rs · chocolatey.rs · readme_services.rs
+    │   └── tasks/
+    ├── linux/         pinnacle-linux    — thirteen tasks
+    │   ├── platform.rs                  the task table
+    │   ├── file_ops.rs                  proved writes to /etc (what registry_ops is)
+    │   ├── systemd_ops.rs               proved systemctl (what service_ops is)
+    │   ├── user_ops.rs                  /etc/passwd, shadow, group; useradd, chage
+    │   ├── apt.rs · knowledge.rs · readme_services.rs
+    │   └── tasks/
+    └── cli/           pinnacle-cypat    — the binary
+        ├── main.rs                      argument parsing and the run pipeline
+        └── tui.rs                       the interactive menu
 ```
+
+**Which crate does a change belong in?** If it names Windows or Linux, it is not
+core. If it would be true on both, it is not a platform crate. When a piece of
+logic is shared but its *data* is not — service-name matching, for one — put the
+logic in core and take the table as a parameter, the way
+`core::readme_services::resolve` does.
+
+**Do not reintroduce `#[cfg(windows)] / #[cfg(unix)]` pairs of the same
+function.** Two implementations sitting next to each other look symmetrical and
+nothing checks that they still mean the same thing; that is precisely how the C#
+port came to disagree with the Rust one about Remote Desktop. Put each in its
+platform crate.
+
+## The platform seam
+
+A platform crate's entire public surface is one `Platform` impl:
+
+```rust
+pub trait Platform {
+    const NAME: &'static str;               // "Windows" / "Linux"
+    const PRIVILEGED_ROLE: &'static str;    // "Administrator" / "root"
+    fn tasks() -> &'static [TaskSpec];
+    fn is_privileged() -> bool;
+}
+```
+
+`TaskSpec` describes one task **once**: flag, short flag, `--help` line, menu
+label, menu detail, whether it needs a README, whether it may run concurrently,
+and how to construct it. `main.rs` and `tui.rs` name no operating system — they
+read `Host::tasks()`, where `Host` is selected by one `cfg` at the top of
+`main.rs`.
+
+This replaced three hand-maintained lists that were free to disagree, and did: a
+task could reach the CLI without reaching the menu, making it invisible to
+anyone who double-clicks `RUN.bat`. **Adding a task is now one row.**
+
+A task with no counterpart on the other platform simply has no row there —
+Group Policy has none on Linux. Do not add a stub that reports success.
 
 ## Coding Standards
 
@@ -129,13 +183,13 @@ containing `[` is otherwise read as markup.
 
 ### All new behaviour must have tests
 - Unit tests live beside the code in `#[cfg(test)] mod tests`
-- Cross-module tests live in `rust/tests/`
+- Cross-module tests live in `rust/crates/*/tests/`
 - Name the test after the behaviour, not the function:
   `group_members_exclude_the_connective_prose`, not `test_parse_groups`
 
 ### Parser changes go through the corpus
 
-`rust/tests/corpus/` holds README fixtures; every one is parsed and snapshotted.
+`rust/crates/core/tests/corpus/` holds README fixtures; every one is parsed and snapshotted.
 A parser change that alters any fixture's output shows as a diff to review.
 
 ```bash
@@ -165,20 +219,32 @@ cargo test group_members              # by name
 
 ## Adding New Tasks
 
-1. Create the task file in `rust/src/tasks/`
-2. Implement the `Task` trait
-3. Add the flag to the `FLAGS` table in `main.rs` - it is the single source of
-   truth for both the help text and the unknown-argument check, so a flag cannot
-   be accepted without also being documented
-4. Register the task in the task-list builder
-5. Add it to the menu's task list in `rust/src/tui.rs`
-6. Write tests
-7. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
+**One row, in one file.** Add a `TaskSpec` to the platform's `platform.rs` —
+`crates/windows/src/platform.rs` or `crates/linux/src/platform.rs` — and the
+flag, the `--help` line, the menu entry and the constructor all come from it.
 
-> Steps 3-5 are three places for one fact, and that is a known wart: the flag,
-> the registration and the menu entry can disagree. Making each task declare its
-> own metadata, with the parser and the menu both reading from that, is the
-> obvious fix and has not been done.
+1. Create the task file in `crates/<platform>/src/tasks/` and register the
+   module in that directory's `mod.rs`
+2. Implement the `Task` trait (`pinnacle_core::Task`)
+3. Add one `TaskSpec` row to the platform's `platform.rs`, in the order a run
+   should execute it
+4. Write tests
+5. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
+
+There is nothing to change in `main.rs` or `tui.rs`, and there is no way to add
+a task that the CLI accepts but the menu does not offer — two tests in
+`main.rs` pin that.
+
+**Keep the flag consistent across platforms.** If Windows spells it
+`--password-policy` / `-p`, Linux does too. A run log from a Linux round should
+read next to a Windows one, and muscle memory should not become a hazard.
+`shared_flags_keep_their_windows_spelling` in `crates/linux/src/platform.rs`
+enforces it.
+
+**If the task has no counterpart on the other platform, leave the row out
+there.** Group Policy has no Linux analogue and has no row. A stub that reports
+success is worse than an absence, because the run then claims to have done
+something.
 
 ## Important Considerations
 
@@ -213,6 +279,36 @@ parser written against English output returns nothing on a non-English image, an
 
 Never use `net user` to set a password: it interactively confirms anything over
 14 characters, and with no console to answer it the command aborts.
+
+### Linux-Specific
+
+Route every write through the `*_ops` modules for the same reason, though the
+hazards are different ones:
+
+| Instead of | Use | Why |
+|---|---|---|
+| editing `/etc/*` by hand | `file_ops::set` | duplicate definitions mean opposite things in `sshd_config` (first wins) and `sysctl.conf` (last wins); `file_ops` leaves exactly one, and writes atomically so an interruption cannot truncate `/etc/shadow` |
+| `systemctl disable` | `systemd_ops::disable` | disable alone is not enough — socket activation and a `Wants=` from another unit both restart it. It stops, disables **and masks** |
+| parsing `net`-style output | reading `/etc/passwd`, `/etc/group` | these are POSIX-fixed colon records with no locale near them, so unlike Windows the file is the better source. **Writes** still go through `useradd`/`usermod`/`gpasswd`, which take the lock and keep `/etc/shadow` in step |
+| `apt-get` directly | `apt::install` / `apt::purge` | needs `DEBIAN_FRONTEND=noninteractive` or it opens a dialog and hangs until the timeout, and `--force-confold` or an upgrade silently reverts the hardening applied earlier in the same run |
+| `remove` | `purge` | a removed package keeps its configuration and unit file, so a reinstall restores the attacker's settings |
+
+Write SSH and sysctl settings to the **drop-in** files (`sshd_config.d/`,
+`sysctl.d/`), never the main file. Ubuntu 22.04+ puts the `Include` first in
+`sshd_config` and sshd obeys the first definition it sees, so editing the main
+file is overridden by any drop-in already present — the run looks applied and
+changes nothing.
+
+Two orderings are load-bearing and both end a round if reversed:
+
+- **Open firewall ports before enabling `ufw`.** Enabling a default-deny
+  firewall with no allow rule drops the SSH session the run is happening over.
+- **Protect the README's critical services before masking anything.** The
+  prohibited list and the critical list overlap by design.
+
+Never pass a password on a command line — it reaches the process table and the
+run log's record of the command. `user_ops::set_password` feeds `chpasswd` on
+stdin.
 
 ## Every Change Must Prove Itself
 
@@ -299,16 +395,21 @@ match registry_ops::set_dword(key, name, value).await {
 
 ## Files to Update When Adding Features
 
-1. `main.rs` - CLI flags and task registration
-2. `src/tui.rs` - the menu's task list, if it is a task
-3. `README.md` - the flag table and the task table
-4. `docs/ARCHITECTURE.md` - the detailed entry
-5. `docs/TASK_ANALYSIS.md` - the implemented-tasks list
+1. `crates/<platform>/src/platform.rs` — the `TaskSpec` row
+2. `crates/<platform>/src/tasks/mod.rs` — the module declaration
+3. `README.md` — the flag table and the task table
+4. `docs/ARCHITECTURE.md` — the detailed entry
+5. `docs/TASK_ANALYSIS.md` — the implemented-tasks list
 6. Tests
 
 ## Do NOT
 
-- Add a task to the CLI without also adding it to the menu, or vice versa
+- Put anything that names an operating system in `pinnacle-core`
+- Write `#[cfg(windows)]` / `#[cfg(unix)]` arms of the same function where a
+  platform crate would do — they drift silently, which is the whole reason the
+  workspace exists
+- Add a `TaskSpec` row for a task that is not implemented, or that would report
+  success without doing anything
 - Compute a task's success from the *pre*-remediation state - "found nothing to
   fix" and "fixed everything" are both successes; "failed to fix" is not
 - Return a bare boolean from an operation that can fail for different reasons

@@ -1,20 +1,21 @@
 # PinnacleCyPat
 
-[![Rust](https://img.shields.io/badge/Rust-2021-000000)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-182-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-303-brightgreen)]()
+[![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
-**Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick, all rights reserved
+**Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
 
-Automated Windows security hardening for CyberPatriot competition images. It
-reads the round's own README, applies the mechanical part of the checklist, and
-tells you exactly what it changed.
+Automated security hardening for CyberPatriot competition images, on **Windows
+and Linux**. It reads the round's own README, applies the mechanical part of the
+checklist, and tells you exactly what it changed.
 
 > [!CAUTION]
 > **This tool makes largely irreversible changes.** It deletes files permanently,
-> deletes user accounts, changes passwords, disables services, rewrites registry
-> and security policy, and uninstalls software. Run `--dry-run` first. Run it only
-> on images you can afford to lose.
+> deletes user accounts, changes passwords, disables services, rewrites the
+> registry and security policy (or `/etc` and systemd), and uninstalls software.
+> Run `--dry-run` first. Run it only on images you can afford to lose.
 
 ---
 
@@ -80,19 +81,25 @@ run log records exactly what it did and you can repeat it non-interactively.
 
 ## Requirements
 
-- Windows 10/11 or Windows Server 2016+
-- **Administrator privileges** — nearly everything needs them
-- Nothing to install — the shipped `pinnacle-cypat.exe` is self-contained and
-  carries no runtime. (Building from source needs [Rust](https://rustup.rs).)
-- Network access, if you want `--auto-readme` (the README lives on the web) or
-  software installation (Chocolatey)
+**Windows** — 10/11 or Server 2016+, run as **Administrator**. Nothing to
+install: the shipped `pinnacle-cypat.exe` is self-contained and carries no
+runtime.
+
+**Linux** — Debian or Ubuntu, run as **root**. Package management assumes `apt`;
+everything else works on any systemd distribution.
+
+Either way, building from source needs [Rust](https://rustup.rs), and
+`--auto-readme` or software installation needs network access.
 
 ---
 
 ## What it does
 
-Thirteen tasks. Each reads the current state, applies its changes, then re-reads
-the machine to verify.
+Each task reads the current state, applies its changes, then re-reads the machine
+to verify. The flags are the same on both platforms wherever the concept exists,
+so `--help` and a run log read the same way on either.
+
+### Windows — fifteen tasks
 
 | Task | Flag | What it does |
 |---|---|---|
@@ -103,12 +110,37 @@ the machine to verify.
 | Audit Policy | `-t` | All 9 audit categories to success+failure, 20 security registry values, PowerShell logging, event log sizing |
 | Firewall | `-f` | Enables all profiles, blocks 26 ports, disables risky rules, turns on logging |
 | Security Hardening | `-H` | 41 registry values — UAC, AutoRun, RDP, Defender, LSA, memory, browser |
+| Local Security Policy | `-g` | SMB signing, anonymous enumeration, logon banners, RDP encryption |
 | Prohibited Media | `-m` | Finds and permanently deletes media, games and hacking tools under `C:\Users` |
 | Software Management | `--software-management` | Removes prohibited software, installs required software, runs a Defender scan |
+| Software Updates | `--software-updates` | Updates installed applications via Chocolatey |
 | Shared Folders Audit | `--shared-folders` | Removes shares beyond `ADMIN$`, `C$`, `IPC$` |
 | Hosts File Audit | `--hosts-file` | Removes unauthorised `hosts` entries |
 | DNS Settings Audit | `--dns-settings` | Reports public resolvers (report only — never changes DNS) |
 | Scheduled Tasks Audit | `--scheduled-tasks` | Disables tasks matching suspicious keywords |
+
+### Linux — thirteen tasks
+
+| Task | Flag | What it does |
+|---|---|---|
+| Password Policy | `-p` | `pam_pwquality` complexity, `faillock` lockout, reports missing password history |
+| Account Permissions | `-a` | Locks passwordless accounts, applies ageing, reports duplicate uid 0 and service accounts with shells |
+| User Management | `-u` | Deletes unauthorised accounts (keeping home directories), fixes `sudo` membership, creates required users |
+| Service Management | `-s` | Masks 28 insecure units, protects the README's critical ones and the scoring engine |
+| Audit Policy | `-t` | Installs and enables `auditd` and `rsyslog`, writes 13 audit rules |
+| Firewall | `-f` | Enables `ufw` with default-deny inbound, opening only what the README needs |
+| Security Hardening | `-H` | 36 settings across `sysctl.d`, `sshd_config.d` and `login.defs` |
+| Prohibited Media | `-m` | Finds media under `/home` and `/root`; deletes only if the README prohibits it |
+| Software Updates | `--software-updates` | `apt upgrade`, then enables `unattended-upgrades` |
+| Software Management | `--software-management` | Purges prohibited packages, installs required ones |
+| Hosts File Audit | `--hosts-file` | Removes unauthorised `/etc/hosts` entries |
+| DNS Settings Audit | `--dns-settings` | Reports the resolvers in use, via `resolv.conf` and `resolvectl` |
+| Scheduled Tasks Audit | `--scheduled-tasks` | Reports suspicious jobs across all six cron locations |
+
+Three Linux findings are deliberately **reported and not fixed** — a second uid 0
+account, suspicious cron jobs, and the resolvers in use — because acting
+automatically on any of them is more likely to break the image than help it.
+Group Policy has no Linux equivalent, so there is no such task there.
 
 **Full detail on every one — why it exists, what it changes, how, and what it
 refuses to touch — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
@@ -154,6 +186,8 @@ address directly.
 
 ## Flags
 
+These are the same on both platforms:
+
 | Flag | Short | Effect |
 |---|---|---|
 | `--help` | `-h` | Show the flag table and exit |
@@ -164,20 +198,29 @@ address directly.
 | `--parse-readme` | | Show what the parser extracted, then exit (read-only) |
 | `--dry-run` | `-d` | Report what would change without changing it |
 | `--all` | | Run every task |
-| `--password-policy` | `-p` | Password and lockout policy |
-| `--account-permissions` | `-a` | Account permissions and group membership |
-| `--user-management` | `-u` | Create, remove and correct user accounts |
-| `--service-management` | `-s` | Enable required and disable insecure services |
-| `--audit-policy` | `-t` | Audit policy and security event logging |
-| `--firewall` | `-f` | Windows Firewall profiles and rules |
-| `--security-hardening` | `-H` | General security hardening |
-| `--media-scan` | `-m` | Find and remove prohibited media |
-| `--software-management` | | Remove prohibited and install required software |
-| `--shared-folders` | | Remove shares beyond `ADMIN$`, `C$`, `IPC$` |
-| `--hosts-file` | | Remove unauthorised hosts file entries |
-| `--dns-settings` | | Report public DNS resolvers |
-| `--scheduled-tasks` | | Disable suspicious scheduled tasks |
 | `--log <path>` | | Write the run log to `<path>` |
+
+The task flags come from the platform the binary was built for, and `--help`
+lists them under a `WINDOWS TASKS:` or `LINUX TASKS:` heading. Where the concept
+exists on both, the spelling matches:
+
+| Flag | Short | Windows | Linux |
+|---|---|---|---|
+| `--password-policy` | `-p` | ✓ | ✓ |
+| `--account-permissions` | `-a` | ✓ | ✓ |
+| `--user-management` | `-u` | ✓ | ✓ |
+| `--service-management` | `-s` | ✓ | ✓ |
+| `--audit-policy` | `-t` | ✓ | ✓ |
+| `--firewall` | `-f` | ✓ | ✓ |
+| `--security-hardening` | `-H` | ✓ | ✓ |
+| `--media-scan` | `-m` | ✓ | ✓ |
+| `--software-management` | | ✓ | ✓ |
+| `--software-updates` | | ✓ | ✓ |
+| `--hosts-file` | | ✓ | ✓ |
+| `--dns-settings` | | ✓ | ✓ |
+| `--scheduled-tasks` | | ✓ | ✓ |
+| `--group-policy` | `-g` | ✓ | — no equivalent |
+| `--shared-folders` | | ✓ | — |
 
 > [!NOTE]
 > `-h` is **help**. Security hardening is `-H`; `--security-hardening` is
@@ -230,19 +273,24 @@ from the command echo.
 
 ## Implementation
 
-One Rust program, `rust/`. A complete C# implementation lived alongside it until
-2026-08-23 and is now frozen under [`archive/csharp/`](archive/csharp/) — it
-still builds and passes its 202 tests, but it is not shipped and not kept in
-step. Keeping two implementations at parity meant every change landed twice and
-drift was silent; [the archive README](archive/csharp/README.md) has the full
-reasoning.
+One Rust program, `rust/`, built as a four-crate workspace: an OS-agnostic core,
+a crate per platform, and the binary. The README parser, the remediation ledger,
+the run log and the whole run pipeline live in the core and are identical on
+both platforms — adding Linux needed no change to any of them.
+
+A complete C# implementation lived alongside the Rust one until 2026-08-23 and is
+now frozen under [`archive/csharp/`](archive/csharp/) — it still builds and
+passes its 202 tests, but it is not shipped and not kept in step. Keeping two
+implementations at parity meant every change landed twice and drift was silent,
+which is also why the platform split is two crates rather than `#[cfg]` branches
+in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 
 ---
 
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 182 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 303 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
 
@@ -251,15 +299,19 @@ same on Windows. By hand:
 
 ```bash
 cd rust
-cargo test
-cargo build --release
+cargo test --workspace
+cargo build --release -p pinnacle-cypat
 ```
+
+The build targets whichever platform you are on, and includes only that
+platform's tasks — a Windows build carries no Linux code and vice versa.
 
 Cross-compiling the Windows binary from Linux needs the GNU target
 (`x86_64-pc-windows-msvc` requires Microsoft's linker) — `publish.sh` handles it.
-A Linux build never compiles the `#[cfg(windows)]` branches, so run
-`cargo clippy --target x86_64-pc-windows-gnu` after touching any of them; a clean
-`cargo test` on Linux proves nothing about those paths.
+A Linux host never compiles the `#[cfg(windows)]` branches, so run
+`cargo clippy --target x86_64-pc-windows-gnu -p pinnacle-windows -p pinnacle-cypat`
+after touching any of them; a clean `cargo test` on Linux proves nothing about
+those paths.
 
 Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
 
@@ -267,26 +319,36 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
 
 ## Project layout
 
+`rust/` is a Cargo workspace of four crates, split so that adding an operating
+system is additive rather than a set of `#[cfg]` branches through every task.
+
 ```
 PinnacleCyPat/
 ├── RUN.bat / RUN.ps1              Double-click launchers → the built-in menu
 ├── LICENSE                        Apache License 2.0
 ├── NOTICE                         Attribution, trademark, third-party components
 ├── rust/
-│   ├── src/
-│   │   ├── main.rs                Entry point, flag parsing, run pipeline
-│   │   ├── tui.rs                 Interactive menu
-│   │   ├── app_config.rs          README discovery, defaults, version
-│   │   ├── knowledge.rs           The tables: registry, packages, services
-│   │   ├── html.rs                HTML structure, via html5ever
-│   │   ├── readme_parser.rs       README prose -> ReadmeData
-│   │   ├── remediation.rs         Prove-and-record wrapper for every change
-│   │   ├── models/                Data models
-│   │   ├── tasks/                 The fourteen tasks
-│   │   └── native/                Win32 APIs (Windows only)
-│   └── tests/
-│       ├── corpus/                README fixtures — add real ones here
-│       └── snapshots/             What each fixture parses to
+│   └── crates/
+│       ├── core/                  pinnacle-core — nothing here names an OS
+│       │   ├── platform.rs        The seam: TaskSpec, Concurrency, Platform
+│       │   ├── task.rs            The Task trait
+│       │   ├── readme_parser.rs   README prose -> ReadmeData
+│       │   ├── remediation.rs     Prove-and-record wrapper for every change
+│       │   ├── run_log.rs         Transcript, diagnostics, remediation ledger
+│       │   ├── models/            Data models
+│       │   └── tests/corpus/      README fixtures — add real ones here
+│       ├── windows/               pinnacle-windows — the fifteen Windows tasks
+│       │   ├── native/            Win32 APIs (Windows only)
+│       │   ├── knowledge.rs       The tables: registry, packages, services
+│       │   └── *_ops.rs           Proved writes
+│       ├── linux/                 pinnacle-linux — the thirteen Linux tasks
+│       │   ├── file_ops.rs        Proved writes to /etc
+│       │   ├── systemd_ops.rs     Proved systemctl operations
+│       │   ├── user_ops.rs        /etc/passwd, shadow, group
+│       │   └── apt.rs             Package installs and upgrades
+│       └── cli/                   pinnacle-cypat — the binary
+│           ├── main.rs            Flag parsing and the run pipeline
+│           └── tui.rs             Interactive menu
 ├── archive/csharp/                The retired C# port, frozen
 ├── scripts/                       check.sh / check.ps1 / publish.sh
 └── docs/
@@ -295,6 +357,10 @@ PinnacleCyPat/
     ├── CLAUDE.md                  AI assistant instructions
     └── TASK_ANALYSIS.md           Task roadmap
 ```
+
+The CLI names no operating system: it reads the platform crate's task table,
+which is selected by one `cfg` at compile time. Adding a task is one row in that
+table, which is also what supplies its `--help` line and its menu entry.
 
 ---
 
@@ -328,5 +394,5 @@ or unusable. The entire risk is yours.
 
 - **Run `--dry-run` first**, every time
 - **Snapshot the VM** before applying
-- **Run as Administrator**, or most changes are silently refused
+- **Run as Administrator** (or root), or most changes are silently refused
 - **Never disable CCS Client** — it is the scoring engine (the tool protects it)

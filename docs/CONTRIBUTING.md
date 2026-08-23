@@ -13,7 +13,7 @@ Thank you for your interest in contributing to the PinnacleCyPat tool! This docu
 If you submit any suggestion, patch, code or other material relating to this project, you agree that:
 
 1. Your contribution is your original work, and you have the right to submit it
-2. You **assign to Maxwell McCormick all right, title and interest** in that material, as required by Section 5 of the [LICENSE](../LICENSE)
+2. It is licensed under Apache 2.0, as Section 5 of the [LICENSE](../LICENSE) provides, unless you state otherwise in writing
 3. You will be credited in the project's contributor list (if you wish)
 
 ## Table of Contents
@@ -69,23 +69,31 @@ committing; `check.ps1` is the same on Windows. By hand:
 
 ```bash
 cd rust
-cargo build
-cargo test
+cargo build --workspace
+cargo test --workspace
 ```
 
-> The Windows type-check in `check.sh` is not optional. A Linux build never
-> compiles the `#[cfg(windows)]` branches — which is the whole of `src/native`
-> plus several call sites — so a clean `cargo test` on Linux proves nothing
-> about them.
+`--workspace` matters: without it cargo builds only the crate whose directory
+you are in, so a change to `pinnacle-core` that breaks a platform crate goes
+unnoticed. Individual crates are addressable with `-p pinnacle-linux` and so on.
+
+> The Windows pass in `check.sh` is not optional. A Linux host builds
+> `pinnacle-core`, `pinnacle-linux` and the CLI in full, but checks
+> `pinnacle-windows` only against its non-Windows fallbacks — the whole of
+> `crates/windows/src/native` is `#[cfg(windows)]` and is never seen. A clean
+> `cargo test` on Linux proves nothing about it.
 
 ### Running
 
 ```bash
 cd rust
-cargo run -- --all --dry-run        # preview everything, change nothing
-cargo run -- --password-policy      # one task
-cargo run -- --parse-readme -r path/to/README.html   # read-only
+cargo run -p pinnacle-cypat -- --all --dry-run   # preview everything, change nothing
+cargo run -p pinnacle-cypat -- --password-policy # one task
+cargo run -p pinnacle-cypat -- --parse-readme -r path/to/README.html   # read-only
 ```
+
+The binary builds for whichever platform you are on and offers that platform's
+tasks. `--help` lists them under a `WINDOWS TASKS:` or `LINUX TASKS:` heading.
 
 ## Making Changes
 
@@ -122,15 +130,16 @@ All new features and bug fixes must include tests.
 ### Running tests
 
 ```bash
-./scripts/check.sh            # everything CI runs
-cargo test                    # just the suite
-cargo test group_members      # by name
-cargo test --test corpus_tests
+./scripts/check.sh                   # everything CI runs
+cargo test --workspace               # just the suite
+cargo test -p pinnacle-linux         # one crate
+cargo test group_members             # by name
+cargo test -p pinnacle-core --test corpus_tests
 ```
 
 ### The README corpus
 
-Parser changes go through `rust/tests/corpus/`: every fixture is parsed and the
+Parser changes go through `rust/crates/core/tests/corpus/`: every fixture is parsed and the
 whole result snapshotted, so a change that alters any of them shows as a diff.
 
 ```bash
@@ -216,10 +225,11 @@ worth more than the assertion itself — it is what stops the next person
 ```rust
 //! Module doc: what this file is for, and the failure that shaped it.
 
-use crate::command;          // 1. crate imports
-use crate::models::*;
-use async_trait::async_trait; // 2. external crates
-use std::time::Duration;      // 3. std
+use crate::file_ops;              // 1. this crate
+use pinnacle_core::models::*;     // 2. the core crate
+use pinnacle_core::task::Task;
+use async_trait::async_trait;     // 3. external crates
+use std::time::Duration;          // 4. std
 
 const MAX_RETRIES: u32 = 3;   // 4. constants
 
@@ -266,17 +276,20 @@ ui::markup_line(&format!("[green]✓ Removed: {}[/]", ui::escape(&program.name))
 
 ## Adding a task
 
+A task lives in a platform crate — `crates/windows` or `crates/linux` — and is
+described by exactly one row in that crate's `platform.rs`.
+
 ### Step 1: The task
 
-Create a file in `rust/src/tasks/` and register it in `rust/src/tasks/mod.rs`:
+Create a file in `crates/<platform>/src/tasks/` and register it in that
+directory's `mod.rs`:
 
 ```rust
 //! What this task does, and why it exists.
 
-use crate::impl_task_meta;
-use crate::models::{SystemInfo, TaskResult};
-use crate::tasks::Task;
-use crate::ui;
+use pinnacle_core::models::{SystemInfo, TaskResult};
+use pinnacle_core::task::Task;
+use pinnacle_core::{impl_task_meta, ui};
 use async_trait::async_trait;
 
 pub struct MyNewTask {
@@ -329,33 +342,39 @@ impl Task for MyNewTask {
 }
 ```
 
-### Step 2: The flag
+### Step 2: The row
 
-In `main.rs`, add it to the `FLAGS` table — the single source of truth for both
-the help text and the unknown-argument check, so a flag cannot be accepted
-without also being documented:
-
-```rust
-("--my-task", "-x", "What this task does"),
-```
-
-Then read it and register the task:
+Add one `TaskSpec` to the platform's `platform.rs`, positioned where a full run
+should execute it:
 
 ```rust
-let run_my_task = has_flag(&cli_args, &["--my-task", "-x"]);
-
-if run_my_task || run_all {
-    tasks.push(Box::new(MyNewTask::new()));
-}
+TaskSpec {
+    flag: "--my-task",
+    short: "-x",
+    help: "What this task does",          // --help
+    label: "My New Task",                 // the menu
+    detail: "what it changes, briefly",   // the menu
+    needs_readme: false,
+    concurrency: Sequential,
+    build: plain!(MyNewTask),             // or with_readme!(MyNewTask)
+},
 ```
 
-### Step 3: The menu
+That is the whole registration. The flag, the help text, the menu entry and the
+constructor all come from this row, so there is no way to add a task the CLI
+accepts but the menu does not offer — which used to be three separate lists,
+free to disagree, and they did.
 
-Add it to the task list in `rust/src/tui.rs`. A task reachable from the CLI but
-not the menu is invisible to anyone who double-clicks `RUN.bat`, which is most
-users.
+Two rules for the row:
 
-### Step 4: Tests
+- **`concurrency: Concurrent` only for a read-mostly audit over an area nothing
+  else touches.** Everything else contends for the same accounts, services and
+  configuration, where overlapping writes race.
+- **Match the other platform's spelling** if the concept exists there. If
+  Windows has `--password-policy` / `-p`, Linux uses the same. A test enforces
+  it.
+
+### Step 3: Tests
 
 ```rust
 #[tokio::test]
@@ -368,9 +387,11 @@ async fn my_new_task_dry_run_changes_nothing() {
 ```
 
 Test the decisions, not the plumbing. `should_have_correct_name_and_description`
-passes forever and catches nothing.
+passes forever and catches nothing. The tests worth writing are the ones about
+what the task *decides*: which accounts it considers unauthorised, which
+services it refuses to touch, what it does when the README is silent.
 
-### Step 5: Documentation
+### Step 4: Documentation
 
 1. `README.md` — the flag table and the task table
 2. `docs/ARCHITECTURE.md` — the detailed entry: why, what it changes, what it
@@ -389,15 +410,15 @@ If you have questions, feel free to:
 ### Your Contributions
 
 Contributions are governed by the [LICENSE](../LICENSE). By contributing, you:
-- Assign copyright in the contribution to Maxwell McCormick (Section 5)
+- License the contribution under Apache 2.0 (Section 5)
 - Confirm you have the right to do so
 - Agree to the Contributor License Agreement above
 
 ### Trademark and Forking
 
-"PinnacleCyPat" is an unregistered trademark of Maxwell McCormick.
+"PinnacleCyPat" is an unregistered trademark of Maxwell McCormick. No right to use the name or any associated branding is granted by the licence — see Section 6 of the [LICENSE](../LICENSE).
 
-**Forking, modifying and redistributing this project are prohibited** by the LICENSE, with or without renaming. No right to use the name or any associated branding is granted for any purpose.
+Forking, modifying and redistributing the code itself are permitted under Apache 2.0, provided you keep the copyright notice, the licence, and the NOTICE file, and state what you changed.
 
 ### Reporting Attribution Violations
 

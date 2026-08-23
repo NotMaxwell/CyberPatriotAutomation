@@ -1,18 +1,34 @@
 # =============================================================================
-# PinnacleCyPat (Rust port)
+# PinnacleCyPat (Rust) - workspace root
 # Author: Maxwell McCormick
 # Copyright 2026 Maxwell McCormick
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
-[package]
-name = "pinnacle-cypat"
+#
+# Four crates, split along the line that already existed in the code:
+#
+#   pinnacle-core     the OS-agnostic half - README parsing, the remediation
+#                     ledger, the run log, the models, the console. Builds and
+#                     is fully tested on any host.
+#   pinnacle-windows  Win32 bindings, the *_ops wrappers, the hardening tables
+#                     and the Windows tasks.
+#   pinnacle-linux    the same shape for Linux: /etc, systemd, PAM, apt.
+#   pinnacle-cypat    the binary. Selects a platform crate by cfg and knows
+#                     nothing else about either.
+#
+# The split is what makes a second operating system additive rather than a set
+# of `#[cfg]` branches threaded through every task. Two implementations kept in
+# one file drift silently; two crates cannot.
+[workspace]
+members = ["crates/core", "crates/windows", "crates/linux", "crates/cli"]
+resolver = "3"
+
+[workspace.package]
 # Bump with every behavioural change and record it in CHANGELOG.md. The run log
 # stamps this value in its header and file name so a log ties back to its build.
-version = "1.15.2"
+version = "1.16.0"
 edition = "2024"
-build = "build.rs"
 authors = ["Maxwell McCormick"]
-description = "Automates CyberPatriot competition security hardening tasks for Windows systems (Rust port)."
 license = "Apache-2.0"
 repository = "https://github.com/NotMaxwell/CyberPatriotAutomation"
 # Not published to crates.io: this is an application, not a library, and there is
@@ -20,15 +36,11 @@ repository = "https://github.com/NotMaxwell/CyberPatriotAutomation"
 # just no reason. Clone the repo or take a release binary.
 publish = false
 
-[[bin]]
-name = "pinnacle-cypat"
-path = "src/main.rs"
+[workspace.dependencies]
+pinnacle-core = { path = "crates/core" }
+pinnacle-windows = { path = "crates/windows" }
+pinnacle-linux = { path = "crates/linux" }
 
-[lib]
-name = "pinnacle_cypat"
-path = "src/lib.rs"
-
-[dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "fs"] }
 async-trait = "0.1"
 regex = "1"
@@ -40,49 +52,17 @@ indicatif = "0.17"
 owo-colors = "4"
 scraper = "0.27.0"
 ego-tree = "0.11.0"
-
-[target.'cfg(windows)'.dependencies]
-# Microsoft's official Windows bindings. Everything under `src/native` is built
-# on these rather than on parsing the output of `net`, `auditpol` and `netsh`,
-# mirroring how the C# port uses CsWin32. One binding crate for the whole
-# project, so there is a single place to add an API.
-windows = { version = "0.59", features = [
-    "Win32_Foundation",
-    # Console: turn on the virtual-terminal flag at startup so ANSI sequences
-    # render from the very first line of output.
-    "Win32_System_Console",
-    # Local accounts and password policy (netapi32).
-    "Win32_NetworkManagement_NetManagement",
-    # Audit policy, and the token privilege it requires (advapi32).
-    "Win32_Security",
-    "Win32_Security_Authentication_Identity",
-    "Win32_System_Threading",
-    # Windows Firewall configuration, which is a COM object.
-    "Win32_NetworkManagement_WindowsFirewall",
-    "Win32_System_Com",
-    # Service control manager.
-    "Win32_System_Services",
-    # Installed-software inventory from the uninstall keys.
-    "Win32_System_Registry",
-    # Shared folders. The Win32 metadata files NetShareEnum and NetShareDel
-    # under Storage rather than with the rest of netapi32.
-    "Win32_Storage_FileSystem",
-    # DNS server addresses per interface, from the IP helper API.
-    "Win32_NetworkManagement_IpHelper",
-    "Win32_NetworkManagement_Ndis",
-    "Win32_Networking_WinSock",
-] }
-
-[dev-dependencies]
 insta = "1.48.0"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
-# The shipping profile. Measured on the win-x64 cross build: 2.50 MB with cargo's
-# defaults for codegen-units and panic, 2.12 MB with the settings below.
+# The shipping profile, at the workspace root because cargo only honours it here.
+# Measured on the win-x64 cross build: 2.50 MB with cargo's defaults for
+# codegen-units and panic, 2.12 MB with the settings below.
 [profile.release]
-# Optimise across crate boundaries, not just within each crate.
+# Optimise across crate boundaries, not just within each crate. This matters
+# more now than it did as a single crate: without it the platform crate and the
+# core crate would not inline into each other.
 lto = true
-# One codegen unit lets LLVM see the whole crate at once. Slower to build and
+# One codegen unit lets LLVM see the whole program at once. Slower to build and
 # worth roughly 8% of the binary.
 codegen-units = 1
 # Optimise for size rather than speed. The run is dominated by process spawns,

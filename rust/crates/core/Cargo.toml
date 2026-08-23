@@ -1,0 +1,43 @@
+# =============================================================================
+# pinnacle-core - the OS-agnostic half of PinnacleCyPat
+# Copyright 2026 Maxwell McCormick
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
+[package]
+name = "pinnacle-core"
+description = "README parsing, the remediation ledger and the run log - the parts of PinnacleCyPat that do not depend on an operating system."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+# Stamps the compile date in as `PCP_BUILD_DATE`; `app_config` reads it.
+build = "build.rs"
+
+[lib]
+name = "pinnacle_core"
+path = "src/lib.rs"
+
+[dependencies]
+tokio.workspace = true
+async-trait.workspace = true
+regex.workspace = true
+html-escape.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+comfy-table.workspace = true
+indicatif.workspace = true
+owo-colors.workspace = true
+scraper.workspace = true
+ego-tree.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# Only for the one call in `ui::init` that turns on the console's
+# virtual-terminal flag. The rest of the Win32 surface lives in
+# `pinnacle-windows`, which is where a new binding belongs.
+windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
+
+[dev-dependencies]
+insta.workspace = true
+tokio = { workspace = true }

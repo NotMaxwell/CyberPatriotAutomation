@@ -16,7 +16,7 @@ if ! rustup target list --installed | grep -q "$target"; then
     exit 1
 fi
 
-cargo build --release --target "$target"
+cargo build --release -p pinnacle-cypat --target "$target"
 
 mkdir -p "$root/publish-win-x64"
 cp "target/$target/release/pinnacle-cypat.exe" "$root/publish-win-x64/"

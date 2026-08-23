@@ -12,11 +12,11 @@ cargo fmt --check
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "==> clippy" -ForegroundColor Cyan
-cargo clippy --all-targets -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host "==> test" -ForegroundColor Cyan
-cargo test
+cargo test --workspace
 if ($LASTEXITCODE -ne 0) { exit 1 }
 
 Write-Host ""

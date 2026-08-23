@@ -72,7 +72,7 @@
 
 > The corpus suite counts as two tests but covers five whole documents, and it
 > is the one to extend: `cargo test --test corpus_tests` re-parses every README
-> in `rust/tests/corpus/` and diffs the entire result against its snapshot.
+> in `rust/crates/core/tests/corpus/` and diffs the entire result against its snapshot.
 > Adding a real competition README there is the highest-value thing anyone can
 > do for the parser — it found two bugs on its first run.
 
