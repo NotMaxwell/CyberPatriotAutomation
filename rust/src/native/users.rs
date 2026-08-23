@@ -10,11 +10,11 @@
 //! status code.
 
 use super::{from_wide, to_wide};
-use windows::core::PCWSTR;
 use windows::Win32::NetworkManagement::NetManagement::{
-    NetApiBufferFree, NetUserDel, NetUserEnum, NetUserGetInfo, NetUserSetInfo,
-    FILTER_NORMAL_ACCOUNT, MAX_PREFERRED_LENGTH, USER_INFO_1, USER_INFO_3,
+    FILTER_NORMAL_ACCOUNT, MAX_PREFERRED_LENGTH, NetApiBufferFree, NetUserDel, NetUserEnum,
+    NetUserGetInfo, NetUserSetInfo, USER_INFO_1, USER_INFO_3,
 };
+use windows::core::PCWSTR;
 
 const NERR_SUCCESS: u32 = 0;
 

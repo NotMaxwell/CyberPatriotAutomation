@@ -21,7 +21,7 @@ mod suspicious_scheduled_tasks_audit;
 mod user_management;
 
 pub use base::{
-    is_group_member, local_group_members, parse_csv_line, parse_local_group_members, Task,
+    Task, is_group_member, local_group_members, parse_csv_line, parse_local_group_members,
 };
 
 pub use account_permissions::AccountPermissionsTask;
@@ -37,8 +37,8 @@ pub use service_management::ServiceManagementTask;
 pub use shared_folders_audit::SharedFoldersAuditTask;
 pub use software_management::SoftwareManagementTask;
 pub use software_update::{
-    parse_choco_outdated, parse_installed_software, AvailableUpdate, InstalledApp,
-    SoftwareUpdateTask,
+    AvailableUpdate, InstalledApp, SoftwareUpdateTask, parse_choco_outdated,
+    parse_installed_software,
 };
 pub use suspicious_scheduled_tasks_audit::SuspiciousScheduledTasksAuditTask;
 pub use user_management::UserManagementTask;

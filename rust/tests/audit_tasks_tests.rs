@@ -123,9 +123,11 @@ async fn group_policy_execute_should_succeed_when_dry_run() {
     assert!(result.success);
     assert!(result.message.contains("Don't display last user name"));
     assert!(result.message.contains("Require Ctrl+Alt+Del"));
-    assert!(result
-        .message
-        .contains("ICS (Internet Connection Sharing) disabled"));
+    assert!(
+        result
+            .message
+            .contains("ICS (Internet Connection Sharing) disabled")
+    );
     assert!(result.message.contains("Restrict anonymous access"));
 }
 

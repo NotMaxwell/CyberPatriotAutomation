@@ -8,13 +8,13 @@
 //! as an administrator.
 
 use super::{from_wide, to_wide};
-use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::NetworkManagement::NetManagement::{
+    LOCALGROUP_INFO_0, LOCALGROUP_MEMBERS_INFO_3, LOCALGROUP_USERS_INFO_0, MAX_PREFERRED_LENGTH,
     NetApiBufferFree, NetLocalGroupAdd, NetLocalGroupAddMembers, NetLocalGroupDelMembers,
     NetLocalGroupGetInfo, NetLocalGroupGetMembers, NetUserGetLocalGroups, NetUserModalsGet,
-    NetUserModalsSet, LOCALGROUP_INFO_0, LOCALGROUP_MEMBERS_INFO_3, LOCALGROUP_USERS_INFO_0,
-    MAX_PREFERRED_LENGTH, USER_MODALS_INFO_0, USER_MODALS_INFO_3,
+    NetUserModalsSet, USER_MODALS_INFO_0, USER_MODALS_INFO_3,
 };
+use windows::core::{PCWSTR, PWSTR};
 
 const NERR_SUCCESS: u32 = 0;
 
@@ -79,10 +79,10 @@ pub fn group_members(group: &str) -> Option<Vec<String>> {
         let entries = buffer as *const LOCALGROUP_MEMBERS_INFO_3;
         let mut members = Vec::with_capacity(read as usize);
         for index in 0..read as usize {
-            if let Some(name) = from_wide((*entries.add(index)).lgrmi3_domainandname.0) {
-                if !name.trim().is_empty() {
-                    members.push(name);
-                }
+            if let Some(name) = from_wide((*entries.add(index)).lgrmi3_domainandname.0)
+                && !name.trim().is_empty()
+            {
+                members.push(name);
             }
         }
 

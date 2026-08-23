@@ -120,10 +120,11 @@ async fn parse_inline_extracts_critical_services_including_ccs() {
 async fn parse_inline_extracts_scenario_and_guidelines() {
     let data = parse_inline().await;
     assert_eq!(data.scenario, "Secure the workstation.");
-    assert!(data
-        .guidelines
-        .iter()
-        .any(|g| g.contains("Read the README carefully")));
+    assert!(
+        data.guidelines
+            .iter()
+            .any(|g| g.contains("Read the README carefully"))
+    );
 }
 
 // OS detection has to survive however the author typed the name: markup in the
@@ -327,10 +328,12 @@ async fn parse_br_separated_user_list_extracts_users() {
 async fn parse_inline_does_not_flag_do_not_disable_as_prohibited() {
     let data = parse_inline().await;
     // "Do not disable the CCS Client service" must NOT add CCS to prohibited services.
-    assert!(!data
-        .prohibited_services
-        .iter()
-        .any(|s| s.to_lowercase().contains("ccs")));
+    assert!(
+        !data
+            .prohibited_services
+            .iter()
+            .any(|s| s.to_lowercase().contains("ccs"))
+    );
 }
 
 /// Parse an arbitrary HTML fragment through the real file-based entry point.

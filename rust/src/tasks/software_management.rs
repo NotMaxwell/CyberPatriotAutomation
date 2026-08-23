@@ -174,25 +174,24 @@ impl SoftwareManagementTask {
     ) -> Option<String> {
         // 1. Chocolatey, if it owns the package. It uninstalls silently and
         //    reports a real reason when it cannot.
-        if let Some(packages) = choco_packages {
-            if let Some(id) = software_matching::resolve_package_id(&software.name, PACKAGE_IDS) {
-                if packages.iter().any(|p| p.eq_ignore_ascii_case(&id)) {
-                    run_log::diagnostic(
-                        "software",
-                        &format!("{}: uninstalling through Chocolatey as {id}", software.name),
-                    );
-                    match chocolatey::uninstall(&id).await {
-                        None => return None,
-                        Some(reason) => run_log::diagnostic(
-                            "software",
-                            &format!(
-                                "{}: choco uninstall {id} failed ({reason}); \
+        if let Some(packages) = choco_packages
+            && let Some(id) = software_matching::resolve_package_id(&software.name, PACKAGE_IDS)
+            && packages.iter().any(|p| p.eq_ignore_ascii_case(&id))
+        {
+            run_log::diagnostic(
+                "software",
+                &format!("{}: uninstalling through Chocolatey as {id}", software.name),
+            );
+            match chocolatey::uninstall(&id).await {
+                None => return None,
+                Some(reason) => run_log::diagnostic(
+                    "software",
+                    &format!(
+                        "{}: choco uninstall {id} failed ({reason}); \
                                  falling back to the registered uninstall command",
-                                software.name
-                            ),
-                        ),
-                    }
-                }
+                        software.name
+                    ),
+                ),
             }
         }
 
@@ -367,7 +366,9 @@ impl Task for SoftwareManagementTask {
 
     async fn execute(&mut self) -> TaskResult {
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing software management changes (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing software management changes (no changes will be made)[/]",
+            );
             return TaskResult {
                 task_name: self.name.clone(),
                 success: true,
@@ -508,37 +509,33 @@ impl Task for SoftwareManagementTask {
         // codes. An uninstaller that exits 0 having shown a dialog nobody
         // answered, or that needs a reboot to finish, both report success.
         let mut survivors: Vec<String> = Vec::new();
-        if !to_remove.is_empty() {
-            if let Some(after) = Self::read_installed().await {
-                survivors = after
-                    .iter()
-                    .filter(|i| {
-                        self.prohibited_software
-                            .iter()
-                            .any(|p| software_matching::matches(&i.name, p))
-                    })
-                    .map(|i| i.name.clone())
-                    .collect();
-                for name in &survivors {
-                    run_log::diagnostic(
-                        "software",
-                        &format!("still present after removal: {name}"),
-                    );
-                    if !removal_failures.iter().any(|f| f.starts_with(name)) {
-                        removal_failures
-                            .push(format!("{name}: reported removed but still installed"));
-                        ui::markup_line(&format!(
-                            "[red]✗ {} is still installed after removal[/]",
-                            ui::escape(name)
-                        ));
-                    }
-                }
-                if !survivors.is_empty() {
-                    details.push(format!(
-                        "Still installed after removal: {}",
-                        survivors.join(", ")
+        if !to_remove.is_empty()
+            && let Some(after) = Self::read_installed().await
+        {
+            survivors = after
+                .iter()
+                .filter(|i| {
+                    self.prohibited_software
+                        .iter()
+                        .any(|p| software_matching::matches(&i.name, p))
+                })
+                .map(|i| i.name.clone())
+                .collect();
+            for name in &survivors {
+                run_log::diagnostic("software", &format!("still present after removal: {name}"));
+                if !removal_failures.iter().any(|f| f.starts_with(name)) {
+                    removal_failures.push(format!("{name}: reported removed but still installed"));
+                    ui::markup_line(&format!(
+                        "[red]✗ {} is still installed after removal[/]",
+                        ui::escape(name)
                     ));
                 }
+            }
+            if !survivors.is_empty() {
+                details.push(format!(
+                    "Still installed after removal: {}",
+                    survivors.join(", ")
+                ));
             }
         }
         // Install required software through Chocolatey, bootstrapping it if

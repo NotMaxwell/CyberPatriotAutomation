@@ -10,6 +10,35 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.15.2
+
+### Changed
+
+- **Migrated to the Rust 2024 edition.** `cargo fix --edition` had nothing to
+  rewrite - the code was already compatible - and the corpus snapshots are
+  byte-identical afterwards, so parser behaviour is unchanged. The toolchain was
+  already current (1.98.0); the edition was the part left behind.
+
+- **Nested `if let` collapsed into let-chains**, which the 2024 edition
+  stabilises. 27 nested `if` statements across 23 files, in the parser, the
+  tasks and the native layer. The line count barely moves - the win is depth,
+  not length. The parser's actionable-item classification went from four levels
+  of nesting to a flat condition:
+
+  ```rust
+  if contains_user_creation_pattern(&lower)
+      && let Some(item) = parse_user_creation_item(&paragraph_text)
+      && !is_duplicate_action_item(data, &item)
+  {
+  ```
+
+  Three of those sites are `#[cfg(windows)]` and needed the migration run
+  against the Windows target as well - a Linux `cargo fix` never compiles them.
+
+  No `unsafe_op_in_unsafe_fn` breakage, which 2024 makes deny-by-default: the
+  native layer already used explicit `unsafe` blocks rather than relying on the
+  enclosing `unsafe fn`.
+
 ## 1.15.1
 
 ### Changed

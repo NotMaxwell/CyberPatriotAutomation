@@ -523,9 +523,11 @@ mod tests {
                 "{spelling} does not resolve to TermService"
             );
         }
-        assert!(SERVICE_NAME_MAP
-            .iter()
-            .any(|(d, s)| *d == "CCS Client" && *s == "CCSClient"));
+        assert!(
+            SERVICE_NAME_MAP
+                .iter()
+                .any(|(d, s)| *d == "CCS Client" && *s == "CCSClient")
+        );
     }
 
     #[test]

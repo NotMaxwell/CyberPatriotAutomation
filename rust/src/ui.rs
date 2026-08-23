@@ -20,8 +20,8 @@ pub fn init() {
     #[cfg(windows)]
     {
         use windows::Win32::System::Console::{
-            GetConsoleMode, GetStdHandle, SetConsoleMode, CONSOLE_MODE,
-            ENABLE_VIRTUAL_TERMINAL_PROCESSING, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+            CONSOLE_MODE, ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle,
+            STD_ERROR_HANDLE, STD_OUTPUT_HANDLE, SetConsoleMode,
         };
 
         // SAFETY: these are simple console-handle queries. A failure at any step

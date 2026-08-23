@@ -47,14 +47,16 @@ pub(crate) fn to_wide(value: &str) -> Vec<u16> {
 /// `ptr` must be null or point to a null-terminated UTF-16 string.
 #[cfg(windows)]
 pub(crate) unsafe fn from_wide(ptr: *const u16) -> Option<String> {
-    if ptr.is_null() {
-        return None;
+    unsafe {
+        if ptr.is_null() {
+            return None;
+        }
+        let mut len = 0usize;
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(
+            ptr, len,
+        )))
     }
-    let mut len = 0usize;
-    while *ptr.add(len) != 0 {
-        len += 1;
-    }
-    Some(String::from_utf16_lossy(std::slice::from_raw_parts(
-        ptr, len,
-    )))
 }

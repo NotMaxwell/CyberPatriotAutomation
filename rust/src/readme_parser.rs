@@ -225,14 +225,14 @@ fn parse_user_block(content: &str, data: &mut ReadmeData) {
         }
 
         if lower.starts_with("password:") || lower.starts_with("password :") {
-            if let Some((is_admin, idx)) = current {
-                if let Some(colon) = line.find(':') {
-                    let password = line[colon + 1..].trim().to_string();
-                    if is_admin {
-                        data.administrators[idx].password = Some(password);
-                    } else {
-                        data.users[idx].password = Some(password);
-                    }
+            if let Some((is_admin, idx)) = current
+                && let Some(colon) = line.find(':')
+            {
+                let password = line[colon + 1..].trim().to_string();
+                if is_admin {
+                    data.administrators[idx].password = Some(password);
+                } else {
+                    data.users[idx].password = Some(password);
                 }
             }
             continue;
@@ -698,56 +698,49 @@ fn parse_actionable_items(content: &str, data: &mut ReadmeData) {
         }
         let lower = paragraph_text.to_lowercase();
 
-        if contains_user_creation_pattern(&lower) {
-            if let Some(item) = parse_user_creation_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    if let Some(username) = item.details.get("Username") {
-                        if !data
-                            .users_to_create
-                            .iter()
-                            .any(|u| u.eq_ignore_ascii_case(username))
-                        {
-                            data.users_to_create.push(username.clone());
-                        }
-                    }
-                    data.actionable_items.push(item);
-                }
+        if contains_user_creation_pattern(&lower)
+            && let Some(item) = parse_user_creation_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            if let Some(username) = item.details.get("Username")
+                && !data
+                    .users_to_create
+                    .iter()
+                    .any(|u| u.eq_ignore_ascii_case(username))
+            {
+                data.users_to_create.push(username.clone());
             }
+            data.actionable_items.push(item);
         }
-        if contains_group_pattern(&lower) {
-            if let Some(item) = parse_group_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    data.actionable_items.push(item);
-                }
-            }
+        if contains_group_pattern(&lower)
+            && let Some(item) = parse_group_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            data.actionable_items.push(item);
         }
-        if contains_service_pattern(&lower) {
-            if let Some(item) = parse_service_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    data.actionable_items.push(item);
-                }
-            }
+        if contains_service_pattern(&lower)
+            && let Some(item) = parse_service_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            data.actionable_items.push(item);
         }
-        if contains_software_pattern(&lower) {
-            if let Some(item) = parse_software_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    data.actionable_items.push(item);
-                }
-            }
+        if contains_software_pattern(&lower)
+            && let Some(item) = parse_software_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            data.actionable_items.push(item);
         }
-        if contains_security_policy_pattern(&lower) {
-            if let Some(item) = parse_security_policy_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    data.actionable_items.push(item);
-                }
-            }
+        if contains_security_policy_pattern(&lower)
+            && let Some(item) = parse_security_policy_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            data.actionable_items.push(item);
         }
-        if contains_file_operation_pattern(&lower) {
-            if let Some(item) = parse_file_operation_item(&paragraph_text) {
-                if !is_duplicate_action_item(data, &item) {
-                    data.actionable_items.push(item);
-                }
-            }
+        if contains_file_operation_pattern(&lower)
+            && let Some(item) = parse_file_operation_item(&paragraph_text)
+            && !is_duplicate_action_item(data, &item)
+        {
+            data.actionable_items.push(item);
         }
     }
 }

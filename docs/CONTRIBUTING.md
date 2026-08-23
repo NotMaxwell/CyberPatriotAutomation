@@ -51,7 +51,8 @@ If you submit any suggestion, patch, code or other material relating to this pro
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs) (2021 edition, stable)
+- [Rust](https://rustup.rs) — stable, 1.88 or newer (the 2024 edition and
+  let-chains)
 - Git
 - For the Windows binary from a Linux host: `rustup target add
   x86_64-pc-windows-gnu` and `mingw-w64`
@@ -202,7 +203,9 @@ worth more than the assertion itself — it is what stops the next person
 
 ### General
 
-- Rust 2021; `cargo fmt` and `clippy -D warnings` both gate the build
+- Rust 2024; `cargo fmt` and `clippy -D warnings` both gate the build
+- Prefer a let-chain (`if let Some(x) = a && x.ok()`) to nested `if let`;
+  clippy will tell you where
 - Comments explain *why*, and name the failure that motivated the code
 - Meaningful names for variables, functions and types
 - Small, focused functions

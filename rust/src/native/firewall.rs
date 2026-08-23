@@ -5,15 +5,15 @@
 //! nothing here depends on the display language. It also replaces a PowerShell
 //! launch per call, which dominated the runtime of the firewall task.
 
-use windows::core::GUID;
 use windows::Win32::Foundation::{VARIANT_FALSE, VARIANT_TRUE};
 use windows::Win32::NetworkManagement::WindowsFirewall::{
-    INetFwPolicy2, NET_FW_ACTION_ALLOW, NET_FW_ACTION_BLOCK, NET_FW_PROFILE2_DOMAIN,
-    NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC, NET_FW_PROFILE_TYPE2,
+    INetFwPolicy2, NET_FW_ACTION_ALLOW, NET_FW_ACTION_BLOCK, NET_FW_PROFILE_TYPE2,
+    NET_FW_PROFILE2_DOMAIN, NET_FW_PROFILE2_PRIVATE, NET_FW_PROFILE2_PUBLIC,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
 };
+use windows::core::GUID;
 
 /// CLSID of the NetFwPolicy2 coclass (hnetcfg.dll).
 const NET_FW_POLICY2_CLSID: GUID = GUID::from_u128(0xe2b3c97f_6ae1_41ac_817a_f6f92166d7dd);

@@ -13,12 +13,12 @@
 
 use super::{from_wide, to_wide};
 use std::collections::BTreeMap;
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER,
-    HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE, RegCloseKey,
+    RegEnumKeyExW, RegOpenKeyExW, RegQueryValueExW,
 };
+use windows::core::PCWSTR;
 
 const UNINSTALL: &str = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
 const UNINSTALL_WOW: &str = r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall";

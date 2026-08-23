@@ -67,17 +67,17 @@ impl PasswordPolicyTask {
         )
         .await;
         if sec_success {
-            if let Ok(cfg_output) = std::fs::read_to_string(&cfg_path) {
-                if cfg_output.contains("PasswordComplexity") {
-                    // The exported value is written as "PasswordComplexity = 1";
-                    // tolerate any surrounding whitespace.
-                    policy.complexity_enabled = cfg_output
-                        .lines()
-                        .filter_map(|l| l.split_once('='))
-                        .any(|(k, v)| {
-                            k.trim().eq_ignore_ascii_case("PasswordComplexity") && v.trim() == "1"
-                        });
-                }
+            if let Ok(cfg_output) = std::fs::read_to_string(&cfg_path)
+                && cfg_output.contains("PasswordComplexity")
+            {
+                // The exported value is written as "PasswordComplexity = 1";
+                // tolerate any surrounding whitespace.
+                policy.complexity_enabled = cfg_output
+                    .lines()
+                    .filter_map(|l| l.split_once('='))
+                    .any(|(k, v)| {
+                        k.trim().eq_ignore_ascii_case("PasswordComplexity") && v.trim() == "1"
+                    });
             }
             let _ = std::fs::remove_file(&cfg_path);
         }

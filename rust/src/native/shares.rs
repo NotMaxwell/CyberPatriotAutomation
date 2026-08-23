@@ -8,8 +8,8 @@
 //! `NetShareDel` takes no interest in open handles and returns a status.
 
 use super::{from_wide, to_wide};
+use windows::Win32::NetworkManagement::NetManagement::{MAX_PREFERRED_LENGTH, NetApiBufferFree};
 use windows::core::PCWSTR;
-use windows::Win32::NetworkManagement::NetManagement::{NetApiBufferFree, MAX_PREFERRED_LENGTH};
 // The share APIs sit under Storage::FileSystem rather than with the rest of
 // netapi32, which is where the Win32 metadata puts them.
 use windows::Win32::Storage::FileSystem::{NetShareDel, NetShareEnum, SHARE_INFO_502};
@@ -52,10 +52,10 @@ pub fn enumerate() -> Option<Vec<String>> {
         let entries = buffer as *const SHARE_INFO_502;
         let mut shares = Vec::with_capacity(read as usize);
         for index in 0..read as usize {
-            if let Some(name) = from_wide((*entries.add(index)).shi502_netname.0) {
-                if !name.trim().is_empty() {
-                    shares.push(name);
-                }
+            if let Some(name) = from_wide((*entries.add(index)).shi502_netname.0)
+                && !name.trim().is_empty()
+            {
+                shares.push(name);
             }
         }
 

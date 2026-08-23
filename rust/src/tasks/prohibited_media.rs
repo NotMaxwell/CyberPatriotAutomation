@@ -151,10 +151,10 @@ impl ProhibitedMediaTask {
             };
 
             if metadata.is_file() {
-                if let Some(file) = to_found_file(&entry_path, &metadata) {
-                    if self.is_prohibited_file(&file) {
-                        self.found_files.push(file);
-                    }
+                if let Some(file) = to_found_file(&entry_path, &metadata)
+                    && self.is_prohibited_file(&file)
+                {
+                    self.found_files.push(file);
                 }
             } else if metadata.is_dir() {
                 if is_hidden_or_system(&entry_path, &metadata) {

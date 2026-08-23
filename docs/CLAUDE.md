@@ -51,7 +51,7 @@ rust/
 ## Coding Standards
 
 ### General
-- Rust 2021. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` both
+- Rust 2024. `cargo fmt` and `cargo clippy --all-targets -- -D warnings` both
   gate the build; `./scripts/check.sh` runs everything CI does.
 - `async`/`await` for all I/O
 - Comments explain *why*, and name the failure that motivated the code. A

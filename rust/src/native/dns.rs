@@ -11,7 +11,7 @@ use super::from_wide;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use windows::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetAdaptersAddresses, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST,
+    GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_MULTICAST, GAA_FLAG_SKIP_UNICAST, GetAdaptersAddresses,
     IP_ADAPTER_ADDRESSES_LH,
 };
 use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
@@ -80,20 +80,22 @@ pub fn servers() -> Option<Vec<(String, IpAddr)>> {
 /// # Safety
 /// `raw` must be null or point to a `SOCKADDR` whose family field is valid.
 unsafe fn to_ip(raw: *const windows::Win32::Networking::WinSock::SOCKADDR) -> Option<IpAddr> {
-    if raw.is_null() {
-        return None;
-    }
-    match (*raw).sa_family {
-        AF_INET => {
-            let v4 = &*(raw as *const SOCKADDR_IN);
-            Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(
-                v4.sin_addr.S_un.S_addr,
-            ))))
+    unsafe {
+        if raw.is_null() {
+            return None;
         }
-        AF_INET6 => {
-            let v6 = &*(raw as *const SOCKADDR_IN6);
-            Some(IpAddr::V6(Ipv6Addr::from(v6.sin6_addr.u.Byte)))
+        match (*raw).sa_family {
+            AF_INET => {
+                let v4 = &*(raw as *const SOCKADDR_IN);
+                Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(
+                    v4.sin_addr.S_un.S_addr,
+                ))))
+            }
+            AF_INET6 => {
+                let v6 = &*(raw as *const SOCKADDR_IN6);
+                Some(IpAddr::V6(Ipv6Addr::from(v6.sin6_addr.u.Byte)))
+            }
+            _ => None,
         }
-        _ => None,
     }
 }

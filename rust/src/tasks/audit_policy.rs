@@ -685,21 +685,21 @@ impl Task for AuditPolicyTask {
         ];
         for category in categories {
             #[cfg(windows)]
-            if let Some(guid) = crate::native::audit_policy::category_guid(category) {
-                if let Some(states) = crate::native::audit_policy::query(&guid) {
-                    let unaudited = states.iter().filter(|s| s.is_unaudited()).count();
-                    if unaudited == 0 {
-                        ui::markup_line(&format!(
-                            "[green]✓ {category}: Success and Failure auditing enabled[/]"
-                        ));
-                    } else {
-                        ui::markup_line(&format!(
-                            "[red]✗ {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
-                        ));
-                        all_good = false;
-                    }
-                    continue;
+            if let Some(guid) = crate::native::audit_policy::category_guid(category)
+                && let Some(states) = crate::native::audit_policy::query(&guid)
+            {
+                let unaudited = states.iter().filter(|s| s.is_unaudited()).count();
+                if unaudited == 0 {
+                    ui::markup_line(&format!(
+                        "[green]✓ {category}: Success and Failure auditing enabled[/]"
+                    ));
+                } else {
+                    ui::markup_line(&format!(
+                        "[red]✗ {category}: {unaudited} subcategory(ies) still set to No Auditing[/]"
+                    ));
+                    all_good = false;
                 }
+                continue;
             }
 
             let (success, output, _e) =

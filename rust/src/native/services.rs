@@ -9,15 +9,15 @@
 //! prompts, and every failure carries its Win32 error.
 
 use super::to_wide;
-use windows::core::PCWSTR;
 use windows::Win32::System::Services::{
-    ChangeServiceConfigW, CloseServiceHandle, ControlService, EnumDependentServicesW,
-    EnumServicesStatusExW, OpenSCManagerW, OpenServiceW, QueryServiceConfigW, QueryServiceStatusEx,
-    StartServiceW, ENUM_SERVICE_STATE, ENUM_SERVICE_STATUSW, ENUM_SERVICE_STATUS_PROCESSW,
-    ENUM_SERVICE_TYPE, QUERY_SERVICE_CONFIGW, SC_ENUM_PROCESS_INFO, SC_HANDLE,
+    ChangeServiceConfigW, CloseServiceHandle, ControlService, ENUM_SERVICE_STATE,
+    ENUM_SERVICE_STATUS_PROCESSW, ENUM_SERVICE_STATUSW, ENUM_SERVICE_TYPE, EnumDependentServicesW,
+    EnumServicesStatusExW, OpenSCManagerW, OpenServiceW, QUERY_SERVICE_CONFIGW,
+    QueryServiceConfigW, QueryServiceStatusEx, SC_ENUM_PROCESS_INFO, SC_HANDLE,
     SC_STATUS_PROCESS_INFO, SERVICE_AUTO_START, SERVICE_DISABLED, SERVICE_ERROR, SERVICE_RUNNING,
-    SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
+    SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOPPED, StartServiceW,
 };
+use windows::core::PCWSTR;
 
 const SC_MANAGER_CONNECT: u32 = 0x0001;
 const SC_MANAGER_ENUMERATE_SERVICE: u32 = 0x0004;

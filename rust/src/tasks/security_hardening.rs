@@ -323,7 +323,9 @@ impl Task for SecurityHardeningTask {
         let mut issues: Vec<String> = Vec::new();
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing security hardening changes (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing security hardening changes (no changes will be made)[/]",
+            );
             result.message = "DRY RUN: Security hardening changes previewed.".to_string();
             return result;
         }

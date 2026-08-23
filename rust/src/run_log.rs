@@ -16,8 +16,8 @@
 use crate::models::{FixOutcome, FixRecord};
 use chrono::Local;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Timestamped lines captured so far, in order.
 static ENTRIES: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -384,10 +384,10 @@ pub fn default_log_path() -> PathBuf {
 
 /// Write the log to `path`, creating parent directories as needed.
 pub fn write_to(path: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
     }
     let mut body = entries().join("\r\n");
     body.push_str("\r\n");

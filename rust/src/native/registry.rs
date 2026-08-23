@@ -8,13 +8,13 @@
 //! for the 64-bit view explicitly and return the Win32 status.
 
 use super::{from_wide, to_wide};
-use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
     HKEY, HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, HKEY_USERS, KEY_READ,
     KEY_WOW64_64KEY, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ, REG_VALUE_TYPE,
+    RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
 };
+use windows::core::PCWSTR;
 
 /// Split `HKLM\Path\To\Key` into its hive and remainder, accepting the long and
 /// short spellings `reg.exe` accepts.

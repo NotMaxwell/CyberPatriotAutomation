@@ -125,7 +125,7 @@ alongside it until 2026-08-23 and is now frozen under
 |---|---|---|
 | Location | `rust/` | `archive/csharp/` |
 | Version | 1.15.0 | 1.8.0, frozen |
-| Framework | Rust 2021 | .NET 10 |
+| Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |

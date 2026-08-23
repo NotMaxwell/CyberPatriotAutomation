@@ -96,24 +96,24 @@ impl AccountPermissionsTask {
             .iter()
             .find(|a| a.username.eq_ignore_ascii_case("Guest"));
 
-        if let Some(guest) = guest {
-            if guest.is_enabled {
-                ui::markup_line("[yellow]Disabling Guest account...[/]");
-                match account_ops::set_enabled("Guest", false).await {
-                    Ok(()) => {
-                        fixes.push("Disabled Guest account".to_string());
-                        ui::markup_line("[green]✓ Guest account disabled[/]");
-                    }
-                    Err(e) => {
-                        issues.push(format!("Failed to disable Guest account: {e}"));
-                        ui::markup_line(&format!(
-                            "[red]✗ Failed to disable Guest account: {}[/]",
-                            ui::escape(&e)
-                        ));
-                    }
+        if let Some(guest) = guest
+            && guest.is_enabled
+        {
+            ui::markup_line("[yellow]Disabling Guest account...[/]");
+            match account_ops::set_enabled("Guest", false).await {
+                Ok(()) => {
+                    fixes.push("Disabled Guest account".to_string());
+                    ui::markup_line("[green]✓ Guest account disabled[/]");
                 }
-                return (fixes, issues);
+                Err(e) => {
+                    issues.push(format!("Failed to disable Guest account: {e}"));
+                    ui::markup_line(&format!(
+                        "[red]✗ Failed to disable Guest account: {}[/]",
+                        ui::escape(&e)
+                    ));
+                }
             }
+            return (fixes, issues);
         }
         ui::markup_line("[green]✓ Guest account is already disabled[/]");
         (fixes, issues)
@@ -383,7 +383,9 @@ impl Task for AccountPermissionsTask {
         // the Guest account and rewrote password-expiry flags - the one mode in
         // which the tool promises to change nothing.
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing account permission changes (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing account permission changes (no changes will be made)[/]",
+            );
 
             let guest_enabled = self
                 .accounts
@@ -469,11 +471,10 @@ impl Task for AccountPermissionsTask {
         if let Some(guest) = accounts
             .iter()
             .find(|a| a.username.eq_ignore_ascii_case("Guest"))
+            && guest.is_enabled
         {
-            if guest.is_enabled {
-                ui::markup_line("[red]✗ Guest account is still enabled[/]");
-                all_good = false;
-            }
+            ui::markup_line("[red]✗ Guest account is still enabled[/]");
+            all_good = false;
         }
 
         // Apply the same exclusion `enforce_password_required` uses. Without it,

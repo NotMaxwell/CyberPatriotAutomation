@@ -56,18 +56,18 @@ where
     }
 
     let before = read_state().await;
-    if let Some(state) = &before {
-        if is_compliant(state) {
-            run_log::record_fix(
-                target,
-                intent,
-                before.clone(),
-                "nothing - already in the wanted state",
-                FixOutcome::AlreadyCompliant,
-                &format!("read before acting: {state}"),
-            );
-            return Ok(());
-        }
+    if let Some(state) = &before
+        && is_compliant(state)
+    {
+        run_log::record_fix(
+            target,
+            intent,
+            before.clone(),
+            "nothing - already in the wanted state",
+            FixOutcome::AlreadyCompliant,
+            &format!("read before acting: {state}"),
+        );
+        return Ok(());
     }
 
     let result = apply_write().await;

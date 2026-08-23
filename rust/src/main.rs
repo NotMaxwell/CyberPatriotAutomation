@@ -709,17 +709,17 @@ fn display_summary(results: &[TaskResult]) {
             format!("[dim]{}[/]", result.executed_at.format("%H:%M:%S")),
         ]);
 
-        if let Some(details) = &result.error_details {
-            if !details.is_empty() {
-                table.add_row([
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                    format!("[dim italic]{}[/]", ui::escape(details)),
-                    String::new(),
-                ]);
-            }
+        if let Some(details) = &result.error_details
+            && !details.is_empty()
+        {
+            table.add_row([
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                format!("[dim italic]{}[/]", ui::escape(details)),
+                String::new(),
+            ]);
         }
     }
 

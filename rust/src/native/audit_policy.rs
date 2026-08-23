@@ -11,17 +11,17 @@
 //! nothing here depends on the console language.
 
 use super::from_wide;
-use windows::core::{GUID, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_NOT_ALL_ASSIGNED, HANDLE};
 use windows::Win32::Security::Authentication::Identity::{
-    AuditEnumerateSubCategories, AuditFree, AuditLookupSubCategoryNameW, AuditQuerySystemPolicy,
-    AuditSetSystemPolicy, AUDIT_POLICY_INFORMATION,
+    AUDIT_POLICY_INFORMATION, AuditEnumerateSubCategories, AuditFree, AuditLookupSubCategoryNameW,
+    AuditQuerySystemPolicy, AuditSetSystemPolicy,
 };
 use windows::Win32::Security::{
-    AdjustTokenPrivileges, LookupPrivilegeValueW, LUID_AND_ATTRIBUTES, SE_PRIVILEGE_ENABLED,
+    AdjustTokenPrivileges, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW, SE_PRIVILEGE_ENABLED,
     TOKEN_ADJUST_PRIVILEGES, TOKEN_PRIVILEGES, TOKEN_QUERY,
 };
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows::core::{GUID, PCWSTR, PWSTR};
 
 const POLICY_AUDIT_EVENT_SUCCESS: u32 = 0x1;
 const POLICY_AUDIT_EVENT_FAILURE: u32 = 0x2;
