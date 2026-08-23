@@ -35,7 +35,13 @@ public enum NativeServiceState
 public static class NativeServices
 {
     private const uint SC_MANAGER_CONNECT = 0x0001;
+    private const uint SC_MANAGER_ENUMERATE_SERVICE = 0x0004;
+    private const uint SERVICE_QUERY_CONFIG = 0x0001;
     private const uint SERVICE_QUERY_STATUS = 0x0004;
+
+    /// <summary>Every service type and every state, for the bulk enumeration.</summary>
+    private const uint SERVICE_TYPE_ALL = 0x0000003F;
+    private const uint SERVICE_STATE_ALL = 0x00000003;
     private const uint SERVICE_ENUMERATE_DEPENDENTS = 0x0008;
     private const uint SERVICE_START = 0x0010;
     private const uint SERVICE_STOP = 0x0020;
@@ -260,6 +266,120 @@ public static class NativeServices
         )
             ? null
             : $"could not set the start type of {name} ({LastError()})";
+    }
+
+    /// <summary>
+    /// Is a service configured as disabled? Null when the service is not
+    /// installed or its configuration could not be read.
+    /// </summary>
+    /// <remarks>
+    /// Replaces parsing <c>sc qc</c>, which prints the start type as a localised
+    /// word ("DISABLED") next to its number.
+    /// </remarks>
+    public static unsafe bool? IsDisabled(string name)
+    {
+        using var manager = PInvoke.OpenSCManager(
+            (string?)null!,
+            (string?)null!,
+            SC_MANAGER_CONNECT
+        );
+        if (manager.IsInvalid)
+            return null;
+
+        using var service = PInvoke.OpenService(manager, name, SERVICE_QUERY_CONFIG);
+        if (service.IsInvalid)
+            return null;
+
+        // Sizing call: this is expected to fail with the required size.
+        PInvoke.QueryServiceConfig(service, null, 0, out var needed);
+        if (needed == 0)
+            return null;
+
+        var buffer = new byte[needed];
+        fixed (byte* raw = buffer)
+        {
+            if (!PInvoke.QueryServiceConfig(service, (QUERY_SERVICE_CONFIGW*)raw, needed, out _))
+                return null;
+
+            return ((QUERY_SERVICE_CONFIGW*)raw)->dwStartType
+                == SERVICE_START_TYPE.SERVICE_DISABLED;
+        }
+    }
+
+    /// <summary>
+    /// Every installed service, keyed by name, with what it is doing. Returns
+    /// null when the enumeration fails, so callers can tell "no services" apart
+    /// from "could not read the service list".
+    /// </summary>
+    /// <remarks>
+    /// Replaces one <c>Get-Service | ConvertTo-Csv</c> and the CSV parser over
+    /// its output, which reported an English status word.
+    /// </remarks>
+    public static unsafe Dictionary<string, NativeServiceState>? EnumerateStates()
+    {
+        using var manager = PInvoke.OpenSCManager(
+            (string?)null!,
+            (string?)null!,
+            SC_MANAGER_ENUMERATE_SERVICE
+        );
+        if (manager.IsInvalid)
+            return null;
+
+        // Sizing call: this is expected to fail with the required size.
+        PInvoke.EnumServicesStatusEx(
+            manager,
+            SC_ENUM_TYPE.SC_ENUM_PROCESS_INFO,
+            (ENUM_SERVICE_TYPE)SERVICE_TYPE_ALL,
+            (ENUM_SERVICE_STATE)SERVICE_STATE_ALL,
+            null,
+            0,
+            out var needed,
+            out _,
+            null,
+            (string?)null!
+        );
+        if (needed == 0)
+            return null;
+
+        var buffer = new byte[needed];
+        fixed (byte* raw = buffer)
+        {
+            if (
+                !PInvoke.EnumServicesStatusEx(
+                    manager,
+                    SC_ENUM_TYPE.SC_ENUM_PROCESS_INFO,
+                    (ENUM_SERVICE_TYPE)SERVICE_TYPE_ALL,
+                    (ENUM_SERVICE_STATE)SERVICE_STATE_ALL,
+                    raw,
+                    needed,
+                    out _,
+                    out var returned,
+                    null,
+                    (string?)null!
+                )
+            )
+                return null;
+
+            var states = new Dictionary<string, NativeServiceState>(
+                (int)returned,
+                StringComparer.OrdinalIgnoreCase
+            );
+            var entries = (ENUM_SERVICE_STATUS_PROCESSW*)raw;
+            for (uint i = 0; i < returned; i++)
+            {
+                var serviceName = entries[i].lpServiceName.ToString();
+                if (string.IsNullOrEmpty(serviceName))
+                    continue;
+
+                states[serviceName] = entries[i].ServiceStatusProcess.dwCurrentState switch
+                {
+                    SERVICE_STATUS_CURRENT_STATE.SERVICE_STOPPED => NativeServiceState.Stopped,
+                    SERVICE_STATUS_CURRENT_STATE.SERVICE_RUNNING => NativeServiceState.Running,
+                    _ => NativeServiceState.Other,
+                };
+            }
+            return states;
+        }
     }
 
     /// <summary>Disable a service so it does not return after a reboot.</summary>

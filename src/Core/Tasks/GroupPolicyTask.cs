@@ -123,14 +123,13 @@ public class GroupPolicyTask : BaseTask
         allSuccess &= ctrlAltDelError is null;
 
         // 3. Disable ICS (Internet Connection Sharing)
-        var (icsSuccess, _, icsError) = await CommandExecutor.ExecuteAsync(
-            "sc",
-            "config SharedAccess start= disabled"
-        );
+        var icsError = await ServiceOps.DisableAsync("SharedAccess");
         details.Add(
-            icsSuccess ? "✓ ICS (Internet Connection Sharing) disabled" : $"✗ Failed: {icsError}"
+            icsError is null
+                ? "✓ ICS (Internet Connection Sharing) disabled"
+                : $"✗ Failed: {icsError}"
         );
-        allSuccess &= icsSuccess;
+        allSuccess &= icsError is null;
 
         // 4. Additional local security policies (example: restrict anonymous access)
         var anonError = await RegistryOps.SetDwordAsync(LsaKey, "restrictanonymous", 1);
@@ -300,39 +299,33 @@ public class GroupPolicyTask : BaseTask
             ReadmeServices.IsRemoteDesktopRequired(_readmeData)
             || await RegDwordEqualsAsync(TerminalServerKey, "fDenyTSConnections", 1);
 
-        var (scSuccess, scOutput, _) = await CommandExecutor.ExecuteAsync("sc", "qc SharedAccess");
-        // `sc qc` prints e.g. "START_TYPE : 4   DISABLED".
-        var icsOk =
-            scSuccess
-            && scOutput
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Any(l =>
-                    l.Contains("START_TYPE", StringComparison.OrdinalIgnoreCase)
-                    && l.Contains("DISABLED", StringComparison.OrdinalIgnoreCase)
-                );
+        // This used to look for the word "DISABLED" in `sc qc` output, which is
+        // localised; the service control manager returns the start type as a
+        // number.
+        var icsOk = await ServiceOps.IsDisabledAsync("SharedAccess") == true;
 
         if (!hideUserOk)
-            AnsiConsole.MarkupLine("[red]? 'Don't display last user name' is not set[/]");
+            AnsiConsole.MarkupLine("[red]✗ 'Don't display last user name' is not set[/]");
         if (!ctrlAltDelOk)
-            AnsiConsole.MarkupLine("[red]? Ctrl+Alt+Del is not required at logon[/]");
+            AnsiConsole.MarkupLine("[red]✗ Ctrl+Alt+Del is not required at logon[/]");
         if (!anonOk)
-            AnsiConsole.MarkupLine("[red]? Anonymous access is not restricted[/]");
+            AnsiConsole.MarkupLine("[red]✗ Anonymous access is not restricted[/]");
         if (!icsOk)
-            AnsiConsole.MarkupLine("[red]? Internet Connection Sharing is not disabled[/]");
+            AnsiConsole.MarkupLine("[red]✗ Internet Connection Sharing is not disabled[/]");
         if (!clientSigningOk)
             AnsiConsole.MarkupLine(
-                "[red]? Microsoft network client does not require SMB signing[/]"
+                "[red]✗ Microsoft network client does not require SMB signing[/]"
             );
         if (!serverSigningOk)
             AnsiConsole.MarkupLine(
-                "[red]? Microsoft network server does not require SMB signing[/]"
+                "[red]✗ Microsoft network server does not require SMB signing[/]"
             );
         if (!clientAgreeOk)
             AnsiConsole.MarkupLine("[red]? Microsoft network client does not offer SMB signing[/]");
         if (!serverAgreeOk)
             AnsiConsole.MarkupLine("[red]? Microsoft network server does not offer SMB signing[/]");
         if (!rdpOk)
-            AnsiConsole.MarkupLine("[red]? Remote desktop sharing is not turned off[/]");
+            AnsiConsole.MarkupLine("[red]✗ Remote desktop sharing is not turned off[/]");
 
         return hideUserOk
             && ctrlAltDelOk

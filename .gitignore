@@ -52,3 +52,6 @@ artifacts/
 AMD/AMD-Software-Installer/AMD-Software-Adrenalin-Edition-24.12.1-MinimalSetup-241204_web/Bin64/
 MSI/MSI Center/Setup/
 AMD/Chipset_Installer/Chipset.exe
+
+# Claude Code per-machine permission cache; not project content.
+.claude/settings.local.json

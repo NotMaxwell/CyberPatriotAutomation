@@ -32,7 +32,10 @@ fn is_group_member_matches_exact_names_only() {
     let members = parse_local_group_members(NET_LOCALGROUP_OUTPUT);
 
     assert!(is_group_member(&members, "bob"));
-    assert!(is_group_member(&members, "BOB"), "match is case-insensitive");
+    assert!(
+        is_group_member(&members, "BOB"),
+        "match is case-insensitive"
+    );
     assert!(is_group_member(&members, "Administrator"));
     // DOMAIN\user entries match on the bare account name too.
     assert!(is_group_member(&members, "alice"));
@@ -46,7 +49,6 @@ fn is_group_member_matches_exact_names_only() {
         );
     }
 }
-
 
 #[tokio::test]
 async fn dns_settings_audit_name_and_description() {
@@ -121,7 +123,9 @@ async fn group_policy_execute_should_succeed_when_dry_run() {
     assert!(result.success);
     assert!(result.message.contains("Don't display last user name"));
     assert!(result.message.contains("Require Ctrl+Alt+Del"));
-    assert!(result.message.contains("ICS (Internet Connection Sharing) disabled"));
+    assert!(result
+        .message
+        .contains("ICS (Internet Connection Sharing) disabled"));
     assert!(result.message.contains("Restrict anonymous access"));
 }
 

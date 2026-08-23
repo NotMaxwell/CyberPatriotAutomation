@@ -67,7 +67,10 @@ pub async fn parse_html_readme_async(file_path: &str) -> ReadmeData {
     let content = match tokio::fs::read_to_string(file_path).await {
         Ok(c) => c,
         Err(e) => {
-            ui::markup_line(&format!("[red]Error parsing README: {}[/]", ui::escape(&e.to_string())));
+            ui::markup_line(&format!(
+                "[red]Error parsing README: {}[/]",
+                ui::escape(&e.to_string())
+            ));
             return data;
         }
     };
@@ -302,8 +305,9 @@ fn parse_user_block(content: &str, data: &mut ReadmeData) {
 
 /// Characters Windows forbids in a local account name. Their presence is a
 /// reliable sign the line is prose rather than a username.
-const INVALID_USERNAME_CHARS: &[char] =
-    &['"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '@', '.', '!'];
+const INVALID_USERNAME_CHARS: &[char] = &[
+    '"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '@', '.', '!',
+];
 
 fn is_valid_username(username: &str) -> bool {
     let username = username.trim();
@@ -347,11 +351,37 @@ fn is_valid_username(username: &str) -> bool {
 fn is_plausible_software_name(name: &str) -> bool {
     /// Generic nouns that appear in these phrasings but never name a product.
     const NOISE: &[&str] = &[
-        "a", "an", "use", "company", "software", "program", "programs", "application",
-        "applications", "app", "apps", "tool", "tools", "version", "versions", "access",
-        "browser", "browsers", "system", "systems", "file", "files", "data", "internet",
+        "a",
+        "an",
+        "use",
+        "company",
+        "software",
+        "program",
+        "programs",
+        "application",
+        "applications",
+        "app",
+        "apps",
+        "tool",
+        "tools",
+        "version",
+        "versions",
+        "access",
+        "browser",
+        "browsers",
+        "system",
+        "systems",
+        "file",
+        "files",
+        "data",
+        "internet",
     ];
-    if !name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    if !name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         return false;
     }
     if is_common_word(name) || NOISE.iter().any(|w| w.eq_ignore_ascii_case(name)) {
@@ -394,9 +424,13 @@ fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
             let matched_phrase = caps.get(0).map(|m| m.as_str()).unwrap_or("");
             let software_list = caps[1].trim();
             for name in splitter.split(software_list) {
-                let clean = name.trim().trim_matches(|c| c == ',' || c == '.' || c == ' ');
+                let clean = name
+                    .trim()
+                    .trim_matches(|c| c == ',' || c == '.' || c == ' ');
                 let len = clean.chars().count();
-                if clean.is_empty() || !(2..=50).contains(&len) || !is_plausible_software_name(clean)
+                if clean.is_empty()
+                    || !(2..=50).contains(&len)
+                    || !is_plausible_software_name(clean)
                 {
                     continue;
                 }
@@ -454,7 +488,8 @@ fn parse_services(content: &str, data: &mut ReadmeData) {
     // phrasing "do not stop or disable the X service" slipped through and queued a
     // critical service for disabling. Allow an intervening "<verb> or " and the
     // other negation forms READMEs use.
-    let negated = re(r"(?i)(?:do\s+not|do\s*n'?t|never|must\s+not|should\s+not)\s+(?:\w+\s+or\s+)?$");
+    let negated =
+        re(r"(?i)(?:do\s+not|do\s*n'?t|never|must\s+not|should\s+not)\s+(?:\w+\s+or\s+)?$");
     let disable1 = re(r"(?i)disable\s+(?:the\s+)?([A-Za-z0-9\s]+?)\s+service");
 
     // Collect first so every "do not disable" is registered as critical before
@@ -481,8 +516,7 @@ fn parse_services(content: &str, data: &mut ReadmeData) {
     }
 
     if lower.contains("do not stop") && lower.contains("ccs client") {
-        data.prohibited_services
-            .retain(|s| !contains_ci(s, "CCS"));
+        data.prohibited_services.retain(|s| !contains_ci(s, "CCS"));
         if !data
             .critical_services
             .iter()
@@ -624,10 +658,47 @@ fn parse_users_to_create(content: &str, data: &mut ReadmeData) {
 
 fn is_common_word(word: &str) -> bool {
     const COMMON: &[&str] = &[
-        "this", "that", "user", "account", "the", "new", "for", "and", "not", "all", "any", "are",
-        "was", "were", "been", "being", "have", "has", "had", "having", "does", "did", "doing",
-        "should", "would", "could", "must", "will", "shall", "may", "might", "can", "need", "home",
-        "employee", "named", "called", "following", "with", "from", "into",
+        "this",
+        "that",
+        "user",
+        "account",
+        "the",
+        "new",
+        "for",
+        "and",
+        "not",
+        "all",
+        "any",
+        "are",
+        "was",
+        "were",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "having",
+        "does",
+        "did",
+        "doing",
+        "should",
+        "would",
+        "could",
+        "must",
+        "will",
+        "shall",
+        "may",
+        "might",
+        "can",
+        "need",
+        "home",
+        "employee",
+        "named",
+        "called",
+        "following",
+        "with",
+        "from",
+        "into",
     ];
     COMMON.iter().any(|w| w.eq_ignore_ascii_case(word))
 }
@@ -724,7 +795,10 @@ fn contains_service_pattern(t: &str) -> bool {
 }
 
 fn contains_software_pattern(t: &str) -> bool {
-    (t.contains("install") || t.contains("uninstall") || t.contains("remove") || t.contains("update"))
+    (t.contains("install")
+        || t.contains("uninstall")
+        || t.contains("remove")
+        || t.contains("update"))
         && (t.contains("software")
             || t.contains("program")
             || t.contains("application")
@@ -766,9 +840,12 @@ fn parse_user_creation_item(text: &str) -> Option<ActionableItem> {
     for pat in patterns {
         if let Some(caps) = re(pat).captures(text) {
             let username = caps[1].trim().to_string();
-            if is_valid_username(&username) && username.chars().count() >= 3 && !is_common_word(&username)
+            if is_valid_username(&username)
+                && username.chars().count() >= 3
+                && !is_common_word(&username)
             {
-                item.details.insert("Username".to_string(), username.clone());
+                item.details
+                    .insert("Username".to_string(), username.clone());
                 item.description = format!("Create user account: {username}");
                 return Some(item);
             }
@@ -796,7 +873,9 @@ fn parse_group_item(text: &str) -> Option<ActionableItem> {
 
     if lower.contains("create") || lower.contains("make") {
         item.item_type = ActionableItemType::CreateGroup;
-        let group = re(r#"(?i)(?:create|make)\s+(?:a\s+)?(?:new\s+)?group\s+(?:called\s+)?["']?(\w+)["']?"#);
+        let group = re(
+            r#"(?i)(?:create|make)\s+(?:a\s+)?(?:new\s+)?group\s+(?:called\s+)?["']?(\w+)["']?"#,
+        );
         if let Some(caps) = group.captures(text) {
             let name = caps[1].trim().to_string();
             item.description = format!("Create group: {name}");
@@ -806,7 +885,9 @@ fn parse_group_item(text: &str) -> Option<ActionableItem> {
         }
     } else if lower.contains("add") && lower.contains("to") && lower.contains("group") {
         item.item_type = ActionableItemType::AddUserToGroup;
-        let add = re(r#"(?i)add\s+(?:user\s+)?["']?(\w+)["']?\s+to\s+(?:the\s+)?["']?(\w+)["']?\s+group"#);
+        let add = re(
+            r#"(?i)add\s+(?:user\s+)?["']?(\w+)["']?\s+to\s+(?:the\s+)?["']?(\w+)["']?\s+group"#,
+        );
         if let Some(caps) = add.captures(text) {
             let user = caps[1].trim().to_string();
             let group = caps[2].trim().to_string();
@@ -818,8 +899,9 @@ fn parse_group_item(text: &str) -> Option<ActionableItem> {
         }
     } else if lower.contains("remove") && lower.contains("from") && lower.contains("group") {
         item.item_type = ActionableItemType::RemoveUserFromGroup;
-        let remove =
-            re(r#"(?i)remove\s+(?:user\s+)?["']?(\w+)["']?\s+from\s+(?:the\s+)?["']?(\w+)["']?\s+group"#);
+        let remove = re(
+            r#"(?i)remove\s+(?:user\s+)?["']?(\w+)["']?\s+from\s+(?:the\s+)?["']?(\w+)["']?\s+group"#,
+        );
         if let Some(caps) = remove.captures(text) {
             let user = caps[1].trim().to_string();
             let group = caps[2].trim().to_string();
@@ -857,9 +939,12 @@ fn parse_service_item(text: &str) -> Option<ActionableItem> {
             let len = service.chars().count();
             if !service.is_empty() && len > 2 && len < 50 {
                 item.item_type = ActionableItemType::EnableService;
-                item.details.insert("ServiceName".to_string(), service.clone());
                 item.details
-                    .insert("Warning".to_string(), "Do NOT disable this service".to_string());
+                    .insert("ServiceName".to_string(), service.clone());
+                item.details.insert(
+                    "Warning".to_string(),
+                    "Do NOT disable this service".to_string(),
+                );
                 item.description = format!("Critical service (do NOT disable): {service}");
                 return Some(item);
             }
@@ -945,7 +1030,11 @@ fn parse_software_item(text: &str) -> Option<ActionableItem> {
             if !software.is_empty()
                 && (2..30).contains(&len)
                 && !is_common_word(&software)
-                && software.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                && software
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
             {
                 item.description = if should_remove {
                     format!("Remove software: {software}")
@@ -970,7 +1059,8 @@ fn parse_security_policy_item(text: &str) -> Option<ActionableItem> {
     };
 
     if lower.contains("password") {
-        item.details.insert("Category".to_string(), "Password Policy".to_string());
+        item.details
+            .insert("Category".to_string(), "Password Policy".to_string());
         item.description = if lower.contains("complexity") {
             "Configure password complexity requirements"
         } else if lower.contains("length") {
@@ -984,19 +1074,24 @@ fn parse_security_policy_item(text: &str) -> Option<ActionableItem> {
         }
         .to_string();
     } else if lower.contains("firewall") {
-        item.details.insert("Category".to_string(), "Firewall".to_string());
+        item.details
+            .insert("Category".to_string(), "Firewall".to_string());
         item.description = "Configure Windows Firewall settings".to_string();
     } else if lower.contains("audit") {
-        item.details.insert("Category".to_string(), "Audit Policy".to_string());
+        item.details
+            .insert("Category".to_string(), "Audit Policy".to_string());
         item.description = "Configure audit policy settings".to_string();
     } else if lower.contains("action center") {
-        item.details.insert("Category".to_string(), "Action Center".to_string());
+        item.details
+            .insert("Category".to_string(), "Action Center".to_string());
         item.description = "Configure Windows Action Center".to_string();
     } else if lower.contains("defender") || lower.contains("antivirus") {
-        item.details.insert("Category".to_string(), "Antivirus".to_string());
+        item.details
+            .insert("Category".to_string(), "Antivirus".to_string());
         item.description = "Configure Windows Defender/Antivirus".to_string();
     } else {
-        item.details.insert("Category".to_string(), "General".to_string());
+        item.details
+            .insert("Category".to_string(), "General".to_string());
         item.description = "Configure security policy (review text for details)".to_string();
     }
 
@@ -1024,12 +1119,15 @@ fn parse_file_operation_item(text: &str) -> Option<ActionableItem> {
     {
         if lower.contains("media") && lower.contains("prohibited") {
             item.description = "Remove prohibited media files".to_string();
-            item.details.insert("FileType".to_string(), "Media files".to_string());
+            item.details
+                .insert("FileType".to_string(), "Media files".to_string());
             return Some(item);
         } else if lower.contains("hacking") || lower.contains("unauthorized") {
             item.description = "Remove unauthorized/hacking tool files".to_string();
-            item.details
-                .insert("FileType".to_string(), "Unauthorized software/tools".to_string());
+            item.details.insert(
+                "FileType".to_string(),
+                "Unauthorized software/tools".to_string(),
+            );
             return Some(item);
         }
     }
@@ -1038,9 +1136,9 @@ fn parse_file_operation_item(text: &str) -> Option<ActionableItem> {
 }
 
 fn is_duplicate_action_item(data: &ReadmeData, new_item: &ActionableItem) -> bool {
-    data.actionable_items
-        .iter()
-        .any(|existing| existing.item_type == new_item.item_type && existing.description == new_item.description)
+    data.actionable_items.iter().any(|existing| {
+        existing.item_type == new_item.item_type && existing.description == new_item.description
+    })
 }
 
 fn parse_guidelines(content: &str, data: &mut ReadmeData) {
@@ -1161,8 +1259,14 @@ pub fn display_parsed_data(data: &ReadmeData) {
     if !data.group_requirements.is_empty() {
         ui::markup_line("[bold cyan]Group Requirements:[/]");
         for group in &data.group_requirements {
-            ui::markup_line(&format!("  [cyan]Group: {}[/]", ui::escape(&group.group_name)));
-            ui::markup_line(&format!("    Members: {}", ui::escape(&group.members.join(", "))));
+            ui::markup_line(&format!(
+                "  [cyan]Group: {}[/]",
+                ui::escape(&group.group_name)
+            ));
+            ui::markup_line(&format!(
+                "    Members: {}",
+                ui::escape(&group.members.join(", "))
+            ));
         }
         ui::write_line();
     }
@@ -1184,7 +1288,11 @@ pub fn display_parsed_data(data: &ReadmeData) {
             t.add_row([
                 format!("[blue]{}[/]", ui::escape(&software.name)),
                 version,
-                software.notes.clone().map(|n| ui::escape(&n)).unwrap_or_default(),
+                software
+                    .notes
+                    .clone()
+                    .map(|n| ui::escape(&n))
+                    .unwrap_or_default(),
             ]);
         }
         t.print();

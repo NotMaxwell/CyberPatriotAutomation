@@ -19,8 +19,9 @@ impl SharedFoldersAuditTask {
     pub fn new() -> Self {
         Self {
             name: "Shared Folders Audit".to_string(),
-            description: "Audits shared folders (fsmgmt.msc) to ensure only ADMIN$, C$, IPC$ exist."
-                .to_string(),
+            description:
+                "Audits shared folders (fsmgmt.msc) to ensure only ADMIN$, C$, IPC$ exist."
+                    .to_string(),
             dry_run: false,
         }
     }
@@ -34,7 +35,8 @@ impl Default for SharedFoldersAuditTask {
 
 /// Extract share names from `net share` output.
 ///
-/// The output is a table wrapped in a header and a trailing status line:
+/// Only reached when the Windows API is unavailable. The output is a table
+/// wrapped in a header and a trailing status line:
 ///
 /// ```text
 /// Share name   Resource                        Remark
@@ -73,6 +75,67 @@ fn parse_shares(output: &str) -> Vec<String> {
     shares
 }
 
+/// The shares on this machine.
+///
+/// Returns `None` when the list could not be read at all, so "no shares" and
+/// "could not look" stay distinguishable.
+async fn read_shares() -> Option<Vec<String>> {
+    // netapi32 returns the share list as data, so there is nothing to parse and
+    // nothing that depends on the console language. `parse_shares` stays as the
+    // fallback for the rare case the call itself fails.
+    #[cfg(windows)]
+    if let Some(shares) = crate::native::shares::enumerate() {
+        return Some(shares);
+    }
+
+    let (success, output, _error) = command::execute("net", Some("share")).await;
+    success.then(|| parse_shares(&output))
+}
+
+/// Remove a share, and prove it is gone.
+async fn remove_share(share: &str) -> Result<(), String> {
+    crate::remediation::apply(
+        &format!("Share {share}"),
+        "removed - only ADMIN$, C$ and IPC$ belong on a competition image",
+        // "absent" has to be a readable state rather than the `None` that means
+        // "could not look", so the share list is re-read and searched.
+        || async {
+            read_shares().await.map(|shares| {
+                if shares.iter().any(|s| s.eq_ignore_ascii_case(share)) {
+                    "present".to_string()
+                } else {
+                    "absent".to_string()
+                }
+            })
+        },
+        |s| s == "absent",
+        "removed the share",
+        || remove_share_core(share),
+    )
+    .await
+}
+
+async fn remove_share_core(share: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        crate::native::shares::delete(share)
+    }
+
+    #[cfg(not(windows))]
+    {
+        // /y answers the "There are open files ... force them closed? (Y/N)"
+        // prompt that `net share /delete` asks when the share is in use.
+        // Without it the command waits on a keypress it will never get, and
+        // aborts having deleted nothing.
+        let (success, _out, error) =
+            command::execute("net", Some(&format!("share {share} /delete /y"))).await;
+        if success {
+            Ok(())
+        } else {
+            Err(error.unwrap_or_else(|| "net share /delete failed".to_string()))
+        }
+    }
+}
 
 fn unauthorized(found: &[String]) -> Vec<String> {
     found
@@ -87,17 +150,28 @@ impl Task for SharedFoldersAuditTask {
     impl_task_meta!();
 
     async fn read_system_state(&mut self) -> SystemInfo {
-        let (_success, output, error) = command::execute("net", Some("share")).await;
+        let shares = read_shares().await;
         SystemInfo {
-            raw_output: Some(output),
-            error_output: error,
+            raw_output: Some(shares.clone().unwrap_or_default().join("\n")),
+            error_output: shares
+                .is_none()
+                .then(|| "Could not read the share list".to_string()),
             ..Default::default()
         }
     }
 
     async fn execute(&mut self) -> TaskResult {
-        let (_success, output, _error) = command::execute("net", Some("share")).await;
-        let found = parse_shares(&output);
+        let Some(found) = read_shares().await else {
+            return TaskResult {
+                task_name: self.name.clone(),
+                success: false,
+                message: "Could not read the share list.".to_string(),
+                error_details: Some(
+                    "Neither the Windows API nor `net share` returned a share list.".to_string(),
+                ),
+                ..Default::default()
+            };
+        };
         let unauthorized = unauthorized(&found);
 
         let mut details: Vec<String> = Vec::new();
@@ -110,7 +184,9 @@ impl Task for SharedFoldersAuditTask {
         }
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing shared folders audit (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing shared folders audit (no changes will be made)[/]",
+            );
             if !unauthorized.is_empty() {
                 details.push(format!("Would remove: {}", unauthorized.join(", ")));
             }
@@ -126,23 +202,19 @@ impl Task for SharedFoldersAuditTask {
         let mut failures: Vec<String> = Vec::new();
 
         for share in &unauthorized {
-            let (del_success, _out, del_err) =
-                // /y answers the "There are open files ... force them closed?
-                // (Y/N)" prompt that `net share /delete` asks when the share is
-                // in use. Without it the command waits on a keypress it will
-                // never get, and aborts having deleted nothing.
-                command::execute("net", Some(&format!("share {share} /delete /y"))).await;
-            if del_success {
-                removed.push(share.clone());
-                ui::markup_line(&format!("[green]✓ Removed share: {}[/]", ui::escape(share)));
-            } else {
-                let e = del_err.unwrap_or_default();
-                failures.push(format!("{share}: {e}"));
-                ui::markup_line(&format!(
-                    "[red]✗ Failed to remove share: {} ({})[/]",
-                    ui::escape(share),
-                    ui::escape(&e)
-                ));
+            match remove_share(share).await {
+                Ok(()) => {
+                    removed.push(share.clone());
+                    ui::markup_line(&format!("[green]✓ Removed share: {}[/]", ui::escape(share)));
+                }
+                Err(e) => {
+                    failures.push(format!("{share}: {e}"));
+                    ui::markup_line(&format!(
+                        "[red]✗ Failed to remove share: {} ({})[/]",
+                        ui::escape(share),
+                        ui::escape(&e)
+                    ));
+                }
             }
         }
 
@@ -168,9 +240,11 @@ impl Task for SharedFoldersAuditTask {
     }
 
     async fn verify(&mut self) -> bool {
-        let (_success, output, _error) = command::execute("net", Some("share")).await;
-        let found = parse_shares(&output);
-        unauthorized(&found).is_empty()
+        // A read failure is not proof the machine is clean.
+        match read_shares().await {
+            Some(found) => unauthorized(&found).is_empty(),
+            None => false,
+        }
     }
 }
 

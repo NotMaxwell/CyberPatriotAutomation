@@ -16,17 +16,72 @@ const MEDIA_EXTENSIONS: &[&str] = &[
 ];
 
 const HACKING_TOOL_PATTERNS: &[&str] = &[
-    "cain", "abel", "wireshark", "nmap", "metasploit", "burp", "sqlmap", "hydra", "john", "hashcat",
-    "aircrack", "ettercap", "nikto", "netcat", "nc.exe", "nc64.exe", "mimikatz", "pwdump", "fgdump",
-    "wce", "gsecdump", "lsadump", "procdump", "keylogger", "keylog", "trojan", "backdoor", "rootkit",
-    "exploit", "payload", "hack", "crack", "keygen", "patch", "loader", "injector", "cheat",
-    "aimbot", "wallhack", "speedhack", "godmode", "trainer",
+    "cain",
+    "abel",
+    "wireshark",
+    "nmap",
+    "metasploit",
+    "burp",
+    "sqlmap",
+    "hydra",
+    "john",
+    "hashcat",
+    "aircrack",
+    "ettercap",
+    "nikto",
+    "netcat",
+    "nc.exe",
+    "nc64.exe",
+    "mimikatz",
+    "pwdump",
+    "fgdump",
+    "wce",
+    "gsecdump",
+    "lsadump",
+    "procdump",
+    "keylogger",
+    "keylog",
+    "trojan",
+    "backdoor",
+    "rootkit",
+    "exploit",
+    "payload",
+    "hack",
+    "crack",
+    "keygen",
+    "patch",
+    "loader",
+    "injector",
+    "cheat",
+    "aimbot",
+    "wallhack",
+    "speedhack",
+    "godmode",
+    "trainer",
 ];
 
 const GAME_PATTERNS: &[&str] = &[
-    "steam", "origin", "epic games", "uplay", "gog", "battlenet", "riot", "minecraft", "fortnite",
-    "valorant", "league of legends", "csgo", "dota", "overwatch", "pubg", "apex legends",
-    "call of duty", "gta", "fifa", "game", "games",
+    "steam",
+    "origin",
+    "epic games",
+    "uplay",
+    "gog",
+    "battlenet",
+    "riot",
+    "minecraft",
+    "fortnite",
+    "valorant",
+    "league of legends",
+    "csgo",
+    "dota",
+    "overwatch",
+    "pubg",
+    "apex legends",
+    "call of duty",
+    "gta",
+    "fifa",
+    "game",
+    "games",
 ];
 
 const SKIP_DIRECTORIES: &[&str] = &[
@@ -202,12 +257,15 @@ impl ProhibitedMediaTask {
 
     fn display_found_files(&self) {
         if self.found_files.is_empty() {
-            ui::markup_line("[green]? No prohibited files found[/]");
+            ui::markup_line("[green]✓ No prohibited files found[/]");
             return;
         }
 
         let by_cat = |cat: &str| -> Vec<&FoundFile> {
-            self.found_files.iter().filter(|f| Self::categorize_file(f) == cat).collect()
+            self.found_files
+                .iter()
+                .filter(|f| Self::categorize_file(f) == cat)
+                .collect()
         };
         let media = by_cat("Media");
         let hacking = by_cat("HackingTool");
@@ -220,16 +278,32 @@ impl ProhibitedMediaTask {
             .title("[bold red]Prohibited Files Found[/]")
             .columns(&["[bold]Category[/]", "[bold]Count[/]", "[bold]Total Size[/]"]);
         if !media.is_empty() {
-            summary.add_row(["[yellow]Media Files[/]".to_string(), media.len().to_string(), format_size(sum(&media))]);
+            summary.add_row([
+                "[yellow]Media Files[/]".to_string(),
+                media.len().to_string(),
+                format_size(sum(&media)),
+            ]);
         }
         if !hacking.is_empty() {
-            summary.add_row(["[red]Hacking Tools[/]".to_string(), hacking.len().to_string(), format_size(sum(&hacking))]);
+            summary.add_row([
+                "[red]Hacking Tools[/]".to_string(),
+                hacking.len().to_string(),
+                format_size(sum(&hacking)),
+            ]);
         }
         if !games.is_empty() {
-            summary.add_row(["[blue]Games[/]".to_string(), games.len().to_string(), format_size(sum(&games))]);
+            summary.add_row([
+                "[blue]Games[/]".to_string(),
+                games.len().to_string(),
+                format_size(sum(&games)),
+            ]);
         }
         if !other.is_empty() {
-            summary.add_row(["[dim]Other[/]".to_string(), other.len().to_string(), format_size(sum(&other))]);
+            summary.add_row([
+                "[dim]Other[/]".to_string(),
+                other.len().to_string(),
+                format_size(sum(&other)),
+            ]);
         }
         summary.add_row([
             "[bold]TOTAL[/]".to_string(),
@@ -241,7 +315,12 @@ impl ProhibitedMediaTask {
 
         let mut sample = ui::TableBuilder::new()
             .title("[bold]Sample Files (up to 20)[/]")
-            .columns(&["[bold]File[/]", "[bold]Path[/]", "[bold]Size[/]", "[bold]Category[/]"]);
+            .columns(&[
+                "[bold]File[/]",
+                "[bold]Path[/]",
+                "[bold]Size[/]",
+                "[bold]Category[/]",
+            ]);
         for file in self.found_files.iter().take(20) {
             let category = Self::categorize_file(file);
             let category_color = match category {
@@ -266,7 +345,10 @@ impl ProhibitedMediaTask {
         sample.print();
 
         if self.found_files.len() > 20 {
-            ui::markup_line(&format!("[dim]...and {} more files[/]", self.found_files.len() - 20));
+            ui::markup_line(&format!(
+                "[dim]...and {} more files[/]",
+                self.found_files.len() - 20
+            ));
         }
     }
 
@@ -381,10 +463,18 @@ impl Task for ProhibitedMediaTask {
         }
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing prohibited media removal (no changes will be made)[/]");
-            ui::markup_line(&format!("[cyan]Would remove {} prohibited files[/]", self.found_files.len()));
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing prohibited media removal (no changes will be made)[/]",
+            );
+            ui::markup_line(&format!(
+                "[cyan]Would remove {} prohibited files[/]",
+                self.found_files.len()
+            ));
             ui::markup_line("[cyan]Files would be deleted permanently, not backed up[/]");
-            result.message = format!("DRY RUN: Would remove {} prohibited files.", self.found_files.len());
+            result.message = format!(
+                "DRY RUN: Would remove {} prohibited files.",
+                self.found_files.len()
+            );
             return result;
         }
 
@@ -433,7 +523,9 @@ impl Task for ProhibitedMediaTask {
 
             let processed = index + 1;
             if processed % 100 == 0 || processed == total_count {
-                ui::markup_line(&format!("[cyan]Processed {processed}/{total_count} files...[/]"));
+                ui::markup_line(&format!(
+                    "[cyan]Processed {processed}/{total_count} files...[/]"
+                ));
             }
         }
 
@@ -451,7 +543,14 @@ impl Task for ProhibitedMediaTask {
                 total_count,
                 issues.len()
             );
-            result.error_details = Some(issues.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+            result.error_details = Some(
+                issues
+                    .iter()
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         }
 
         result
@@ -464,10 +563,13 @@ impl Task for ProhibitedMediaTask {
             self.scan_directory(users_path);
         }
         if self.found_files.is_empty() {
-            ui::markup_line("[green]? No prohibited files found after cleanup[/]");
+            ui::markup_line("[green]✓ No prohibited files found after cleanup[/]");
             true
         } else {
-            ui::markup_line(&format!("[yellow]? {} prohibited files still remain[/]", self.found_files.len()));
+            ui::markup_line(&format!(
+                "[yellow]⚠ {} prohibited files still remain[/]",
+                self.found_files.len()
+            ));
             false
         }
     }

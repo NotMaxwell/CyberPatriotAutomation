@@ -87,6 +87,12 @@ fn actionable_item_should_store_action_details() {
 #[test]
 fn actionable_item_type_should_have_all_expected_types() {
     // Referencing the variants confirms they exist and are distinct.
-    assert_ne!(ActionableItemType::CreateGroup, ActionableItemType::CreateUser);
-    assert_ne!(ActionableItemType::CreateUser, ActionableItemType::DisableService);
+    assert_ne!(
+        ActionableItemType::CreateGroup,
+        ActionableItemType::CreateUser
+    );
+    assert_ne!(
+        ActionableItemType::CreateUser,
+        ActionableItemType::DisableService
+    );
 }

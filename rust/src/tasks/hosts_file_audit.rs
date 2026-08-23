@@ -63,7 +63,6 @@ fn unauthorized_entries(lines: &[String]) -> Vec<String> {
         .collect()
 }
 
-
 #[async_trait]
 impl Task for HostsFileAuditTask {
     impl_task_meta!();
@@ -87,7 +86,10 @@ impl Task for HostsFileAuditTask {
         let lines = match read_lines() {
             Ok(lines) => lines,
             Err(e) => {
-                ui::markup_line(&format!("[red]✗ Failed to read hosts file: {}[/]", ui::escape(&e)));
+                ui::markup_line(&format!(
+                    "[red]✗ Failed to read hosts file: {}[/]",
+                    ui::escape(&e)
+                ));
                 return TaskResult {
                     task_name: self.name.clone(),
                     success: false,
@@ -114,7 +116,9 @@ impl Task for HostsFileAuditTask {
         }
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing hosts file audit (no changes will be made)[/]");
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing hosts file audit (no changes will be made)[/]",
+            );
             if !unauthorized.is_empty() {
                 details.push(format!("Would remove: {}", unauthorized.join(", ")));
             }
@@ -140,7 +144,9 @@ impl Task for HostsFileAuditTask {
 
         let new_lines: Vec<String> = lines
             .iter()
-            .filter(|l| l.trim().is_empty() || l.trim().starts_with('#') || is_allowed_entry(l.trim()))
+            .filter(|l| {
+                l.trim().is_empty() || l.trim().starts_with('#') || is_allowed_entry(l.trim())
+            })
             .cloned()
             .collect();
 
@@ -149,7 +155,26 @@ impl Task for HostsFileAuditTask {
         let mut contents = new_lines.join("\r\n");
         contents.push_str("\r\n");
 
-        match std::fs::write(HOSTS_FILE_PATH, contents) {
+        let written = crate::remediation::apply(
+            HOSTS_FILE_PATH,
+            &format!(
+                "only loopback entries; {} redirect(s) removed",
+                unauthorized.len()
+            ),
+            || async {
+                read_lines()
+                    .ok()
+                    .map(|l| format!("{} unauthorized entries", unauthorized_entries(&l).len()))
+            },
+            |s| s == "0 unauthorized entries",
+            &format!("rewrote the file without: {}", unauthorized.join(", ")),
+            || async {
+                std::fs::write(HOSTS_FILE_PATH, contents).map_err(|e: std::io::Error| e.to_string())
+            },
+        )
+        .await;
+
+        match written {
             Ok(_) => {
                 details.push(format!("Removed: {}", unauthorized.join(", ")));
                 ui::markup_line(&format!(
@@ -168,13 +193,16 @@ impl Task for HostsFileAuditTask {
                 }
             }
             Err(e) => {
-                ui::markup_line(&format!("[red]✗ Failed to update hosts file: {}[/]", ui::escape(&e.to_string())));
+                ui::markup_line(&format!(
+                    "[red]✗ Failed to update hosts file: {}[/]",
+                    ui::escape(&e)
+                ));
                 details.push(format!("Failed to update hosts file: {e}"));
                 TaskResult {
                     task_name: self.name.clone(),
                     success: false,
                     message: details.join("\n"),
-                    error_details: Some(e.to_string()),
+                    error_details: Some(e),
                     ..Default::default()
                 }
             }
@@ -208,9 +236,14 @@ mod tests {
 
     #[test]
     fn redirected_domains_are_unauthorized() {
-        let hosts = lines("127.0.0.1       localhost\n127.0.0.1 www.google.com\n0.0.0.0 update.microsoft.com\n");
+        let hosts = lines(
+            "127.0.0.1       localhost\n127.0.0.1 www.google.com\n0.0.0.0 update.microsoft.com\n",
+        );
         let bad = unauthorized_entries(&hosts);
-        assert_eq!(bad, vec!["127.0.0.1 www.google.com", "0.0.0.0 update.microsoft.com"]);
+        assert_eq!(
+            bad,
+            vec!["127.0.0.1 www.google.com", "0.0.0.0 update.microsoft.com"]
+        );
     }
 
     #[test]

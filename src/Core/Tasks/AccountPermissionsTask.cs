@@ -94,7 +94,8 @@ public class AccountPermissionsTask : BaseTask
                     );
                 }
 
-                // The remaining steps only report; run them so the preview is complete.
+                // The remaining steps honour DryRun themselves or only report;
+                // run them so the preview is complete.
                 var previewPassword = await EnforcePasswordRequiredAsync();
                 issues.AddRange(previewPassword.Issues);
                 var previewAdmin = await ReviewAdminAccountsAsync();
@@ -166,7 +167,7 @@ public class AccountPermissionsTask : BaseTask
         );
         if (guest != null && guest.IsEnabled)
         {
-            AnsiConsole.MarkupLine("[red]? Guest account is still enabled[/]");
+            AnsiConsole.MarkupLine("[red]✗ Guest account is still enabled[/]");
             allGood = false;
         }
 
@@ -175,14 +176,14 @@ public class AccountPermissionsTask : BaseTask
         if (noPassword.Any())
         {
             AnsiConsole.MarkupLine(
-                $"[red]? {noPassword.Count} account(s) still don't require passwords[/]"
+                $"[red]✗ {noPassword.Count} account(s) still don't require passwords[/]"
             );
             allGood = false;
         }
 
         if (allGood)
         {
-            AnsiConsole.MarkupLine("[green]? All account security settings verified[/]");
+            AnsiConsole.MarkupLine("[green]✓ All account security settings verified[/]");
         }
 
         return allGood;
@@ -190,121 +191,21 @@ public class AccountPermissionsTask : BaseTask
 
     private async Task<List<AccountInfo>> GetUserAccountsAsync()
     {
-        var accounts = new List<AccountInfo>();
+        var accounts = await LocalAccounts.EnumerateUsersAsync();
+        if (accounts is null)
+            return new List<AccountInfo>();
 
-        // Get all local users using PowerShell
-        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
-            "Get-LocalUser | Select-Object Name, FullName, Enabled, PasswordRequired, PasswordNeverExpires, LastLogon | ConvertTo-Csv -NoTypeInformation"
-        );
+        // Read the Administrators membership once rather than shelling out
+        // per account, and match names exactly.
+        var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
 
-        if (success && !string.IsNullOrEmpty(output))
+        foreach (var account in accounts)
         {
-            var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
-
-            // Read the Administrators membership once rather than shelling out
-            // per account, and match names exactly.
-            var admins = await LocalAccounts.GetGroupMembersAsync("Administrators");
-
-            // Skip header
-            foreach (var line in lines.Skip(1))
-            {
-                var account = ParseAccountFromCsv(line);
-                if (account != null)
-                {
-                    account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
-                    account.GroupMemberships = await GetUserGroupsAsync(account.Username);
-                    accounts.Add(account);
-                }
-            }
+            account.IsAdmin = LocalAccounts.IsGroupMember(admins, account.Username);
+            account.GroupMemberships = await LocalAccounts.GroupsOfAsync(account.Username);
         }
 
         return accounts;
-    }
-
-    private AccountInfo? ParseAccountFromCsv(string csvLine)
-    {
-        try
-        {
-            // Parse CSV line - handle quoted values
-            var values = ParseCsvLine(csvLine);
-            if (values.Count < 5)
-                return null;
-
-            return new AccountInfo
-            {
-                Username = values[0].Trim('"'),
-                FullName = values.Count > 1 ? values[1].Trim('"') : "",
-                IsEnabled =
-                    values.Count > 2
-                    && values[2].Trim('"').Equals("True", StringComparison.OrdinalIgnoreCase),
-                PasswordRequired =
-                    values.Count > 3
-                    && values[3].Trim('"').Equals("True", StringComparison.OrdinalIgnoreCase),
-                PasswordNeverExpires =
-                    values.Count > 4
-                    && values[4].Trim('"').Equals("True", StringComparison.OrdinalIgnoreCase),
-                LastLogon = values.Count > 5 ? ParseDateTime(values[5].Trim('"')) : null,
-            };
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private List<string> ParseCsvLine(string line)
-    {
-        var result = new List<string>();
-        bool inQuotes = false;
-        var currentValue = "";
-
-        foreach (char c in line)
-        {
-            if (c == '"')
-            {
-                inQuotes = !inQuotes;
-                currentValue += c;
-            }
-            else if (c == ',' && !inQuotes)
-            {
-                result.Add(currentValue);
-                currentValue = "";
-            }
-            else
-            {
-                currentValue += c;
-            }
-        }
-        result.Add(currentValue);
-        return result;
-    }
-
-    private DateTime? ParseDateTime(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value) || value == "")
-            return null;
-
-        if (DateTime.TryParse(value, out DateTime result))
-            return result;
-
-        return null;
-    }
-
-    private async Task<List<string>> GetUserGroupsAsync(string username)
-    {
-        var groups = new List<string>();
-        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
-            $"(Get-LocalUser {CommandExecutor.PsQuote(username)} | Get-LocalGroup).Name"
-        );
-
-        if (success && !string.IsNullOrEmpty(output))
-        {
-            groups = output
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .ToList();
-        }
-
-        return groups;
     }
 
     private void DisplayAccountsTable(List<AccountInfo> accounts)
@@ -377,31 +278,28 @@ public class AccountPermissionsTask : BaseTask
         if (guest != null && guest.IsEnabled)
         {
             AnsiConsole.MarkupLine("[yellow]Disabling Guest account...[/]");
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "net",
-                "user Guest /active:no"
-            );
+            var error = await LocalAccounts.SetEnabledAsync("Guest", false);
 
-            if (success)
+            if (error is null)
             {
                 fixes.Add("Disabled Guest account");
-                AnsiConsole.MarkupLine("[green]? Guest account disabled[/]");
+                AnsiConsole.MarkupLine("[green]✓ Guest account disabled[/]");
             }
             else
             {
                 issues.Add($"Failed to disable Guest account: {error}");
-                AnsiConsole.MarkupLine($"[red]? Failed to disable Guest account: {error}[/]");
+                AnsiConsole.MarkupLine($"[red]✗ Failed to disable Guest account: {error}[/]");
             }
         }
         else
         {
-            AnsiConsole.MarkupLine("[green]? Guest account is already disabled[/]");
+            AnsiConsole.MarkupLine("[green]✓ Guest account is already disabled[/]");
         }
 
         return (fixes, issues);
     }
 
-    private Task<(List<string> Fixes, List<string> Issues)> EnforcePasswordRequiredAsync()
+    private async Task<(List<string> Fixes, List<string> Issues)> EnforcePasswordRequiredAsync()
     {
         var fixes = new List<string>();
         var issues = new List<string>();
@@ -419,25 +317,48 @@ public class AccountPermissionsTask : BaseTask
 
         foreach (var account in accountsWithoutPassword)
         {
+            if (DryRun)
+            {
+                AnsiConsole.MarkupLine(
+                    $"[cyan]Would require a password on {Markup.Escape(account.Username)}[/]"
+                );
+                continue;
+            }
+
             AnsiConsole.MarkupLine(
                 $"[yellow]Enforcing password requirement for {account.Username}...[/]"
             );
 
-            // Can't directly force password required, but we can flag it
-            issues.Add(
-                $"Account '{account.Username}' does not require a password - manual password set required"
-            );
-            AnsiConsole.MarkupLine(
-                $"[yellow]? Account '{account.Username}' needs a password set manually[/]"
-            );
+            // UF_PASSWD_NOTREQD is only reachable through the account database:
+            // neither `net user` nor Set-LocalUser exposes it, which is why this
+            // step used to do nothing but tell the competitor to go and do it by
+            // hand.
+            var error = await LocalAccounts.RequirePasswordAsync(account.Username);
+            if (error is null)
+            {
+                fixes.Add($"Required a password on {account.Username}");
+                AnsiConsole.MarkupLine(
+                    $"[green]✓ Password now required for {Markup.Escape(account.Username)}[/]"
+                );
+            }
+            else
+            {
+                issues.Add(
+                    $"Account '{account.Username}' does not require a password and could not be "
+                        + $"changed ({error}) - set one manually"
+                );
+                AnsiConsole.MarkupLine(
+                    $"[yellow]⚠ Account '{account.Username}' needs a password set manually[/]"
+                );
+            }
         }
 
         if (accountsWithoutPassword.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? All enabled accounts require passwords[/]");
+            AnsiConsole.MarkupLine("[green]✓ All enabled accounts require passwords[/]");
         }
 
-        return Task.FromResult((fixes, issues));
+        return (fixes, issues);
     }
 
     private async Task<(List<string> Fixes, List<string> Issues)> CheckPasswordExpirationAsync()
@@ -463,23 +384,20 @@ public class AccountPermissionsTask : BaseTask
                 $"[yellow]Enabling password expiration for {account.Username}...[/]"
             );
 
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "powershell",
-                $"-Command \"Set-LocalUser -Name '{account.Username}' -PasswordNeverExpires $false\""
-            );
+            var error = await LocalAccounts.SetPasswordNeverExpiresAsync(account.Username, false);
 
-            if (success)
+            if (error is null)
             {
                 fixes.Add($"Enabled password expiration for {account.Username}");
                 AnsiConsole.MarkupLine(
-                    $"[green]? Password expiration enabled for {account.Username}[/]"
+                    $"[green]✓ Password expiration enabled for {account.Username}[/]"
                 );
             }
             else
             {
                 issues.Add($"Failed to enable password expiration for {account.Username}: {error}");
                 AnsiConsole.MarkupLine(
-                    $"[red]? Failed to enable password expiration for {account.Username}[/]"
+                    $"[red]✗ Failed to enable password expiration for {account.Username}[/]"
                 );
             }
         }
@@ -487,7 +405,7 @@ public class AccountPermissionsTask : BaseTask
         if (neverExpires.Count == 0)
         {
             AnsiConsole.MarkupLine(
-                "[green]? All user accounts have password expiration enabled[/]"
+                "[green]✓ All user accounts have password expiration enabled[/]"
             );
         }
 
@@ -510,7 +428,7 @@ public class AccountPermissionsTask : BaseTask
                 // Recommend renaming the default Administrator account
                 issues.Add("Default Administrator account should be renamed for security");
                 AnsiConsole.MarkupLine(
-                    $"[yellow]? Consider renaming default Administrator account[/]"
+                    $"[yellow]⚠ Consider renaming default Administrator account[/]"
                 );
             }
             else
@@ -526,7 +444,7 @@ public class AccountPermissionsTask : BaseTask
                 $"Review required: {adminAccounts.Count} admin accounts exist - ensure all are necessary"
             );
             AnsiConsole.MarkupLine(
-                $"[yellow]? Consider reviewing admin accounts - {adminAccounts.Count} accounts have admin privileges[/]"
+                $"[yellow]⚠ Consider reviewing admin accounts - {adminAccounts.Count} accounts have admin privileges[/]"
             );
         }
 
@@ -559,13 +477,13 @@ public class AccountPermissionsTask : BaseTask
                 $"Account '{account.Username}' inactive for {daysSinceLogon} days - consider disabling"
             );
             AnsiConsole.MarkupLine(
-                $"[yellow]? Account '{account.Username}' has been inactive for {daysSinceLogon} days[/]"
+                $"[yellow]⚠ Account '{account.Username}' has been inactive for {daysSinceLogon} days[/]"
             );
         }
 
         if (inactiveAccounts.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No inactive accounts detected[/]");
+            AnsiConsole.MarkupLine("[green]✓ No inactive accounts detected[/]");
         }
 
         return Task.FromResult((fixes, issues));

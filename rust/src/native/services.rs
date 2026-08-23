@@ -12,14 +12,21 @@ use super::to_wide;
 use windows::core::PCWSTR;
 use windows::Win32::System::Services::{
     ChangeServiceConfigW, CloseServiceHandle, ControlService, EnumDependentServicesW,
-    OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, StartServiceW, ENUM_SERVICE_STATE,
-    ENUM_SERVICE_STATUSW, ENUM_SERVICE_TYPE, SC_HANDLE, SC_STATUS_PROCESS_INFO, SERVICE_ERROR,
-    SERVICE_AUTO_START, SERVICE_DISABLED, SERVICE_START_TYPE, SERVICE_STATUS,
-    SERVICE_STATUS_PROCESS, SERVICE_RUNNING, SERVICE_STOPPED,
+    EnumServicesStatusExW, OpenSCManagerW, OpenServiceW, QueryServiceConfigW, QueryServiceStatusEx,
+    StartServiceW, ENUM_SERVICE_STATE, ENUM_SERVICE_STATUSW, ENUM_SERVICE_STATUS_PROCESSW,
+    ENUM_SERVICE_TYPE, QUERY_SERVICE_CONFIGW, SC_ENUM_PROCESS_INFO, SC_HANDLE,
+    SC_STATUS_PROCESS_INFO, SERVICE_AUTO_START, SERVICE_DISABLED, SERVICE_ERROR, SERVICE_RUNNING,
+    SERVICE_START_TYPE, SERVICE_STATUS, SERVICE_STATUS_PROCESS, SERVICE_STOPPED,
 };
 
 const SC_MANAGER_CONNECT: u32 = 0x0001;
+const SC_MANAGER_ENUMERATE_SERVICE: u32 = 0x0004;
+const SERVICE_QUERY_CONFIG: u32 = 0x0001;
 const SERVICE_QUERY_STATUS: u32 = 0x0004;
+
+/// Every service type and every state, for the bulk enumeration.
+const SERVICE_TYPE_ALL: ENUM_SERVICE_TYPE = ENUM_SERVICE_TYPE(0x0000_003F);
+const SERVICE_STATE_ALL: ENUM_SERVICE_STATE = ENUM_SERVICE_STATE(0x0000_0003);
 const SERVICE_ENUMERATE_DEPENDENTS: u32 = 0x0008;
 const SERVICE_START_ACCESS: u32 = 0x0010;
 const SERVICE_STOP_ACCESS: u32 = 0x0020;
@@ -63,10 +70,19 @@ fn last_error() -> String {
 }
 
 fn manager() -> Result<Handle, String> {
+    manager_with(SC_MANAGER_CONNECT)
+}
+
+fn manager_with(access: u32) -> Result<Handle, String> {
     unsafe {
-        OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT)
+        OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), access)
             .map(Handle)
-            .map_err(|_| format!("could not open the service control manager ({})", last_error()))
+            .map_err(|_| {
+                format!(
+                    "could not open the service control manager ({})",
+                    last_error()
+                )
+            })
     }
 }
 
@@ -249,6 +265,98 @@ fn set_start_type(name: &str, start_type: SERVICE_START_TYPE) -> Result<(), Stri
             PCWSTR::null(),
         )
         .map_err(|_| format!("could not set the start type of {name} ({})", last_error()))
+    }
+}
+
+/// Is a service configured to start at boot, or is it disabled?
+///
+/// Returns `None` when the service is not installed or its configuration could
+/// not be read. Replaces parsing `sc qc`, which prints the start type as a
+/// localised word next to its number.
+pub fn is_disabled(name: &str) -> Option<bool> {
+    let scm = manager().ok()?;
+    let service = open(&scm, name, SERVICE_QUERY_CONFIG).ok()??;
+
+    unsafe {
+        // Sizing call: expected to fail with the required buffer size.
+        let mut needed = 0u32;
+        let _ = QueryServiceConfigW(service.0, None, 0, &mut needed);
+        if needed == 0 {
+            return None;
+        }
+
+        let mut buffer = vec![0u8; needed as usize];
+        QueryServiceConfigW(
+            service.0,
+            Some(buffer.as_mut_ptr() as *mut QUERY_SERVICE_CONFIGW),
+            needed,
+            &mut needed,
+        )
+        .ok()?;
+
+        let config = &*(buffer.as_ptr() as *const QUERY_SERVICE_CONFIGW);
+        Some(config.dwStartType == SERVICE_DISABLED)
+    }
+}
+
+/// Every installed service, as (name, state) pairs.
+///
+/// Returns `None` when the enumeration fails, so callers can tell "no services"
+/// apart from "could not read the service list". Replaces one `Get-Service |
+/// ConvertTo-Csv` and the CSV parser over its output.
+pub fn enumerate_states() -> Option<Vec<(String, ServiceState)>> {
+    let Ok(scm) = manager_with(SC_MANAGER_ENUMERATE_SERVICE) else {
+        return None;
+    };
+
+    unsafe {
+        // Sizing call: expected to fail with the required buffer size.
+        let mut needed = 0u32;
+        let mut returned = 0u32;
+        let _ = EnumServicesStatusExW(
+            scm.0,
+            SC_ENUM_PROCESS_INFO,
+            SERVICE_TYPE_ALL,
+            SERVICE_STATE_ALL,
+            None,
+            &mut needed,
+            &mut returned,
+            None,
+            PCWSTR::null(),
+        );
+        if needed == 0 {
+            return None;
+        }
+
+        let mut buffer = vec![0u8; needed as usize];
+        EnumServicesStatusExW(
+            scm.0,
+            SC_ENUM_PROCESS_INFO,
+            SERVICE_TYPE_ALL,
+            SERVICE_STATE_ALL,
+            Some(&mut buffer),
+            &mut needed,
+            &mut returned,
+            None,
+            PCWSTR::null(),
+        )
+        .ok()?;
+
+        let entries = buffer.as_ptr() as *const ENUM_SERVICE_STATUS_PROCESSW;
+        Some(
+            (0..returned as usize)
+                .filter_map(|i| {
+                    let entry = &*entries.add(i);
+                    let name = super::from_wide(entry.lpServiceName.0)?;
+                    let state = match entry.ServiceStatusProcess.dwCurrentState {
+                        SERVICE_STOPPED => ServiceState::Stopped,
+                        SERVICE_RUNNING => ServiceState::Running,
+                        _ => ServiceState::Other,
+                    };
+                    (!name.is_empty()).then_some((name, state))
+                })
+                .collect(),
+        )
     }
 }
 

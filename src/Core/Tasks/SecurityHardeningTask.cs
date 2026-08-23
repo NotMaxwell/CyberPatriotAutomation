@@ -10,6 +10,14 @@ namespace PinnacleCyPat.Core.Tasks;
 /// </summary>
 public class SecurityHardeningTask : BaseTask
 {
+    /// <summary>Where the UAC and Ctrl+Alt+Del policy values live.</summary>
+    private const string PoliciesSystemKey =
+        @"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+
+    /// <summary>Where the Remote Desktop switch lives.</summary>
+    private const string TerminalServerKey =
+        @"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
+
     private ReadmeData? _readmeData;
 
     /// <summary>Set the README data for this task.</summary>
@@ -393,28 +401,20 @@ public class SecurityHardeningTask : BaseTask
             .AddColumn("[bold]Setting[/]")
             .AddColumn("[bold]Status[/]");
 
-        // Check UAC
-        var (uacSuccess, uacOutput, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"query ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"" /v EnableLUA"
-        );
-        var uacEnabled = uacSuccess && uacOutput.Contains("0x1");
+        // These used to substring-search whole `reg query` output for "0x1",
+        // which also matched 0x10, the key path and the value name. Compare the
+        // value itself.
+        var uacEnabled = await RegistryOps.DwordEqualsAsync(PoliciesSystemKey, "EnableLUA", 1);
         checksTable.AddRow("UAC Enabled", uacEnabled ? "[green]Yes[/]" : "[red]No[/]");
 
-        // Check Ctrl+Alt+Del
-        var (cadSuccess, cadOutput, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"query ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"" /v DisableCAD"
-        );
-        var cadRequired = cadSuccess && cadOutput.Contains("0x0");
+        var cadRequired = await RegistryOps.DwordEqualsAsync(PoliciesSystemKey, "DisableCAD", 0);
         checksTable.AddRow("Ctrl+Alt+Del Required", cadRequired ? "[green]Yes[/]" : "[red]No[/]");
 
-        // Check Remote Desktop
-        var (rdpSuccess, rdpOutput, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"query ""HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server"" /v fDenyTSConnections"
+        var rdpDisabled = await RegistryOps.DwordEqualsAsync(
+            TerminalServerKey,
+            "fDenyTSConnections",
+            1
         );
-        var rdpDisabled = rdpSuccess && rdpOutput.Contains("0x1");
         checksTable.AddRow("Remote Desktop Disabled", rdpDisabled ? "[green]Yes[/]" : "[red]No[/]");
 
         AnsiConsole.Write(checksTable);
@@ -498,38 +498,30 @@ public class SecurityHardeningTask : BaseTask
         bool allGood = true;
 
         // Check UAC
-        var (uacSuccess, uacOutput, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"query ""HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"" /v EnableLUA"
-        );
-        if (uacSuccess && uacOutput.Contains("0x1"))
+        if (await RegistryOps.DwordEqualsAsync(PoliciesSystemKey, "EnableLUA", 1))
         {
-            AnsiConsole.MarkupLine("[green]? UAC is enabled[/]");
+            AnsiConsole.MarkupLine("[green]✓ UAC is enabled[/]");
         }
         else
         {
-            AnsiConsole.MarkupLine("[red]? UAC is not enabled[/]");
+            AnsiConsole.MarkupLine("[red]✗ UAC is not enabled[/]");
             allGood = false;
         }
 
         // Check Remote Desktop
-        var (rdpSuccess, rdpOutput, _) = await CommandExecutor.ExecuteAsync(
-            "reg",
-            @"query ""HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server"" /v fDenyTSConnections"
-        );
         if (ReadmeServices.IsRemoteDesktopRequired(_readmeData))
         {
             // Deliberately left enabled; verifying it as "must be denied" would
             // report a failure for having done the right thing.
             AnsiConsole.MarkupLine("[dim]? Remote Desktop left enabled at the README's request[/]");
         }
-        else if (rdpSuccess && rdpOutput.Contains("0x1"))
+        else if (await RegistryOps.DwordEqualsAsync(TerminalServerKey, "fDenyTSConnections", 1))
         {
-            AnsiConsole.MarkupLine("[green]? Remote Desktop is disabled[/]");
+            AnsiConsole.MarkupLine("[green]✓ Remote Desktop is disabled[/]");
         }
         else
         {
-            AnsiConsole.MarkupLine("[red]? Remote Desktop is not disabled[/]");
+            AnsiConsole.MarkupLine("[red]✗ Remote Desktop is not disabled[/]");
             allGood = false;
         }
 
@@ -579,12 +571,16 @@ public class SecurityHardeningTask : BaseTask
                 continue;
             }
 
-            var (success, _, error) = await CommandExecutor.ExecuteAsync(
-                "reg",
-                $"add \"{path}\" /v {name} /t {type} /d {value} /f"
-            );
+            // Every entry in the table is a DWORD today; the type column is
+            // honoured anyway so a REG_SZ entry can be added without silently
+            // being written as a number. The description rides along so the run
+            // log names the setting in words next to the path it wrote.
+            var error =
+                type == "REG_DWORD" && int.TryParse(value, out var dword)
+                    ? await RegistryOps.SetDwordAsync(path, name, dword, description)
+                    : await RegistryOps.SetStringAsync(path, name, value, description);
 
-            if (success)
+            if (error is null)
             {
                 fixes.Add($"Set {description}");
                 successCount++;
@@ -594,9 +590,7 @@ public class SecurityHardeningTask : BaseTask
                 // Counted for the tally *and* surfaced, so a value that could not
                 // be written is not invisible.
                 failCount++;
-                issues.Add(
-                    $"Could not set {description} ({name}): {error ?? "no reason reported"}"
-                );
+                issues.Add($"Failed to set {description} ({path}\\{name}): {error}");
             }
         }
 
@@ -623,7 +617,7 @@ public class SecurityHardeningTask : BaseTask
             if (success)
             {
                 fixes.Add($"Disabled feature: {feature}");
-                AnsiConsole.MarkupLine($"[green]? Disabled: {feature}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Disabled: {feature}[/]");
             }
             else
             {
@@ -648,7 +642,7 @@ public class SecurityHardeningTask : BaseTask
         // Flush DNS cache
         await CommandExecutor.ExecuteAsync("ipconfig", "/flushdns");
         fixes.Add("Flushed DNS cache");
-        AnsiConsole.MarkupLine("[green]? Flushed DNS cache[/]");
+        AnsiConsole.MarkupLine("[green]✓ Flushed DNS cache[/]");
 
         // Enable Windows Defender
         await CommandExecutor.ExecuteAsync(
@@ -656,7 +650,7 @@ public class SecurityHardeningTask : BaseTask
             "-Command \"Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue\""
         );
         fixes.Add("Enabled Windows Defender real-time monitoring");
-        AnsiConsole.MarkupLine("[green]? Enabled Windows Defender real-time monitoring[/]");
+        AnsiConsole.MarkupLine("[green]✓ Enabled Windows Defender real-time monitoring[/]");
 
         // Update Windows Defender definitions
         AnsiConsole.MarkupLine("[cyan]Updating Windows Defender definitions...[/]");
@@ -665,11 +659,18 @@ public class SecurityHardeningTask : BaseTask
             "-Command \"Update-MpSignature -ErrorAction SilentlyContinue\""
         );
         fixes.Add("Updated Windows Defender definitions");
-        AnsiConsole.MarkupLine("[green]? Updated Windows Defender definitions[/]");
+        AnsiConsole.MarkupLine("[green]✓ Updated Windows Defender definitions[/]");
 
-        // Start Windows Update service
-        await CommandExecutor.ExecuteAsync("net", "start wuauserv");
-        fixes.Add("Started Windows Update service");
+        // Start Windows Update service. `net start` reports failure only through
+        // an exit code, and would ask about dependents with nothing to answer.
+        if (await ServiceOps.StartAsync("wuauserv") is null)
+        {
+            fixes.Add("Started Windows Update service");
+        }
+        else
+        {
+            issues.Add("Could not start the Windows Update service");
+        }
     }
 
     private async Task DisableSuspiciousStartupAsync(List<string> fixes, List<string> issues)
@@ -699,11 +700,7 @@ public class SecurityHardeningTask : BaseTask
 
         foreach (var key in suspiciousRunKeys)
         {
-            var (querySuccess, queryOutput, _) = await CommandExecutor.ExecuteAsync(
-                "reg",
-                $"query \"{key}\""
-            );
-            if (querySuccess)
+            if (await RegistryOps.KeyExistsAsync(key))
             {
                 AnsiConsole.MarkupLine($"[dim]Checked: {key}[/]");
             }

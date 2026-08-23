@@ -10,6 +10,71 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.14.0
+
+### Added
+
+- **Remediation ledger.** Every change now records what it wanted, what it did,
+  and the read-back that proves it. `remediation::apply` reads the state before
+  acting, skips the write when the machine is already right, performs the
+  change, then reads the state again — and that second read is what lands in the
+  log as `Proof`. The run log gains a `REMEDIATION LEDGER` section grouped by
+  task, and the console gains a `Changes and Proof` summary that names anything
+  it could not confirm.
+- Five outcomes replace the old pass/fail: `FIXED`, `ALREADY OK`, `FAILED`,
+  `UNVERIFIED` (the write reported success and the machine disagrees, or could
+  not be read back) and `SKIPPED`. `UNVERIFIED` is the case the ledger exists
+  for — it was previously indistinguishable from success.
+- `registry_ops`, `service_ops`, `account_ops` and `policy_ops` route every
+  write through the ledger, so coverage does not depend on each task
+  remembering to log. The shared-folder, scheduled-task and hosts-file changes,
+  which write outside those modules, are wired individually.
+- Fixes are attributed with a `tokio` task-local rather than a global, so the
+  independent audits that run concurrently are grouped under the task that
+  actually made each change.
+- **Chocolatey support** (`chocolatey`), ported from the C# `Chocolatey`
+  utility. Required software the README names is now installed rather than
+  reported as needing a manual install, and installed software is upgraded by
+  package name. Chocolatey is bootstrapped when absent and resolved by absolute
+  path as well as by name, because a running process keeps the environment block
+  it started with and would not see the freshly installed `choco` on PATH.
+
+### Changed
+
+- The 42 hardening registry settings go through `registry_ops` instead of
+  shelling out to `reg add`, so they use the Windows API where available and
+  each one is proved. A non-DWORD entry added to the table now fails loudly
+  rather than being written as a number.
+- `SecurityHardeningTask` read the registry with `output.contains("0x1")`, which
+  also matched `0x10` and `0x1a`, so a setting could read as correct whatever it
+  held. It now compares the value exactly through `registry_ops::dword_equals`.
+- The `net accounts` parser moved onto `PasswordPolicyInfo`, so the task and the
+  ledger's evidence read the output through one parser rather than two that
+  could disagree.
+- Registry-write failures in the hardening task are recorded in the task's
+  issues; they were counted for the on-screen tally but never surfaced.
+- Software management verifies against the uninstall registry rather than a
+  second `wmic product` call, and an inventory that cannot be read now fails
+  verification instead of passing on an empty list.
+- Prohibited software is excluded from the update candidates. `choco upgrade`
+  *installs* a package that is absent, and the candidate list is built from the
+  inventory read before removal — so a run that removed Python put a newer
+  Python back four minutes later.
+
+### Fixed
+
+- **Security hardening ignored the README**, denying Remote Desktop even on an
+  image whose scenario requires it — while service management protected
+  `TermService` in the same run, leaving the service running with every
+  connection refused. Group policy then verified `fDenyTSConnections=1`
+  unconditionally, reporting a failure for having done the right thing.
+- **Group members were parsed out of the surrounding prose.** "add the users a,
+  b and c into the group" yielded `users` and `group` as members, and the run
+  issued `net localgroup allsafe "group" /add`.
+- 219 status glyphs across both ports rendered as a literal `?` — `✓`, `✗` and
+  `⚠` had been flattened by an encoding round-trip. Since the run log mirrors
+  console output, these were in the log too.
+
 ## 1.13.0
 
 ### Fixed

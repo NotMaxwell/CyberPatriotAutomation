@@ -174,12 +174,48 @@ parser written against English output returns nothing on a non-English image, an
 | `reg add` | `RegistryOps` | `NativeRegistry` (64-bit view explicitly) |
 | `sc` / `net start` / `net stop` | `ServiceOps` | `NativeServices` (stops dependents, never prompts) |
 | `net user` / `net localgroup` | `LocalAccounts` | `NativeAccounts` + `*-LocalUser` cmdlets |
+| `net accounts` | `PolicyOps` | password and lockout policy |
 | `auditpol.exe` | - | `NativeAuditPolicy` (category GUIDs) |
 | `netsh advfirewall` | - | `NativeFirewall` (`INetFwPolicy2`) |
 | `wmic product` | - | `NativeInstalledSoftware` (uninstall keys) |
 
 Never use `net user` to set a password: it interactively confirms anything over
 14 characters, and with no console to answer it the command aborts.
+
+## Every Change Must Prove Itself
+
+A write that returns success is not evidence that the machine changed. A value
+written to the wrong key, a service reconfigured but still running, a policy
+Windows silently normalised — all of them return success. Reporting those as
+fixed is the failure mode the run log exists to prevent.
+
+So the utilities above do not expose a bare write. Each mutating call goes
+through `Remediation.ApplyAsync` (`remediation::apply` in Rust), which:
+
+1. reads the current state, and returns early if it is already right —
+   "already compliant" and "fixed" are different facts,
+2. performs the write,
+3. **reads the state again**, and records that second read as the proof.
+
+The result is one `FixRecord` per change, carrying `Target`, `Intent`, `Before`,
+`Action`, `Outcome` and `Evidence`. `RunLog.AppendLedger` renders them grouped by
+task. Outcomes are `Fixed`, `AlreadyCompliant`, `Failed`, `Unverified` and
+`Skipped`; `Unverified` means the write reported success and the machine
+disagrees, or could not be read back.
+
+**When you add a remediation, route it through `Remediation` rather than calling
+the API directly.** If the result genuinely cannot be read back — setting a
+password, which Windows will not hand back — use `ApplyUnprovableAsync` and say
+why, rather than claiming a proof that was never taken. Audit-only tasks use
+`RecordFinding` so their conclusions land in the same ledger.
+
+Two rules for the `readState` callback:
+
+- Return `null`/`None` **only** when the state could not be read. "Absent" is a
+  readable state and must be spelled as one, or a failed read will be recorded
+  as a successful removal.
+- Read through the same code path the task's own verify step uses. Two parsers
+  that disagree make a change look unapplied when it was not.
 
 ## Common Patterns
 
@@ -194,6 +230,12 @@ public void SetReadmeData(ReadmeData data)
 ```
 
 ### Progress Reporting
+
+Only from code that is *not* already inside one. `Program.cs` runs every task's
+`ExecuteAsync` inside an `AnsiConsole.Progress()`, and Spectre throws on a second
+concurrent dynamic display — an exception the task's own catch reports as a
+plain failure, having applied nothing.
+
 ```csharp
 await AnsiConsole.Progress()
     .StartAsync(async ctx =>

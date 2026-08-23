@@ -52,6 +52,28 @@ public class HostsFileAuditTask : BaseTask
         Description = "Audits the Windows hosts file for unauthorized entries.";
     }
 
+    /// <summary>
+    /// How many entries in the file are neither comments nor loopback, as
+    /// evidence text. Null when the file could not be read.
+    /// </summary>
+    private static async Task<string?> ReadUnauthorizedCountAsync()
+    {
+        try
+        {
+            var lines = await File.ReadAllLinesAsync(HostsFilePath);
+            var count = lines
+                .Select(l => l.Trim())
+                .Count(l =>
+                    !string.IsNullOrWhiteSpace(l) && !l.StartsWith("#") && !IsAllowedEntry(l)
+                );
+            return $"{count} unauthorized entries";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public override async Task<SystemInfo> ReadSystemStateAsync()
     {
         string[] lines = Array.Empty<string>();
@@ -134,28 +156,31 @@ public class HostsFileAuditTask : BaseTask
                 string.IsNullOrWhiteSpace(l) || l.Trim().StartsWith("#") || IsAllowedEntry(l.Trim())
             )
             .ToArray();
-        try
-        {
-            await File.WriteAllLinesAsync(HostsFilePath, newLines);
-            details.Add($"Removed: {string.Join(", ", unauthorized)}");
-            AnsiConsole.MarkupLine(
-                $"[green]✓ Removed unauthorized hosts entries: {string.Join(", ", unauthorized)}[/]"
-            );
-            return new TaskResult
+
+        var writeError = await Remediation.ApplyAsync(
+            target: HostsFilePath,
+            intent: $"only loopback entries; {unauthorized.Count} redirect(s) removed",
+            readState: () => ReadUnauthorizedCountAsync(),
+            isCompliant: state => state == "0 unauthorized entries",
+            action: $"rewrote the file without: {string.Join(", ", unauthorized)}",
+            apply: async () =>
             {
-                TaskName = Name,
-                // Success reflects the remediation having been applied. The
-                // previous `unauthorized.Count == 0` inverted this: cleaning up
-                // entries reported the task as failed, and only a file needing no
-                // work at all counted as a success.
-                Success = true,
-                Message = string.Join("\n", details),
-            };
-        }
-        catch (Exception ex)
+                try
+                {
+                    await File.WriteAllLinesAsync(HostsFilePath, newLines);
+                    return null;
+                }
+                catch (Exception ex)
+                {
+                    return ex.Message;
+                }
+            }
+        );
+
+        if (writeError is not null)
         {
-            AnsiConsole.MarkupLine($"[red]✗ Failed to update hosts file: {ex.Message}[/]");
-            details.Add($"Failed to update hosts file: {ex.Message}");
+            AnsiConsole.MarkupLine($"[red]✗ Failed to update hosts file: {writeError}[/]");
+            details.Add($"Failed to update hosts file: {writeError}");
             return new TaskResult
             {
                 TaskName = Name,
@@ -163,6 +188,21 @@ public class HostsFileAuditTask : BaseTask
                 Message = string.Join("\n", details),
             };
         }
+
+        details.Add($"Removed: {string.Join(", ", unauthorized)}");
+        AnsiConsole.MarkupLine(
+            $"[green]✓ Removed unauthorized hosts entries: {string.Join(", ", unauthorized)}[/]"
+        );
+        return new TaskResult
+        {
+            TaskName = Name,
+            // Success reflects the remediation having been applied. The previous
+            // `unauthorized.Count == 0` inverted this: cleaning up entries
+            // reported the task as failed, and only a file needing no work at all
+            // counted as a success.
+            Success = true,
+            Message = string.Join("\n", details),
+        };
     }
 
     public override async Task<bool> VerifyAsync()

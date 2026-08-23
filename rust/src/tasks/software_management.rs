@@ -289,7 +289,11 @@ impl SoftwareManagementTask {
 
     /// Runs a Windows Defender malware scan and returns (success, threats_found, message).
     async fn run_windows_defender_scan(&self) -> (bool, i32, String) {
-        let scan_type = if self.use_quick_scan { "QuickScan" } else { "FullScan" };
+        let scan_type = if self.use_quick_scan {
+            "QuickScan"
+        } else {
+            "FullScan"
+        };
         ui::markup_line(&format!("[blue]Running Windows Defender {scan_type}...[/]"));
 
         let (update_success, _o, update_error) = command::powershell("Update-MpSignature").await;
@@ -315,10 +319,19 @@ impl SoftwareManagementTask {
                 "[red]✗ Windows Defender scan failed: {}[/]",
                 ui::escape(&scan_error.clone().unwrap_or_default())
             ));
-            return (false, 0, format!("Windows Defender scan failed: {}", scan_error.unwrap_or_default()));
+            return (
+                false,
+                0,
+                format!(
+                    "Windows Defender scan failed: {}",
+                    scan_error.unwrap_or_default()
+                ),
+            );
         }
 
-        ui::markup_line(&format!("[green]✓ Windows Defender {scan_type} completed[/]"));
+        ui::markup_line(&format!(
+            "[green]✓ Windows Defender {scan_type} completed[/]"
+        ));
 
         let (threat_success, threat_output, _e) = command::powershell_query(
             "Get-MpThreatDetection | Select-Object -Property ThreatID, ActionSuccess | ConvertTo-Json",
@@ -329,8 +342,11 @@ impl SoftwareManagementTask {
         if threat_success && !threat_output.trim().is_empty() {
             threats_found = threat_output.split("ThreatID").count() as i32 - 1;
             if threats_found > 0 {
-                ui::markup_line(&format!("[red]⚠ Windows Defender found {threats_found} threat(s)[/]"));
-                let (remove_success, _o, remove_error) = command::powershell("Remove-MpThreat").await;
+                ui::markup_line(&format!(
+                    "[red]⚠ Windows Defender found {threats_found} threat(s)[/]"
+                ));
+                let (remove_success, _o, remove_error) =
+                    command::powershell("Remove-MpThreat").await;
                 if remove_success {
                     ui::markup_line("[green]✓ Attempted to remove detected threats[/]");
                 } else {
@@ -409,6 +425,10 @@ impl Task for SoftwareManagementTask {
                 task_name: self.name.clone(),
                 success: false,
                 message: "Could not read the installed software inventory".to_string(),
+                error_details: Some(
+                    "Neither the uninstall registry nor `wmic product` returned an inventory."
+                        .to_string(),
+                ),
                 ..Default::default()
             };
         };
@@ -460,7 +480,11 @@ impl Task for SoftwareManagementTask {
         details.push(format!("Prohibited software list: {}", self.prohibited_software.join(", ")));
         details.push(format!(
             "Required software list: {}",
-            self.required_software.iter().map(|r| r.name.clone()).collect::<Vec<_>>().join(", ")
+            self.required_software
+                .iter()
+                .map(|r| r.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
 
         if !to_remove.is_empty() {
@@ -475,7 +499,11 @@ impl Task for SoftwareManagementTask {
         if !to_install.is_empty() {
             details.push(format!(
                 "Missing required software: {}",
-                to_install.iter().map(|s| s.name.clone()).collect::<Vec<_>>().join(", ")
+                to_install
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         } else {
             details.push("All required software is installed.".to_string());
@@ -757,7 +785,13 @@ impl Task for SoftwareManagementTask {
         // `wmic product` call: wmic sees only MSI installs, so it could not see
         // the NSIS and Inno programs this task removes and reported them gone
         // whether they were or not.
-        let installed = Self::read_installed().await.unwrap_or_default();
+        //
+        // A read failure is not proof the machine is in the wanted state, so it
+        // fails verification rather than passing on an empty list.
+        let Some(installed) = Self::read_installed().await else {
+            run_log::diagnostic("software", "verify: the inventory could not be read");
+            return false;
+        };
 
         let still_present: Vec<&str> = installed
             .iter()

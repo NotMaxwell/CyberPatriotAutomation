@@ -343,7 +343,9 @@ fn decode_utf16(bytes: &[u8], to_u16: fn([u8; 2]) -> u16) -> String {
 pub fn parse_internet_shortcut(contents: &str) -> Option<String> {
     contents.lines().find_map(|line| {
         let (key, value) = line.split_once('=')?;
-        key.trim().eq_ignore_ascii_case("URL").then(|| value.trim().to_string())
+        key.trim()
+            .eq_ignore_ascii_case("URL")
+            .then(|| value.trim().to_string())
     })
 }
 
@@ -492,7 +494,12 @@ pub fn is_shortcut(path: &Path) -> bool {
 /// (e.g. "README.url", "Read Me.lnk", "CyberPatriot README.lnk")
 fn shortcut_name_looks_like_readme(path: &Path) -> bool {
     path.file_stem()
-        .map(|s| s.to_string_lossy().to_lowercase().replace(' ', "").contains("readme"))
+        .map(|s| {
+            s.to_string_lossy()
+                .to_lowercase()
+                .replace(' ', "")
+                .contains("readme")
+        })
         .unwrap_or(false)
 }
 
@@ -541,7 +548,8 @@ mod tests {
 
     #[test]
     fn internet_shortcut_url_value_is_extracted() {
-        let contents = "[InternetShortcut]\r\nURL=file:///C:/CyberPatriot/README.html\r\nIconIndex=0\r\n";
+        let contents =
+            "[InternetShortcut]\r\nURL=file:///C:/CyberPatriot/README.html\r\nIconIndex=0\r\n";
         assert_eq!(
             parse_internet_shortcut(contents).as_deref(),
             Some("file:///C:/CyberPatriot/README.html")
@@ -662,7 +670,9 @@ mod tests {
         assert!(is_remote_target(
             "https://example-bucket.s3.us-east-1.amazonaws.com/round/private/readme.html"
         ));
-        assert!(is_remote_target("https://any-other-host.example/whatever.html"));
+        assert!(is_remote_target(
+            "https://any-other-host.example/whatever.html"
+        ));
         assert!(is_remote_target("http://example.org/readme.html"));
         assert!(is_remote_target("  HTTPS://EXAMPLE.ORG/x  "));
 

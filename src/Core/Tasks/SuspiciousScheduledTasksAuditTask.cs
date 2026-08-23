@@ -32,6 +32,39 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
         return new SystemInfo { RawOutput = output, ErrorOutput = error };
     }
 
+    /// <summary>
+    /// One task's "Scheduled Task State", or null when it could not be read.
+    /// </summary>
+    /// <remarks>
+    /// This is the evidence for a disable: <c>schtasks /Change</c> reports only
+    /// an exit code, and a task that is still enabled after a successful-looking
+    /// change is exactly the case worth catching.
+    /// </remarks>
+    private static async Task<string?> ReadTaskStatusAsync(string taskName)
+    {
+        var (success, output, _) = await CommandExecutor.ExecuteAsync(
+            "schtasks",
+            $"/query /tn \"{taskName}\" /fo LIST /v"
+        );
+        if (!success)
+            return null;
+
+        foreach (
+            var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        )
+        {
+            // "Scheduled Task State:  Disabled" - the label is localised, but the
+            // fallback below keeps a wrong read from reading as a right one.
+            if (line.Contains("Scheduled Task State", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = line.Split(':').Skip(1).FirstOrDefault()?.Trim();
+                if (!string.IsNullOrEmpty(value))
+                    return value;
+            }
+        }
+        return null;
+    }
+
     public override async Task<TaskResult> ExecuteAsync()
     {
         if (DryRun)
@@ -109,11 +142,22 @@ public class SuspiciousScheduledTasksAuditTask : BaseTask
             if (taskLine.StartsWith(namePrefix, StringComparison.OrdinalIgnoreCase))
             {
                 var taskName = taskLine.Substring(namePrefix.Length).Trim();
-                var (disableSuccess, _, disableError) = await CommandExecutor.ExecuteAsync(
-                    "schtasks",
-                    $"/Change /TN \"{taskName}\" /Disable"
+                var disableError = await Remediation.ApplyAsync(
+                    target: $"Scheduled task {taskName}",
+                    intent: "disabled - it runs from a path a scheduled task should not",
+                    readState: () => ReadTaskStatusAsync(taskName),
+                    isCompliant: state => state == "Disabled",
+                    action: "ran schtasks /Change /Disable",
+                    apply: async () =>
+                    {
+                        var (ok, _, error) = await CommandExecutor.ExecuteAsync(
+                            "schtasks",
+                            $"/Change /TN \"{taskName}\" /Disable"
+                        );
+                        return ok ? null : error ?? "schtasks /Change failed";
+                    }
                 );
-                if (disableSuccess)
+                if (disableError is null)
                 {
                     AnsiConsole.MarkupLine($"[yellow]Disabled suspicious task: {taskName}[/]");
                     disabledTasks.Add(taskName);

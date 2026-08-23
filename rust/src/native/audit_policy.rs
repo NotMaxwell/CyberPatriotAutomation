@@ -12,7 +12,7 @@
 
 use super::from_wide;
 use windows::core::{GUID, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{HANDLE, ERROR_NOT_ALL_ASSIGNED};
+use windows::Win32::Foundation::{ERROR_NOT_ALL_ASSIGNED, HANDLE};
 use windows::Win32::Security::Authentication::Identity::{
     AuditEnumerateSubCategories, AuditFree, AuditLookupSubCategoryNameW, AuditQuerySystemPolicy,
     AuditSetSystemPolicy, AUDIT_POLICY_INFORMATION,

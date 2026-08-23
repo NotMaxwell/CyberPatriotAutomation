@@ -1,9 +1,9 @@
 //! Manage Windows services based on README requirements and security best practices.
 
 use crate::command;
-use crate::service_ops;
 use crate::impl_task_meta;
 use crate::models::{ReadmeData, SystemInfo, TaskResult};
+use crate::service_ops::{self, ServiceState};
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
@@ -13,7 +13,10 @@ use std::collections::HashSet;
 const SERVICES_TO_DISABLE: &[(&str, &str)] = &[
     ("TermService", "Remote Desktop Services"),
     ("SessionEnv", "Remote Desktop Configuration"),
-    ("UmRdpService", "Remote Desktop Services UserMode Port Redirector"),
+    (
+        "UmRdpService",
+        "Remote Desktop Services UserMode Port Redirector",
+    ),
     ("RemoteRegistry", "Remote Registry"),
     ("RemoteAccess", "Routing and Remote Access"),
     ("RasMan", "Remote Access Connection Manager"),
@@ -57,7 +60,10 @@ const SERVICES_TO_DISABLE: &[(&str, &str)] = &[
     ("SCardSvr", "Smart Card"),
     ("SCPolicySvc", "Smart Card Removal Policy"),
     ("TabletInputService", "Tablet PC Input Service"),
-    ("WMPNetworkSvc", "Windows Media Player Network Sharing Service"),
+    (
+        "WMPNetworkSvc",
+        "Windows Media Player Network Sharing Service",
+    ),
     ("icssvc", "Windows Mobile Hotspot Service"),
     ("lfsvc", "Geolocation Service"),
     ("MapsBroker", "Downloaded Maps Manager"),
@@ -189,14 +195,14 @@ impl ServiceManagementTask {
         if !readme.critical_services.is_empty() {
             ui::markup_line("[bold green]README Critical Services (Do NOT disable):[/]");
             for service in &readme.critical_services {
-                ui::markup_line(&format!("  [green]? {}[/]", ui::escape(service)));
+                ui::markup_line(&format!("  [green]✓ {}[/]", ui::escape(service)));
             }
             ui::write_line();
         }
         if !readme.prohibited_services.is_empty() {
             ui::markup_line("[bold red]README Services to Disable:[/]");
             for service in &readme.prohibited_services {
-                ui::markup_line(&format!("  [red]? {}[/]", ui::escape(service)));
+                ui::markup_line(&format!("  [red]✗ {}[/]", ui::escape(service)));
             }
             ui::write_line();
         }
@@ -242,27 +248,13 @@ impl ServiceManagementTask {
     /// The C# original spawned a separate PowerShell process per service, which
     /// is why it only ever sampled the first handful. One bulk query makes
     /// checking *all* of them cheap enough to be correct.
-    async fn service_status_map() -> std::collections::HashMap<String, String> {
-        let mut map = std::collections::HashMap::new();
-        let (success, output, _e) = command::powershell_query(
-            "Get-Service | Select-Object Name, Status | ConvertTo-Csv -NoTypeInformation",
-        )
-        .await;
-        if !success {
-            return map;
-        }
-        for line in output.split(['\r', '\n']).filter(|l| !l.trim().is_empty()).skip(1) {
-            let fields: Vec<&str> = line.split("\",\"").collect();
-            if fields.len() < 2 {
-                continue;
-            }
-            let name = fields[0].trim_matches('"').trim();
-            let status = fields[1].trim_matches('"').trim();
-            if !name.is_empty() {
-                map.insert(name.to_lowercase(), status.to_string());
-            }
-        }
-        map
+    async fn service_status_map() -> std::collections::HashMap<String, ServiceState> {
+        service_ops::enumerate_states()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(name, state)| (name.to_lowercase(), state))
+            .collect()
     }
 
     /// Ensure every protected service is running.
@@ -288,29 +280,39 @@ impl ServiceManagementTask {
                 // Not installed on this image - nothing to protect.
                 continue;
             };
-            if status.eq_ignore_ascii_case("Running") {
+            if *status == ServiceState::Running {
                 ui::markup_line(&format!("[dim]? {service} is already running[/]"));
                 continue;
             }
 
-            ui::markup_line(&format!("[yellow]Starting critical service: {service}...[/]"));
+            ui::markup_line(&format!(
+                "[yellow]Starting critical service: {service}...[/]"
+            ));
             // A disabled service cannot be started until its start type is reset.
             let _ = service_ops::set_automatic(service).await;
             let start_error = service_ops::start(service).await.err();
             if start_error.is_none() {
                 fixes.push(format!("Started critical service: {service}"));
-                ui::markup_line(&format!("[green]? Started {service}[/]"));
+                ui::markup_line(&format!("[green]✓ Started {service}[/]"));
             } else {
                 let e = start_error.unwrap_or_default();
                 issues.push(format!("Could not start critical service {service}: {e}"));
-                ui::markup_line(&format!("[red]? Could not start {}: {}[/]", service, ui::escape(&e)));
+                ui::markup_line(&format!(
+                    "[red]✗ Could not start {}: {}[/]",
+                    service,
+                    ui::escape(&e)
+                ));
             }
         }
     }
 
-    async fn enable_services(to_enable: &ServiceSet, fixes: &mut Vec<String>, issues: &mut Vec<String>) {
+    async fn enable_services(
+        to_enable: &ServiceSet,
+        fixes: &mut Vec<String>,
+        issues: &mut Vec<String>,
+    ) {
         if to_enable.len() == 0 {
-            ui::markup_line("[green]? No additional services need to be enabled[/]");
+            ui::markup_line("[green]✓ No additional services need to be enabled[/]");
             return;
         }
         for service in to_enable.iter() {
@@ -318,7 +320,7 @@ impl ServiceManagementTask {
             let config_error = service_ops::set_automatic(service).await.err();
             if let Some(config_error) = config_error {
                 issues.push(format!("Could not enable {service}: {config_error}"));
-                ui::markup_line(&format!("[red]? Could not enable {service}[/]"));
+                ui::markup_line(&format!("[red]✗ Could not enable {service}[/]"));
                 continue;
             }
 
@@ -331,12 +333,14 @@ impl ServiceManagementTask {
 
             if start_error.is_none() {
                 fixes.push(format!("Enabled service: {service}"));
-                ui::markup_line(&format!("[green]? Enabled {service}[/]"));
+                ui::markup_line(&format!("[green]✓ Enabled {service}[/]"));
             } else {
                 let e = start_error.unwrap_or_default();
-                issues.push(format!("Set {service} to auto-start but could not start it: {e}"));
+                issues.push(format!(
+                    "Set {service} to auto-start but could not start it: {e}"
+                ));
                 ui::markup_line(&format!(
-                    "[yellow]? {} set to auto-start but did not start: {}[/]",
+                    "[yellow]⚠ {} set to auto-start but did not start: {}[/]",
                     service,
                     ui::escape(&e)
                 ));
@@ -352,7 +356,11 @@ impl ServiceManagementTask {
     ) {
         let mut table = ui::TableBuilder::new()
             .title("[bold red]Services to Disable[/]")
-            .columns(&["[bold]Service[/]", "[bold]Description[/]", "[bold]Status[/]"]);
+            .columns(&[
+                "[bold]Service[/]",
+                "[bold]Description[/]",
+                "[bold]Status[/]",
+            ]);
 
         let mut disabled_count = 0;
         let mut skipped_count = 0;
@@ -388,12 +396,24 @@ impl ServiceManagementTask {
             let disable_error = service_ops::disable(service).await.err();
 
             if disable_error.is_none() {
-                table.add_row([format!("[red]{service}[/]"), description.to_string(), "[green]Disabled[/]".to_string()]);
+                table.add_row([
+                    format!("[red]{service}[/]"),
+                    description.to_string(),
+                    "[green]Disabled[/]".to_string(),
+                ]);
                 fixes.push(format!("Disabled service: {service}"));
                 disabled_count += 1;
             } else {
-                table.add_row([format!("[yellow]{service}[/]"), description.to_string(), "[red]Failed[/]".to_string()]);
-                issues.push(format!("Failed to disable {}: {}", service, disable_error.unwrap_or_default()));
+                table.add_row([
+                    format!("[yellow]{service}[/]"),
+                    description.to_string(),
+                    "[red]Failed[/]".to_string(),
+                ]);
+                issues.push(format!(
+                    "Failed to disable {}: {}",
+                    service,
+                    disable_error.unwrap_or_default()
+                ));
             }
         }
 
@@ -415,19 +435,22 @@ impl ServiceManagementTask {
             .await;
             if success {
                 fixes.push(format!("Disabled feature: {feature}"));
-                ui::markup_line(&format!("[green]? Disabled feature: {feature}[/]"));
+                ui::markup_line(&format!("[green]✓ Disabled feature: {feature}[/]"));
             } else {
-                ui::markup_line(&format!("[dim]Feature {feature} may not exist or already disabled[/]"));
+                ui::markup_line(&format!(
+                    "[dim]Feature {feature} may not exist or already disabled[/]"
+                ));
             }
         }
         ui::markup_line("[cyan]Ensuring SMB1 is disabled...[/]");
         let (smb1_success, _o, _e) =
-            command::powershell("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force").await;
+            command::powershell("Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force")
+                .await;
         if smb1_success {
             fixes.push("Disabled SMB1 protocol".to_string());
-            ui::markup_line("[green]? Disabled SMB1 protocol[/]");
+            ui::markup_line("[green]✓ Disabled SMB1 protocol[/]");
         } else {
-            ui::markup_line("[yellow]? Could not disable SMB1 protocol[/]");
+            ui::markup_line("[yellow]⚠ Could not disable SMB1 protocol[/]");
         }
     }
 }
@@ -446,14 +469,11 @@ impl Task for ServiceManagementTask {
         let mut system_info = SystemInfo::new();
         ui::markup_line("[cyan]Reading current service states...[/]");
 
-        let (success, output, _e) = command::powershell_query(
-            "Get-Service | Select-Object Name, DisplayName, Status, StartType | ConvertTo-Csv -NoTypeInformation",
-        )
-        .await;
-
-        if success && !output.is_empty() {
-            for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()).skip(1).take(20) {
-                system_info.running_services.push(line.to_string());
+        if let Some(services) = service_ops::enumerate_states().await {
+            for (name, state) in services.into_iter().take(20) {
+                system_info
+                    .running_services
+                    .push(format!("{name},{state:?}"));
             }
         }
 
@@ -475,11 +495,22 @@ impl Task for ServiceManagementTask {
         let (to_disable, to_enable, do_not_touch) = self.build_service_lists();
 
         if self.dry_run {
-            ui::markup_line("[yellow]DRY RUN: Previewing service changes (no changes will be made)[/]");
-            ui::markup_line(&format!("[cyan]Services to disable: {}[/]", to_disable.len()));
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing service changes (no changes will be made)[/]",
+            );
+            ui::markup_line(&format!(
+                "[cyan]Services to disable: {}[/]",
+                to_disable.len()
+            ));
             ui::markup_line(&format!("[cyan]Services to enable: {}[/]", to_enable.len()));
-            ui::markup_line(&format!("[cyan]Services protected: {}[/]", do_not_touch.len()));
-            result.message = format!("DRY RUN: Would apply changes to {} services.", to_disable.len() + to_enable.len());
+            ui::markup_line(&format!(
+                "[cyan]Services protected: {}[/]",
+                do_not_touch.len()
+            ));
+            result.message = format!(
+                "DRY RUN: Would apply changes to {} services.",
+                to_disable.len() + to_enable.len()
+            );
             return result;
         }
 
@@ -500,10 +531,24 @@ impl Task for ServiceManagementTask {
         Self::disable_insecure_features(&mut fixes, &mut issues).await;
 
         if !issues.is_empty() {
-            result.message = format!("Applied {} service changes. {} issues encountered.", fixes.len(), issues.len());
-            result.error_details = Some(issues.iter().take(10).cloned().collect::<Vec<_>>().join("\n"));
+            result.message = format!(
+                "Applied {} service changes. {} issues encountered.",
+                fixes.len(),
+                issues.len()
+            );
+            result.error_details = Some(
+                issues
+                    .iter()
+                    .take(10)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         } else {
-            result.message = format!("Successfully applied {} service management changes.", fixes.len());
+            result.message = format!(
+                "Successfully applied {} service management changes.",
+                fixes.len()
+            );
         }
 
         result
@@ -522,15 +567,15 @@ impl Task for ServiceManagementTask {
             let Some(status) = statuses.get(&service.to_lowercase()) else {
                 continue;
             };
-            if status.eq_ignore_ascii_case("Running") {
-                ui::markup_line(&format!("[green]? Critical service {service} is running[/]"));
+            if *status == ServiceState::Running {
+                ui::markup_line(&format!(
+                    "[green]✓ Critical service {service} is running[/]"
+                ));
             } else {
                 // A critical service that is not running is a verification
                 // failure: these are the services that must stay up.
                 ui::markup_line(&format!(
-                    "[red]? Critical service {} is {}[/]",
-                    service,
-                    ui::escape(status)
+                    "[red]✗ Critical service {service} is {status:?}[/]"
                 ));
                 all_good = false;
             }
@@ -540,13 +585,13 @@ impl Task for ServiceManagementTask {
             let Some(status) = statuses.get(&service.to_lowercase()) else {
                 continue;
             };
-            if status.eq_ignore_ascii_case("Stopped") {
-                ui::markup_line(&format!("[green]? Insecure service {service} is stopped[/]"));
+            if *status == ServiceState::Stopped {
+                ui::markup_line(&format!(
+                    "[green]✓ Insecure service {service} is stopped[/]"
+                ));
             } else {
                 ui::markup_line(&format!(
-                    "[red]? Insecure service {} is still {}[/]",
-                    service,
-                    ui::escape(status)
+                    "[red]✗ Insecure service {service} is still {status:?}[/]"
                 ));
                 all_good = false;
             }

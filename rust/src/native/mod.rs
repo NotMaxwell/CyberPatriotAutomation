@@ -20,6 +20,8 @@ pub mod accounts;
 #[cfg(windows)]
 pub mod audit_policy;
 #[cfg(windows)]
+pub mod dns;
+#[cfg(windows)]
 pub mod firewall;
 #[cfg(windows)]
 pub mod installed_software;
@@ -27,6 +29,10 @@ pub mod installed_software;
 pub mod registry;
 #[cfg(windows)]
 pub mod services;
+#[cfg(windows)]
+pub mod shares;
+#[cfg(windows)]
+pub mod users;
 
 /// Encode a Rust string as a null-terminated UTF-16 buffer for the Win32 `W`
 /// entry points.
@@ -48,5 +54,7 @@ pub(crate) unsafe fn from_wide(ptr: *const u16) -> Option<String> {
     while *ptr.add(len) != 0 {
         len += 1;
     }
-    Some(String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len)))
+    Some(String::from_utf16_lossy(std::slice::from_raw_parts(
+        ptr, len,
+    )))
 }

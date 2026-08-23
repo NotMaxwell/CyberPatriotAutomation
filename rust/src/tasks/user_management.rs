@@ -1,6 +1,5 @@
 //! Manage user accounts based on README requirements.
 
-use crate::command;
 use crate::impl_task_meta;
 use crate::models::{AccountInfo, ReadmeData, SystemInfo, TaskResult};
 use crate::tasks::Task;
@@ -22,67 +21,13 @@ const SECURE_PASSWORDS: &[&str] = &[
     "S8!dF7@gH6#jK5$lZ4%xC3^vB2&nM1bN0(mL9)K",
 ];
 
-/// Set a local account's password.
-///
-/// Uses PowerShell rather than `net user`: `net` interactively confirms any
-/// password longer than 14 characters ("Do you want to continue this operation?
-/// (Y/N)"), and these commands run with stdin closed, so the prompt reaches EOF
-/// and `net` aborts. Every generated password is longer than that, so every
-/// password change failed. `Set-LocalUser` has no prompt and reports a real
-/// reason on failure.
-async fn set_password(username: &str, password: &str) -> Result<(), String> {
-    let script = format!(
-        "Set-LocalUser -Name {} -Password (ConvertTo-SecureString {} -AsPlainText -Force)",
-        command::ps_quote(username),
-        command::ps_quote(password)
-    );
-    match command::powershell(&script).await {
-        (true, _, _) => Ok(()),
-        (false, _, error) => Err(describe(error)),
-    }
-}
-
-/// Create a local account with the given password.
-async fn create_user(username: &str, password: &str) -> Result<(), String> {
-    let script = format!(
-        "New-LocalUser -Name {} -Password (ConvertTo-SecureString {} -AsPlainText -Force) \
-         -AccountNeverExpires -ErrorAction Stop | Out-Null",
-        command::ps_quote(username),
-        command::ps_quote(password)
-    );
-    match command::powershell(&script).await {
-        (true, _, _) => Ok(()),
-        (false, _, error) => Err(describe(error)),
-    }
-}
-
-/// Add a local account to a local group.
-async fn add_to_group(username: &str, group: &str) -> Result<(), String> {
-    let script = format!(
-        "Add-LocalGroupMember -Group {} -Member {}",
-        command::ps_quote(group),
-        command::ps_quote(username)
-    );
-    match command::powershell(&script).await {
-        (true, _, _) => Ok(()),
-        (false, _, error) => {
-            let reason = describe(error);
-            // Already a member is the desired end state, not a failure.
-            if reason.to_lowercase().contains("already a member") {
-                Ok(())
-            } else {
-                Err(reason)
-            }
-        }
-    }
-}
-
-fn describe(error: Option<String>) -> String {
-    error
-        .map(|e| e.trim().to_string())
-        .filter(|e| !e.is_empty())
-        .unwrap_or_else(|| "no reason reported".to_string())
-}
+// Account and group changes go through `account_ops`, which picks the Windows
+// API where it is available and the shell otherwise. See that module for why
+// neither `net user` nor the cmdlets are used directly.
+use crate::account_ops::{
+    self, add_to_group, create_group, create_user, delete_user, group_exists, remove_from_group,
+    set_password, set_password_never_expires,
+};
 
 /// A strong password unique to each account.
 ///
@@ -90,7 +35,10 @@ fn describe(error: Option<String>) -> String {
 /// accounts than entries; the index suffix keeps every account distinct while
 /// preserving length and character-class coverage.
 fn generate_password(index: usize) -> String {
-    format!("{}#{index:02}", SECURE_PASSWORDS[index % SECURE_PASSWORDS.len()])
+    format!(
+        "{}#{index:02}",
+        SECURE_PASSWORDS[index % SECURE_PASSWORDS.len()]
+    )
 }
 
 /// Case-insensitive set built from an iterator of strings.
@@ -114,7 +62,8 @@ impl UserManagementTask {
     pub fn new() -> Self {
         Self {
             name: "User Account Management".to_string(),
-            description: "Manage users, passwords, and permissions based on README requirements".to_string(),
+            description: "Manage users, passwords, and permissions based on README requirements"
+                .to_string(),
             dry_run: false,
             readme_data: None,
             current_accounts: Vec::new(),
@@ -126,22 +75,15 @@ impl UserManagementTask {
     }
 
     async fn get_all_user_accounts() -> Vec<AccountInfo> {
-        let mut accounts = Vec::new();
-        let (success, output, _e) = command::powershell_query(
-            "Get-LocalUser | Select-Object Name, FullName, Enabled, Description | ConvertTo-Csv -NoTypeInformation",
-        )
-        .await;
+        let Some(mut accounts) = account_ops::enumerate_users().await else {
+            return Vec::new();
+        };
 
-        if success && !output.is_empty() {
-            // Read the Administrators membership once rather than shelling out
-            // per account, and match names exactly.
-            let admins = crate::tasks::local_group_members("Administrators").await;
-            for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()).skip(1) {
-                if let Some(mut account) = parse_account_line(line) {
-                    account.is_admin = crate::tasks::is_group_member(&admins, &account.username);
-                    accounts.push(account);
-                }
-            }
+        // Read the Administrators membership once rather than shelling out per
+        // account, and match names exactly.
+        let admins = crate::tasks::local_group_members("Administrators").await;
+        for account in &mut accounts {
+            account.is_admin = crate::tasks::is_group_member(&admins, &account.username);
         }
         accounts
     }
@@ -166,8 +108,18 @@ impl UserManagementTask {
         for account in &self.current_accounts {
             table.add_row([
                 account.username.clone(),
-                if account.is_enabled { "[green]Yes[/]" } else { "[dim]No[/]" }.to_string(),
-                if account.is_admin { "[yellow]Yes[/]" } else { "[dim]No[/]" }.to_string(),
+                if account.is_enabled {
+                    "[green]Yes[/]"
+                } else {
+                    "[dim]No[/]"
+                }
+                .to_string(),
+                if account.is_admin {
+                    "[yellow]Yes[/]"
+                } else {
+                    "[dim]No[/]"
+                }
+                .to_string(),
             ]);
         }
         table.print();
@@ -196,7 +148,8 @@ impl UserManagementTask {
                 "[yellow]re-check the README with --parse-readme before running user management.[/]",
             );
             issues.push(
-                "Skipped unauthorized-user deletion: README produced no authorized users".to_string(),
+                "Skipped unauthorized-user deletion: README produced no authorized users"
+                    .to_string(),
             );
             return (fixes, issues);
         }
@@ -213,29 +166,45 @@ impl UserManagementTask {
             .collect();
 
         if unauthorized.is_empty() {
-            ui::markup_line("[green]? No unauthorized users found[/]");
+            ui::markup_line("[green]✓ No unauthorized users found[/]");
             return (fixes, issues);
         }
 
-        ui::markup_line(&format!("[yellow]Found {} unauthorized user(s):[/]", unauthorized.len()));
+        ui::markup_line(&format!(
+            "[yellow]Found {} unauthorized user(s):[/]",
+            unauthorized.len()
+        ));
         let mut table = ui::TableBuilder::new().columns(&["[bold]Username[/]", "[bold]Action[/]"]);
         for user in &unauthorized {
-            table.add_row([format!("[red]{}[/]", ui::escape(&user.username)), "Will be deleted".to_string()]);
+            table.add_row([
+                format!("[red]{}[/]", ui::escape(&user.username)),
+                "Will be deleted".to_string(),
+            ]);
         }
         table.print();
         ui::write_line();
 
         for user in &unauthorized {
-            ui::markup_line(&format!("[yellow]Deleting user: {}...[/]", ui::escape(&user.username)));
-            let (success, _o, error) =
-                command::execute("net", Some(&format!("user \"{}\" /delete", user.username))).await;
-            if success {
-                fixes.push(format!("Deleted unauthorized user: {}", user.username));
-                ui::markup_line(&format!("[green]? Deleted user: {}[/]", ui::escape(&user.username)));
-            } else {
-                let e = error.unwrap_or_default();
-                issues.push(format!("Failed to delete user {}: {}", user.username, e));
-                ui::markup_line(&format!("[red]? Failed to delete {}: {}[/]", ui::escape(&user.username), ui::escape(&e)));
+            ui::markup_line(&format!(
+                "[yellow]Deleting user: {}...[/]",
+                ui::escape(&user.username)
+            ));
+            match delete_user(&user.username).await {
+                Ok(()) => {
+                    fixes.push(format!("Deleted unauthorized user: {}", user.username));
+                    ui::markup_line(&format!(
+                        "[green]✓ Deleted user: {}[/]",
+                        ui::escape(&user.username)
+                    ));
+                }
+                Err(e) => {
+                    issues.push(format!("Failed to delete user {}: {}", user.username, e));
+                    ui::markup_line(&format!(
+                        "[red]✗ Failed to delete {}: {}[/]",
+                        ui::escape(&user.username),
+                        ui::escape(&e)
+                    ));
+                }
             }
         }
 
@@ -264,45 +233,82 @@ impl UserManagementTask {
             let is_currently_admin = account.is_admin;
 
             if should_be_admin && !is_currently_admin {
-                ui::markup_line(&format!("[yellow]Adding {} to Administrators group...[/]", ui::escape(&account.username)));
-                let (success, _o, error) = command::execute(
-                    "net",
-                    Some(&format!("localgroup Administrators \"{}\" /add", account.username)),
-                )
-                .await;
-                if success {
-                    fixes.push(format!("Added {} to Administrators group", account.username));
-                    ui::markup_line(&format!("[green]? {} is now an administrator[/]", ui::escape(&account.username)));
-                } else if error.as_deref().map(|e| e.contains("already a member")).unwrap_or(false) {
-                    ui::markup_line(&format!("[dim]{} is already in Administrators group[/]", ui::escape(&account.username)));
-                } else {
-                    issues.push(format!("Failed to add {} to Administrators: {}", account.username, error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to add {} to Administrators[/]", ui::escape(&account.username)));
+                ui::markup_line(&format!(
+                    "[yellow]Adding {} to Administrators group...[/]",
+                    ui::escape(&account.username)
+                ));
+                // Already a member reads as success from here, so there is no
+                // longer a localised "already a member" string to match on.
+                match add_to_group(&account.username, "Administrators").await {
+                    Ok(()) => {
+                        fixes.push(format!(
+                            "Added {} to Administrators group",
+                            account.username
+                        ));
+                        ui::markup_line(&format!(
+                            "[green]✓ {} is now an administrator[/]",
+                            ui::escape(&account.username)
+                        ));
+                    }
+                    Err(e) => {
+                        issues.push(format!(
+                            "Failed to add {} to Administrators: {}",
+                            account.username, e
+                        ));
+                        ui::markup_line(&format!(
+                            "[red]✗ Failed to add {} to Administrators[/]",
+                            ui::escape(&account.username)
+                        ));
+                    }
                 }
             } else if !should_be_admin && is_currently_admin {
-                ui::markup_line(&format!("[yellow]Removing {} from Administrators group...[/]", ui::escape(&account.username)));
-                let (success, _o, error) = command::execute(
-                    "net",
-                    Some(&format!("localgroup Administrators \"{}\" /delete", account.username)),
-                )
-                .await;
-                if success {
-                    fixes.push(format!("Removed {} from Administrators group", account.username));
-                    ui::markup_line(&format!("[green]? {} is no longer an administrator[/]", ui::escape(&account.username)));
-                } else {
-                    issues.push(format!("Failed to remove {} from Administrators: {}", account.username, error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to remove {} from Administrators[/]", ui::escape(&account.username)));
+                ui::markup_line(&format!(
+                    "[yellow]Removing {} from Administrators group...[/]",
+                    ui::escape(&account.username)
+                ));
+                match remove_from_group(&account.username, "Administrators").await {
+                    Ok(()) => {
+                        fixes.push(format!(
+                            "Removed {} from Administrators group",
+                            account.username
+                        ));
+                        ui::markup_line(&format!(
+                            "[green]✓ {} is no longer an administrator[/]",
+                            ui::escape(&account.username)
+                        ));
+                    }
+                    Err(e) => {
+                        issues.push(format!(
+                            "Failed to remove {} from Administrators: {}",
+                            account.username, e
+                        ));
+                        ui::markup_line(&format!(
+                            "[red]✗ Failed to remove {} from Administrators[/]",
+                            ui::escape(&account.username)
+                        ));
+                    }
                 }
             } else {
-                let role = if should_be_admin { "administrator" } else { "standard user" };
-                ui::markup_line(&format!("[dim]? {} has correct permissions ({})[/]", ui::escape(&account.username), role));
+                let role = if should_be_admin {
+                    "administrator"
+                } else {
+                    "standard user"
+                };
+                ui::markup_line(&format!(
+                    "[dim]? {} has correct permissions ({})[/]",
+                    ui::escape(&account.username),
+                    role
+                ));
             }
         }
 
         (fixes, issues)
     }
 
-    async fn update_insecure_passwords(&mut self, authorized_users: &HashSet<String>) -> (Vec<String>, Vec<String>) {
+    async fn update_insecure_passwords(
+        &mut self,
+        authorized_users: &HashSet<String>,
+    ) -> (Vec<String>, Vec<String>) {
         let mut fixes = Vec::new();
         let mut issues = Vec::new();
 
@@ -378,7 +384,7 @@ impl UserManagementTask {
                         account.username
                     ));
                     ui::markup_line(&format!(
-                        "[green]? {} password set to: {}[/]",
+                        "[green]✓ {} password set to: {}[/]",
                         ui::escape(&account.username),
                         ui::escape(&password)
                     ));
@@ -389,7 +395,7 @@ impl UserManagementTask {
                         account.username
                     ));
                     ui::markup_line(&format!(
-                        "[red]? Failed to set password for {}: {}[/]",
+                        "[red]✗ Failed to set password for {}: {}[/]",
                         ui::escape(&account.username),
                         ui::escape(&reason)
                     ));
@@ -400,19 +406,21 @@ impl UserManagementTask {
         ui::write_line();
         ui::markup_line("[cyan]Ensuring all accounts require passwords...[/]");
         for account in &accounts {
-            let (success, _o, error) = command::powershell(&format!(
-                "Set-LocalUser -Name {} -PasswordNeverExpires $false",
-                command::ps_quote(&account.username)
-            ))
-            .await;
-            if success {
-                ui::markup_line(&format!("[dim]? Password expiration enabled for {}[/]", ui::escape(&account.username)));
-            } else {
-                issues.push(format!(
-                    "Failed to enable password expiration for {}: {}",
-                    account.username,
-                    error.unwrap_or_default()
-                ));
+            // Subject the password to the maximum-age policy the password task
+            // just set; without this the account is exempt from it.
+            match set_password_never_expires(&account.username, false).await {
+                Ok(()) => {
+                    ui::markup_line(&format!(
+                        "[dim]? Password expiration enabled for {}[/]",
+                        ui::escape(&account.username)
+                    ));
+                }
+                Err(e) => {
+                    issues.push(format!(
+                        "Failed to enable password expiration for {}: {e}",
+                        account.username
+                    ));
+                }
             }
         }
 
@@ -428,7 +436,7 @@ impl UserManagementTask {
         let mut issues = Vec::new();
 
         if users_to_create.is_empty() {
-            ui::markup_line("[green]? No new users need to be created[/]");
+            ui::markup_line("[green]✓ No new users need to be created[/]");
             return (fixes, issues);
         }
 
@@ -438,19 +446,27 @@ impl UserManagementTask {
         let mut password_index = 0usize;
         for username in users_to_create {
             if ci_contains(&existing, username) {
-                ui::markup_line(&format!("[dim]? User {} already exists[/]", ui::escape(username)));
+                ui::markup_line(&format!(
+                    "[dim]? User {} already exists[/]",
+                    ui::escape(username)
+                ));
                 continue;
             }
 
             let password = generate_password(password_index);
             password_index += 1;
 
-            ui::markup_line(&format!("[yellow]Creating new user: {}...[/]", ui::escape(username)));
+            ui::markup_line(&format!(
+                "[yellow]Creating new user: {}...[/]",
+                ui::escape(username)
+            ));
             match create_user(username, &password).await {
                 Ok(()) => {
-                    fixes.push(format!("Created new user {username} with password: {password}"));
+                    fixes.push(format!(
+                        "Created new user {username} with password: {password}"
+                    ));
                     ui::markup_line(&format!(
-                        "[green]? Created user {} with password: {}[/]",
+                        "[green]✓ Created user {} with password: {}[/]",
                         ui::escape(username),
                         ui::escape(&password)
                     ));
@@ -460,7 +476,7 @@ impl UserManagementTask {
                             Ok(()) => {
                                 fixes.push(format!("Added {username} to Administrators"));
                                 ui::markup_line(&format!(
-                                    "[green]? Added {} to Administrators group[/]",
+                                    "[green]✓ Added {} to Administrators group[/]",
                                     ui::escape(username)
                                 ));
                             }
@@ -469,7 +485,7 @@ impl UserManagementTask {
                                     "Failed to add {username} to Administrators: {reason}"
                                 ));
                                 ui::markup_line(&format!(
-                                    "[red]? Failed to add {} to Administrators: {}[/]",
+                                    "[red]✗ Failed to add {} to Administrators: {}[/]",
                                     ui::escape(username),
                                     ui::escape(&reason)
                                 ));
@@ -480,7 +496,7 @@ impl UserManagementTask {
                 Err(reason) => {
                     issues.push(format!("Failed to create user {username}: {reason}"));
                     ui::markup_line(&format!(
-                        "[red]? Failed to create user {}: {}[/]",
+                        "[red]✗ Failed to create user {}: {}[/]",
                         ui::escape(username),
                         ui::escape(&reason)
                     ));
@@ -497,46 +513,76 @@ impl UserManagementTask {
 
         let group_requirements = self.readme_data.as_ref().map(|r| &r.group_requirements);
         if group_requirements.map(|g| g.is_empty()).unwrap_or(true) {
-            ui::markup_line("[green]? No group requirements specified[/]");
+            ui::markup_line("[green]✓ No group requirements specified[/]");
             return (fixes, issues);
         }
 
         for group_req in group_requirements.unwrap() {
-            ui::markup_line(&format!("[cyan]Configuring group: {}[/]", ui::escape(&group_req.group_name)));
+            ui::markup_line(&format!(
+                "[cyan]Configuring group: {}[/]",
+                ui::escape(&group_req.group_name)
+            ));
 
-            let (check_success, check_output, _e) =
-                command::execute("net", Some(&format!("localgroup \"{}\"", group_req.group_name))).await;
-
-            if !check_success || check_output.contains("does not exist") {
-                ui::markup_line(&format!("[yellow]Creating group: {}...[/]", ui::escape(&group_req.group_name)));
-                let (create_success, _o, create_error) =
-                    command::execute("net", Some(&format!("localgroup \"{}\" /add", group_req.group_name))).await;
-                if create_success {
-                    fixes.push(format!("Created group: {}", group_req.group_name));
-                    ui::markup_line(&format!("[green]? Created group: {}[/]", ui::escape(&group_req.group_name)));
-                } else {
-                    issues.push(format!("Failed to create group {}: {}", group_req.group_name, create_error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to create group: {}[/]", ui::escape(&group_req.group_name)));
-                    continue;
+            // Unknown counts as absent: creating a group that is already there
+            // is harmless, skipping one that is not is not.
+            if group_exists(&group_req.group_name).await != Some(true) {
+                ui::markup_line(&format!(
+                    "[yellow]Creating group: {}...[/]",
+                    ui::escape(&group_req.group_name)
+                ));
+                match create_group(&group_req.group_name).await {
+                    Ok(()) => {
+                        fixes.push(format!("Created group: {}", group_req.group_name));
+                        ui::markup_line(&format!(
+                            "[green]✓ Created group: {}[/]",
+                            ui::escape(&group_req.group_name)
+                        ));
+                    }
+                    Err(e) => {
+                        issues.push(format!(
+                            "Failed to create group {}: {e}",
+                            group_req.group_name
+                        ));
+                        ui::markup_line(&format!(
+                            "[red]✗ Failed to create group: {}[/]",
+                            ui::escape(&group_req.group_name)
+                        ));
+                        continue;
+                    }
                 }
             } else {
-                ui::markup_line(&format!("[dim]Group {} already exists[/]", ui::escape(&group_req.group_name)));
+                ui::markup_line(&format!(
+                    "[dim]Group {} already exists[/]",
+                    ui::escape(&group_req.group_name)
+                ));
             }
 
             for member in &group_req.members {
-                let (add_success, _o, add_error) = command::execute(
-                    "net",
-                    Some(&format!("localgroup \"{}\" \"{}\" /add", group_req.group_name, member)),
-                )
-                .await;
-                if add_success {
-                    fixes.push(format!("Added {} to group {}", member, group_req.group_name));
-                    ui::markup_line(&format!("[green]? Added {} to {}[/]", ui::escape(member), ui::escape(&group_req.group_name)));
-                } else if add_error.as_deref().map(|e| e.contains("already a member")).unwrap_or(false) {
-                    ui::markup_line(&format!("[dim]{} is already in {}[/]", ui::escape(member), ui::escape(&group_req.group_name)));
-                } else {
-                    issues.push(format!("Failed to add {} to {}: {}", member, group_req.group_name, add_error.unwrap_or_default()));
-                    ui::markup_line(&format!("[red]? Failed to add {} to {}[/]", ui::escape(member), ui::escape(&group_req.group_name)));
+                // Already a member reads as success from here, so there is no
+                // longer a localised "already a member" string to match on.
+                match add_to_group(member, &group_req.group_name).await {
+                    Ok(()) => {
+                        fixes.push(format!(
+                            "Added {} to group {}",
+                            member, group_req.group_name
+                        ));
+                        ui::markup_line(&format!(
+                            "[green]✓ Added {} to {}[/]",
+                            ui::escape(member),
+                            ui::escape(&group_req.group_name)
+                        ));
+                    }
+                    Err(e) => {
+                        issues.push(format!(
+                            "Failed to add {} to {}: {e}",
+                            member, group_req.group_name
+                        ));
+                        ui::markup_line(&format!(
+                            "[red]✗ Failed to add {} to {}[/]",
+                            ui::escape(member),
+                            ui::escape(&group_req.group_name)
+                        ));
+                    }
                 }
             }
         }
@@ -549,20 +595,6 @@ impl Default for UserManagementTask {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn parse_account_line(csv_line: &str) -> Option<AccountInfo> {
-    let values = crate::tasks::parse_csv_line(csv_line);
-    if values.len() < 3 {
-        return None;
-    }
-    let trim = |s: &str| s.trim_matches('"').to_string();
-    Some(AccountInfo {
-        username: trim(&values[0]),
-        full_name: values.get(1).map(|v| trim(v)).unwrap_or_default(),
-        is_enabled: values.get(2).map(|v| trim(v).eq_ignore_ascii_case("True")).unwrap_or(false),
-        ..Default::default()
-    })
 }
 
 #[async_trait]
@@ -593,17 +625,26 @@ impl Task for UserManagementTask {
 
         if self.readme_data.is_none() {
             result.success = false;
-            result.message = "No README data provided. Please parse a README file first.".to_string();
+            result.message =
+                "No README data provided. Please parse a README file first.".to_string();
             result.error_details = Some("Use --readme flag to specify a README file".to_string());
             return result;
         }
 
         if self.dry_run {
             let rd = self.readme_data.as_ref().unwrap();
-            ui::markup_line("[yellow]DRY RUN: Previewing user management changes (no changes will be made)[/]");
-            ui::markup_line(&format!("[cyan]Authorized admins: {}[/]", rd.administrators.len()));
+            ui::markup_line(
+                "[yellow]DRY RUN: Previewing user management changes (no changes will be made)[/]",
+            );
+            ui::markup_line(&format!(
+                "[cyan]Authorized admins: {}[/]",
+                rd.administrators.len()
+            ));
             ui::markup_line(&format!("[cyan]Authorized users: {}[/]", rd.users.len()));
-            ui::markup_line(&format!("[cyan]Users to create: {}[/]", rd.users_to_create.len()));
+            ui::markup_line(&format!(
+                "[cyan]Users to create: {}[/]",
+                rd.users_to_create.len()
+            ));
             result.message = "DRY RUN: User management changes previewed.".to_string();
             return result;
         }
@@ -635,13 +676,17 @@ impl Task for UserManagementTask {
 
         ui::write_line();
         ui::rule("[bold yellow]Step 1: Delete Unauthorized Users[/]");
-        let (f, i) = self.delete_unauthorized_users(&all_authorized, &system_accounts).await;
+        let (f, i) = self
+            .delete_unauthorized_users(&all_authorized, &system_accounts)
+            .await;
         fixes.extend(f);
         issues.extend(i);
 
         ui::write_line();
         ui::rule("[bold yellow]Step 2: Fix User Permissions[/]");
-        let (f, i) = self.fix_user_permissions(&authorized_admins, &system_accounts).await;
+        let (f, i) = self
+            .fix_user_permissions(&authorized_admins, &system_accounts)
+            .await;
         fixes.extend(f);
         issues.extend(i);
 
@@ -653,7 +698,9 @@ impl Task for UserManagementTask {
 
         ui::write_line();
         ui::rule("[bold yellow]Step 4: Create New Users[/]");
-        let (f, i) = self.create_new_users(&users_to_create, &authorized_admins).await;
+        let (f, i) = self
+            .create_new_users(&users_to_create, &authorized_admins)
+            .await;
         fixes.extend(f);
         issues.extend(i);
 
@@ -664,10 +711,17 @@ impl Task for UserManagementTask {
         issues.extend(i);
 
         if !issues.is_empty() {
-            result.message = format!("Applied {} changes. {} issues require attention.", fixes.len(), issues.len());
+            result.message = format!(
+                "Applied {} changes. {} issues require attention.",
+                fixes.len(),
+                issues.len()
+            );
             result.error_details = Some(issues.join("\n"));
         } else {
-            result.message = format!("Successfully applied {} user management changes.", fixes.len());
+            result.message = format!(
+                "Successfully applied {} user management changes.",
+                fixes.len()
+            );
         }
 
         result
@@ -685,8 +739,14 @@ impl Task for UserManagementTask {
         let mut all_good = true;
 
         for username in &users_to_create {
-            if !accounts.iter().any(|a| a.username.eq_ignore_ascii_case(username)) {
-                ui::markup_line(&format!("[red]? Required user '{}' not found[/]", ui::escape(username)));
+            if !accounts
+                .iter()
+                .any(|a| a.username.eq_ignore_ascii_case(username))
+            {
+                ui::markup_line(&format!(
+                    "[red]✗ Required user '{}' not found[/]",
+                    ui::escape(username)
+                ));
                 all_good = false;
             }
         }
@@ -694,14 +754,22 @@ impl Task for UserManagementTask {
         for account in accounts.iter().filter(|a| a.is_enabled) {
             let should_be_admin = ci_contains(&authorized_admins, &account.username);
             if account.is_admin != should_be_admin && !Self::is_system_account(&account.username) {
-                let expected = if should_be_admin { "admin" } else { "standard user" };
-                ui::markup_line(&format!("[red]? User '{}' should be {}[/]", ui::escape(&account.username), expected));
+                let expected = if should_be_admin {
+                    "admin"
+                } else {
+                    "standard user"
+                };
+                ui::markup_line(&format!(
+                    "[red]✗ User '{}' should be {}[/]",
+                    ui::escape(&account.username),
+                    expected
+                ));
                 all_good = false;
             }
         }
 
         if all_good {
-            ui::markup_line("[green]? All user accounts verified[/]");
+            ui::markup_line("[green]✓ All user accounts verified[/]");
         }
         all_good
     }

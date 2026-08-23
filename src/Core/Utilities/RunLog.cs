@@ -16,7 +16,72 @@ namespace PinnacleCyPat.Core.Utilities;
 public static class RunLog
 {
     private static readonly List<string> Entries = new();
+    private static readonly List<FixRecord> Fixes = new();
     private static readonly Lock Gate = new();
+    private static string _currentTask = "(startup)";
+
+    /// <summary>
+    /// Name the task that subsequent <see cref="RecordFix"/> calls belong to.
+    /// </summary>
+    /// <remarks>
+    /// The utilities that record a fix - <see cref="RegistryOps"/> and friends -
+    /// are called from every task and are not told which one they are serving.
+    /// Rather than thread a task name through every signature to carry something
+    /// none of them otherwise need, the runner sets it here before each task.
+    /// </remarks>
+    public static void BeginTask(string name)
+    {
+        lock (Gate)
+        {
+            _currentTask = string.IsNullOrWhiteSpace(name) ? "(unnamed task)" : name.Trim();
+        }
+    }
+
+    /// <summary>
+    /// When true, the utilities record what they would have done and change
+    /// nothing. Set from the runner's own dry-run flag.
+    /// </summary>
+    /// <remarks>
+    /// Tasks generally return before reaching a write in dry-run mode, so this is
+    /// a backstop rather than the primary guard - but it is the one that cannot
+    /// be forgotten in a new task, and it makes a dry run produce a full ledger
+    /// of intended changes rather than a silent one.
+    /// </remarks>
+    public static bool DryRun { get; set; }
+
+    /// <summary>
+    /// Record one attempted change, and mirror a one-line summary into the
+    /// narrative so the log reads in order.
+    /// </summary>
+    public static void RecordFix(
+        string target,
+        string intent,
+        string? before,
+        string action,
+        FixOutcome outcome,
+        string evidence
+    )
+    {
+        FixRecord record;
+        lock (Gate)
+        {
+            record = new FixRecord(_currentTask, target, intent, before, action, outcome, evidence);
+            Fixes.Add(record);
+        }
+
+        // Outside the lock: Record takes it again, and nesting it here would rely
+        // on the reentrancy of the lock rather than on not needing it.
+        Record($"[{record.Tag}] {target} - want {intent}; {evidence}");
+    }
+
+    /// <summary>Every change recorded so far.</summary>
+    public static List<FixRecord> FixSnapshot()
+    {
+        lock (Gate)
+        {
+            return new List<FixRecord>(Fixes);
+        }
+    }
 
     /// <summary>Append a line. Blank lines are dropped to keep the log dense.</summary>
     public static void Record(string text)
@@ -175,6 +240,9 @@ public static class RunLog
         lock (Gate)
         {
             Entries.Clear();
+            Fixes.Clear();
+            _currentTask = "(startup)";
+            DryRun = false;
         }
     }
 
@@ -202,6 +270,65 @@ public static class RunLog
             $"Command:   {commandLine}",
             new string('=', 79),
         };
+
+    /// <summary>
+    /// Append the remediation ledger: every change this run wanted to make, what
+    /// it did, and the read-back that proves it.
+    /// </summary>
+    /// <remarks>
+    /// Grouped by task and written before the task results, so the summary at
+    /// the bottom of the log can be read against the detail above it.
+    /// </remarks>
+    public static void AppendLedger()
+    {
+        var fixes = FixSnapshot();
+
+        RecordRaw(string.Empty);
+        RecordRaw(new string('=', 79));
+        RecordRaw("REMEDIATION LEDGER");
+        RecordRaw(new string('=', 79));
+        RecordRaw("Every change this run wanted to make, what it did about it, and how it");
+        RecordRaw("knows. \"Proof\" is a re-read of the real state taken after the write, not a");
+        RecordRaw("restatement of what was attempted.");
+
+        if (fixes.Count == 0)
+        {
+            RecordRaw(string.Empty);
+            RecordRaw("No changes were attempted.");
+            return;
+        }
+
+        foreach (var group in fixes.GroupBy(f => f.Task))
+        {
+            RecordRaw(string.Empty);
+            RecordRaw($"--- {group.Key} ---");
+
+            foreach (var fix in group)
+            {
+                RecordRaw(string.Empty);
+                RecordRaw($"[{fix.Tag}] {fix.Target}");
+                RecordRaw($"  Want:   {fix.Intent}");
+                RecordRaw($"  Before: {fix.Before ?? "(could not read)"}");
+                RecordRaw($"  Did:    {fix.Action}");
+                RecordRaw($"  Proof:  {fix.Evidence}");
+            }
+        }
+
+        RecordRaw(string.Empty);
+        RecordRaw(LedgerTotals(fixes));
+    }
+
+    /// <summary>One line tallying the ledger by outcome.</summary>
+    public static string LedgerTotals(IReadOnlyCollection<FixRecord> fixes)
+    {
+        int Count(FixOutcome outcome) => fixes.Count(f => f.Outcome == outcome);
+
+        return $"Totals: {Count(FixOutcome.Fixed)} fixed, "
+            + $"{Count(FixOutcome.AlreadyCompliant)} already compliant, "
+            + $"{Count(FixOutcome.Failed)} failed, "
+            + $"{Count(FixOutcome.Unverified)} unverified, "
+            + $"{Count(FixOutcome.Skipped)} skipped";
+    }
 
     /// <summary>Append a structured, per-task record.</summary>
     /// <remarks>

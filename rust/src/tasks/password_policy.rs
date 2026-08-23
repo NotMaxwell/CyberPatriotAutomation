@@ -3,6 +3,7 @@
 use crate::command;
 use crate::impl_task_meta;
 use crate::models::{PasswordPolicyInfo, PasswordPolicyStandards, SystemInfo, TaskResult};
+use crate::policy_ops;
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
@@ -45,27 +46,11 @@ impl PasswordPolicyTask {
             return policy;
         }
 
+        // The parser lives on the model so `policy_ops` reads its evidence the
+        // same way rather than through a second one that could disagree.
         let (success, output, _) = command::execute("net", Some("accounts")).await;
         if success && !output.is_empty() {
-            for line in output.split(['\r', '\n']).filter(|l| !l.is_empty()) {
-                if line.contains("Minimum password length") {
-                    policy.min_password_length = extract_numeric_value(line);
-                } else if line.contains("Maximum password age") {
-                    let v = extract_numeric_value(line);
-                    policy.max_password_age = if v == -1 { 0 } else { v };
-                } else if line.contains("Minimum password age") {
-                    policy.min_password_age = extract_numeric_value(line);
-                } else if line.contains("Length of password history") {
-                    policy.password_history_count = extract_numeric_value(line);
-                } else if line.contains("Lockout threshold") {
-                    let v = extract_numeric_value(line);
-                    policy.lockout_threshold = if v == -1 { 0 } else { v };
-                } else if line.contains("Lockout duration") {
-                    policy.lockout_duration = extract_numeric_value(line);
-                } else if line.contains("Lockout observation window") {
-                    policy.lockout_observation_window = extract_numeric_value(line);
-                }
-            }
+            policy = PasswordPolicyInfo::parse_net_accounts(&output);
         }
 
         // `secedit` is spawned directly rather than through a shell, so a
@@ -89,7 +74,9 @@ impl PasswordPolicyTask {
                     policy.complexity_enabled = cfg_output
                         .lines()
                         .filter_map(|l| l.split_once('='))
-                        .any(|(k, v)| k.trim().eq_ignore_ascii_case("PasswordComplexity") && v.trim() == "1");
+                        .any(|(k, v)| {
+                            k.trim().eq_ignore_ascii_case("PasswordComplexity") && v.trim() == "1"
+                        });
                 }
             }
             let _ = std::fs::remove_file(&cfg_path);
@@ -99,8 +86,8 @@ impl PasswordPolicyTask {
     }
 
     fn display_policy_comparison(current: &PasswordPolicyInfo) {
-        let mut table = ui::TableBuilder::new()
-            .columns(&["Setting", "Current", "Recommended", "Status"]);
+        let mut table =
+            ui::TableBuilder::new().columns(&["Setting", "Current", "Recommended", "Status"]);
 
         add_comparison_row(
             &mut table,
@@ -138,7 +125,11 @@ impl PasswordPolicyTask {
         add_comparison_row(
             &mut table,
             "Complexity Enabled",
-            if current.complexity_enabled { "Yes" } else { "No" },
+            if current.complexity_enabled {
+                "Yes"
+            } else {
+                "No"
+            },
             "Yes",
             current.complexity_enabled,
         );
@@ -165,7 +156,10 @@ impl PasswordPolicyTask {
         table.print();
     }
 
-    async fn apply_password_policy(&self, current: &PasswordPolicyInfo) -> (Vec<String>, Vec<String>) {
+    async fn apply_password_policy(
+        &self,
+        current: &PasswordPolicyInfo,
+    ) -> (Vec<String>, Vec<String>) {
         let mut fixes = Vec::new();
         let mut issues = Vec::new();
 
@@ -194,32 +188,32 @@ impl PasswordPolicyTask {
                 "[yellow]Setting minimum password length to {}...[/]",
                 PasswordPolicyStandards::MIN_PASSWORD_LENGTH
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /minpwlen:{}", PasswordPolicyStandards::MIN_PASSWORD_LENGTH)),
-            )
-            .await;
-            if success {
-                fixes.push(format!("Set minimum password length to {}", PasswordPolicyStandards::MIN_PASSWORD_LENGTH));
-            } else {
-                issues.push(format!("Failed to set minimum password length: {}", error.unwrap_or_default()));
+            match policy_ops::set_min_password_length(PasswordPolicyStandards::MIN_PASSWORD_LENGTH)
+                .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set minimum password length to {}",
+                    PasswordPolicyStandards::MIN_PASSWORD_LENGTH
+                )),
+                Err(e) => issues.push(format!("Failed to set minimum password length: {e}")),
             }
         }
 
-        if current.max_password_age == 0 || current.max_password_age > PasswordPolicyStandards::MAX_PASSWORD_AGE {
+        if current.max_password_age == 0
+            || current.max_password_age > PasswordPolicyStandards::MAX_PASSWORD_AGE
+        {
             ui::markup_line(&format!(
                 "[yellow]Setting maximum password age to {} days...[/]",
                 PasswordPolicyStandards::MAX_PASSWORD_AGE
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /maxpwage:{}", PasswordPolicyStandards::MAX_PASSWORD_AGE)),
-            )
-            .await;
-            if success {
-                fixes.push(format!("Set maximum password age to {} days", PasswordPolicyStandards::MAX_PASSWORD_AGE));
-            } else {
-                issues.push(format!("Failed to set maximum password age: {}", error.unwrap_or_default()));
+            match policy_ops::set_max_password_age_days(PasswordPolicyStandards::MAX_PASSWORD_AGE)
+                .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set maximum password age to {} days",
+                    PasswordPolicyStandards::MAX_PASSWORD_AGE
+                )),
+                Err(e) => issues.push(format!("Failed to set maximum password age: {e}")),
             }
         }
 
@@ -228,15 +222,14 @@ impl PasswordPolicyTask {
                 "[yellow]Setting minimum password age to {} day(s)...[/]",
                 PasswordPolicyStandards::MIN_PASSWORD_AGE
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /minpwage:{}", PasswordPolicyStandards::MIN_PASSWORD_AGE)),
-            )
-            .await;
-            if success {
-                fixes.push(format!("Set minimum password age to {} day(s)", PasswordPolicyStandards::MIN_PASSWORD_AGE));
-            } else {
-                issues.push(format!("Failed to set minimum password age: {}", error.unwrap_or_default()));
+            match policy_ops::set_min_password_age_days(PasswordPolicyStandards::MIN_PASSWORD_AGE)
+                .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set minimum password age to {} day(s)",
+                    PasswordPolicyStandards::MIN_PASSWORD_AGE
+                )),
+                Err(e) => issues.push(format!("Failed to set minimum password age: {e}")),
             }
         }
 
@@ -245,15 +238,16 @@ impl PasswordPolicyTask {
                 "[yellow]Setting password history to {}...[/]",
                 PasswordPolicyStandards::PASSWORD_HISTORY_COUNT
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /uniquepw:{}", PasswordPolicyStandards::PASSWORD_HISTORY_COUNT)),
+            match policy_ops::set_password_history_length(
+                PasswordPolicyStandards::PASSWORD_HISTORY_COUNT,
             )
-            .await;
-            if success {
-                fixes.push(format!("Set password history to {}", PasswordPolicyStandards::PASSWORD_HISTORY_COUNT));
-            } else {
-                issues.push(format!("Failed to set password history: {}", error.unwrap_or_default()));
+            .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set password history to {}",
+                    PasswordPolicyStandards::PASSWORD_HISTORY_COUNT
+                )),
+                Err(e) => issues.push(format!("Failed to set password history: {e}")),
             }
         }
 
@@ -263,14 +257,20 @@ impl PasswordPolicyTask {
             if success {
                 fixes.push("Enabled password complexity requirement".to_string());
             } else {
-                issues.push(format!("Failed to enable password complexity: {}", error.unwrap_or_default()));
+                issues.push(format!(
+                    "Failed to enable password complexity: {}",
+                    error.unwrap_or_default()
+                ));
             }
         }
 
         (fixes, issues)
     }
 
-    async fn apply_lockout_policy(&self, current: &PasswordPolicyInfo) -> (Vec<String>, Vec<String>) {
+    async fn apply_lockout_policy(
+        &self,
+        current: &PasswordPolicyInfo,
+    ) -> (Vec<String>, Vec<String>) {
         let mut fixes = Vec::new();
         let mut issues = Vec::new();
 
@@ -279,20 +279,21 @@ impl PasswordPolicyTask {
             return (fixes, issues);
         }
 
-        if current.lockout_threshold == 0 || current.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD {
+        if current.lockout_threshold == 0
+            || current.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD
+        {
             ui::markup_line(&format!(
                 "[yellow]Setting account lockout threshold to {}...[/]",
                 PasswordPolicyStandards::LOCKOUT_THRESHOLD
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /lockoutthreshold:{}", PasswordPolicyStandards::LOCKOUT_THRESHOLD)),
-            )
-            .await;
-            if success {
-                fixes.push(format!("Set account lockout threshold to {}", PasswordPolicyStandards::LOCKOUT_THRESHOLD));
-            } else {
-                issues.push(format!("Failed to set lockout threshold: {}", error.unwrap_or_default()));
+            match policy_ops::set_lockout_threshold(PasswordPolicyStandards::LOCKOUT_THRESHOLD)
+                .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set account lockout threshold to {}",
+                    PasswordPolicyStandards::LOCKOUT_THRESHOLD
+                )),
+                Err(e) => issues.push(format!("Failed to set lockout threshold: {e}")),
             }
         }
 
@@ -301,32 +302,35 @@ impl PasswordPolicyTask {
                 "[yellow]Setting lockout duration to {} minutes...[/]",
                 PasswordPolicyStandards::LOCKOUT_DURATION
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /lockoutduration:{}", PasswordPolicyStandards::LOCKOUT_DURATION)),
+            match policy_ops::set_lockout_duration_minutes(
+                PasswordPolicyStandards::LOCKOUT_DURATION,
             )
-            .await;
-            if success {
-                fixes.push(format!("Set lockout duration to {} minutes", PasswordPolicyStandards::LOCKOUT_DURATION));
-            } else {
-                issues.push(format!("Failed to set lockout duration: {}", error.unwrap_or_default()));
+            .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set lockout duration to {} minutes",
+                    PasswordPolicyStandards::LOCKOUT_DURATION
+                )),
+                Err(e) => issues.push(format!("Failed to set lockout duration: {e}")),
             }
         }
 
-        if current.lockout_observation_window < PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW {
+        if current.lockout_observation_window < PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW
+        {
             ui::markup_line(&format!(
                 "[yellow]Setting lockout observation window to {} minutes...[/]",
                 PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW
             ));
-            let (success, _o, error) = command::execute(
-                "net",
-                Some(&format!("accounts /lockoutwindow:{}", PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW)),
+            match policy_ops::set_lockout_observation_minutes(
+                PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW,
             )
-            .await;
-            if success {
-                fixes.push(format!("Set lockout observation window to {} minutes", PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW));
-            } else {
-                issues.push(format!("Failed to set lockout observation window: {}", error.unwrap_or_default()));
+            .await
+            {
+                Ok(()) => fixes.push(format!(
+                    "Set lockout observation window to {} minutes",
+                    PasswordPolicyStandards::LOCKOUT_OBSERVATION_WINDOW
+                )),
+                Err(e) => issues.push(format!("Failed to set lockout observation window: {e}")),
             }
         }
 
@@ -347,13 +351,22 @@ fn add_comparison_row(
     recommended: &str,
     is_compliant: bool,
 ) {
-    let status = if is_compliant { "[green]? OK[/]" } else { "[red]? Fix[/]" };
+    let status = if is_compliant {
+        "[green]✓ OK[/]"
+    } else {
+        "[red]✗ Fix[/]"
+    };
     let current_formatted = if is_compliant {
         format!("[green]{current}[/]")
     } else {
         format!("[yellow]{current}[/]")
     };
-    table.add_row([setting.to_string(), current_formatted, recommended.to_string(), status.to_string()]);
+    table.add_row([
+        setting.to_string(),
+        current_formatted,
+        recommended.to_string(),
+        status.to_string(),
+    ]);
 }
 
 async fn enable_password_complexity() -> (bool, Option<String>) {
@@ -363,8 +376,11 @@ async fn enable_password_complexity() -> (bool, Option<String>) {
     let temp_file_str = temp_file.to_string_lossy().into_owned();
     let db_file_str = db_file.to_string_lossy().into_owned();
 
-    let (export_success, _o, export_error) =
-        command::execute("secedit", Some(&format!("/export /cfg \"{temp_file_str}\""))).await;
+    let (export_success, _o, export_error) = command::execute(
+        "secedit",
+        Some(&format!("/export /cfg \"{temp_file_str}\"")),
+    )
+    .await;
     if !export_success {
         return (false, export_error);
     }
@@ -391,7 +407,9 @@ async fn enable_password_complexity() -> (bool, Option<String>) {
 
     let (import_success, _o, import_error) = command::execute(
         "secedit",
-        Some(&format!("/configure /db \"{db_file_str}\" /cfg \"{temp_file_str}\" /areas SECURITYPOLICY")),
+        Some(&format!(
+            "/configure /db \"{db_file_str}\" /cfg \"{temp_file_str}\" /areas SECURITYPOLICY"
+        )),
     )
     .await;
 
@@ -399,23 +417,6 @@ async fn enable_password_complexity() -> (bool, Option<String>) {
     let _ = std::fs::remove_file(&db_file);
 
     (import_success, import_error)
-}
-
-fn extract_numeric_value(line: &str) -> i32 {
-    if let Some(colon) = line.find(':') {
-        let value = line[colon + 1..].trim();
-        if value.to_lowercase().contains("never") || value.to_lowercase().contains("unlimited") {
-            return -1;
-        }
-        if value.to_lowercase().contains("none") {
-            return 0;
-        }
-        let numeric: String = value.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect();
-        if let Ok(result) = numeric.parse::<i32>() {
-            return result;
-        }
-    }
-    0
 }
 
 #[async_trait]
@@ -426,13 +427,34 @@ impl Task for PasswordPolicyTask {
         let mut system_info = SystemInfo::new();
         let policy = Self::get_current_password_policy().await;
 
-        system_info.registry_settings.insert("MinPasswordLength".to_string(), policy.min_password_length.to_string());
-        system_info.registry_settings.insert("MaxPasswordAge".to_string(), policy.max_password_age.to_string());
-        system_info.registry_settings.insert("MinPasswordAge".to_string(), policy.min_password_age.to_string());
-        system_info.registry_settings.insert("PasswordHistoryCount".to_string(), policy.password_history_count.to_string());
-        system_info.registry_settings.insert("ComplexityEnabled".to_string(), policy.complexity_enabled.to_string());
-        system_info.registry_settings.insert("LockoutThreshold".to_string(), policy.lockout_threshold.to_string());
-        system_info.registry_settings.insert("LockoutDuration".to_string(), policy.lockout_duration.to_string());
+        system_info.registry_settings.insert(
+            "MinPasswordLength".to_string(),
+            policy.min_password_length.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "MaxPasswordAge".to_string(),
+            policy.max_password_age.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "MinPasswordAge".to_string(),
+            policy.min_password_age.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "PasswordHistoryCount".to_string(),
+            policy.password_history_count.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "ComplexityEnabled".to_string(),
+            policy.complexity_enabled.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "LockoutThreshold".to_string(),
+            policy.lockout_threshold.to_string(),
+        );
+        system_info.registry_settings.insert(
+            "LockoutDuration".to_string(),
+            policy.lockout_duration.to_string(),
+        );
 
         self.current_policy = Some(policy);
         system_info
@@ -467,10 +489,17 @@ impl Task for PasswordPolicyTask {
         issues.extend(li);
 
         if !issues.is_empty() {
-            result.message = format!("Applied {} fixes. {} issues remain.", fixes.len(), issues.len());
+            result.message = format!(
+                "Applied {} fixes. {} issues remain.",
+                fixes.len(),
+                issues.len()
+            );
             result.error_details = Some(issues.join("\n"));
         } else {
-            result.message = format!("Successfully applied {} password policy settings.", fixes.len());
+            result.message = format!(
+                "Successfully applied {} password policy settings.",
+                fixes.len()
+            );
         }
 
         result
@@ -481,24 +510,28 @@ impl Task for PasswordPolicyTask {
         let mut all_good = true;
 
         if verified.min_password_length < PasswordPolicyStandards::MIN_PASSWORD_LENGTH {
-            ui::markup_line("[red]? Minimum password length not set correctly[/]");
+            ui::markup_line("[red]✗ Minimum password length not set correctly[/]");
             all_good = false;
         }
-        if verified.max_password_age > PasswordPolicyStandards::MAX_PASSWORD_AGE || verified.max_password_age == 0 {
-            ui::markup_line("[red]? Maximum password age not set correctly[/]");
+        if verified.max_password_age > PasswordPolicyStandards::MAX_PASSWORD_AGE
+            || verified.max_password_age == 0
+        {
+            ui::markup_line("[red]✗ Maximum password age not set correctly[/]");
             all_good = false;
         }
         if !verified.complexity_enabled {
-            ui::markup_line("[red]? Password complexity not enabled[/]");
+            ui::markup_line("[red]✗ Password complexity not enabled[/]");
             all_good = false;
         }
-        if verified.lockout_threshold == 0 || verified.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD {
-            ui::markup_line("[red]? Account lockout threshold not set correctly[/]");
+        if verified.lockout_threshold == 0
+            || verified.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD
+        {
+            ui::markup_line("[red]✗ Account lockout threshold not set correctly[/]");
             all_good = false;
         }
 
         if all_good {
-            ui::markup_line("[green]? All password policy settings verified[/]");
+            ui::markup_line("[green]✓ All password policy settings verified[/]");
         }
         all_good
     }

@@ -19,7 +19,7 @@ logic bugs found during the port were fixed rather than reproduced. See
 
 ```bash
 cd rust
-cargo test                 # 139 tests
+cargo test                 # 155 tests
 cargo clippy --all-targets # clean
 ```
 
@@ -68,7 +68,23 @@ shell-out paths with `#[cfg(windows)]`, matching the C# `#if WINDOWS`.
 | `native::accounts` | `net localgroup`, `net accounts` | netapi32 |
 | `native::audit_policy` | `auditpol.exe` | advapi32 |
 | `native::firewall` | `Set-NetFirewallProfile` | `INetFwPolicy2` (COM) |
+| `native::dns` | `netsh interface ip show dns` | IP helper |
 | `native::installed_software` | a PowerShell registry query | uninstall keys |
+| `native::registry` | `reg.exe`, `Set-ItemProperty` | advapi32 |
+| `native::services` | `sc.exe`, `net start`, `Get-Service` | service control manager |
+| `native::shares` | `net share` | netapi32 |
+| `native::users` | `net user`, the `*-LocalUser` cmdlets | netapi32 |
+
+The call sites do not reach into `native` directly. Four modules make the
+native-or-shell choice once, so a task reads as plain intent and there is a
+single place that knows about the fallback - mirroring the C# `Core/Utilities`:
+
+| Module | C# equivalent | Covers |
+| --- | --- | --- |
+| `account_ops` | `LocalAccounts` | accounts and local groups |
+| `policy_ops` | `PolicyOps` | password and lockout policy |
+| `registry_ops` | `RegistryOps` | registry reads and writes |
+| `service_ops` | `ServiceOps` | service state and control |
 
 The reason is not tidiness. Those tools print localised, human-formatted tables:
 a parser written against the English output returns nothing on a non-English

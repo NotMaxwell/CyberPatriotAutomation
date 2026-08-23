@@ -242,33 +242,9 @@ public class ServiceManagementTask : BaseTask
     /// only ever sampled a handful. One bulk query makes checking all of them
     /// cheap enough to be correct.
     /// </remarks>
-    private static async Task<Dictionary<string, string>> GetServiceStatusesAsync()
-    {
-        var statuses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        var (success, output, _) = await CommandExecutor.PowerShellQueryAsync(
-            "Get-Service | Select-Object Name, Status | ConvertTo-Csv -NoTypeInformation"
-        );
-        if (!success)
-            return statuses;
-
-        foreach (
-            var line in output
-                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                .Skip(1)
-        )
-        {
-            var fields = line.Split("\",\"");
-            if (fields.Length < 2)
-                continue;
-            var name = fields[0].Trim().Trim('"').Trim();
-            var status = fields[1].Trim().Trim('"').Trim();
-            if (name.Length > 0)
-                statuses[name] = status;
-        }
-
-        return statuses;
-    }
+    private static async Task<Dictionary<string, ServiceState>> GetServiceStatusesAsync() =>
+        await ServiceOps.EnumerateStatesAsync()
+        ?? new Dictionary<string, ServiceState>(StringComparer.OrdinalIgnoreCase);
 
     public override async Task<bool> VerifyAsync()
     {
@@ -286,10 +262,10 @@ public class ServiceManagementTask : BaseTask
             if (!statuses.TryGetValue(service, out var status))
                 continue;
 
-            if (status.Equals("Running", StringComparison.OrdinalIgnoreCase))
+            if (status == ServiceState.Running)
             {
                 AnsiConsole.MarkupLine(
-                    $"[green]? Critical service {Markup.Escape(service)} is running[/]"
+                    $"[green]✓ Critical service {Markup.Escape(service)} is running[/]"
                 );
             }
             else
@@ -297,7 +273,7 @@ public class ServiceManagementTask : BaseTask
                 // A critical service that is not running is a verification
                 // failure: these are the services that must stay up.
                 AnsiConsole.MarkupLine(
-                    $"[red]? Critical service {Markup.Escape(service)} is {Markup.Escape(status)}[/]"
+                    $"[red]✗ Critical service {Markup.Escape(service)} is {status}[/]"
                 );
                 allGood = false;
             }
@@ -309,16 +285,16 @@ public class ServiceManagementTask : BaseTask
             if (!statuses.TryGetValue(service, out var status))
                 continue;
 
-            if (status.Equals("Stopped", StringComparison.OrdinalIgnoreCase))
+            if (status == ServiceState.Stopped)
             {
                 AnsiConsole.MarkupLine(
-                    $"[green]? Insecure service {Markup.Escape(service)} is stopped[/]"
+                    $"[green]✓ Insecure service {Markup.Escape(service)} is stopped[/]"
                 );
             }
             else
             {
                 AnsiConsole.MarkupLine(
-                    $"[red]? Insecure service {Markup.Escape(service)} is still {Markup.Escape(status)}[/]"
+                    $"[red]✗ Insecure service {Markup.Escape(service)} is still {status}[/]"
                 );
                 allGood = false;
             }
@@ -339,7 +315,7 @@ public class ServiceManagementTask : BaseTask
             AnsiConsole.MarkupLine("[bold green]README Critical Services (Do NOT disable):[/]");
             foreach (var service in _readmeData.CriticalServices)
             {
-                AnsiConsole.MarkupLine($"  [green]? {service}[/]");
+                AnsiConsole.MarkupLine($"  [green]✓ {service}[/]");
             }
             AnsiConsole.WriteLine();
         }
@@ -349,7 +325,7 @@ public class ServiceManagementTask : BaseTask
             AnsiConsole.MarkupLine("[bold red]README Services to Disable:[/]");
             foreach (var service in _readmeData.ProhibitedServices)
             {
-                AnsiConsole.MarkupLine($"  [red]? {service}[/]");
+                AnsiConsole.MarkupLine($"  [red]✗ {service}[/]");
             }
             AnsiConsole.WriteLine();
         }
@@ -439,7 +415,7 @@ public class ServiceManagementTask : BaseTask
             if (!statuses.TryGetValue(service, out var status))
                 continue;
 
-            if (status.Equals("Running", StringComparison.OrdinalIgnoreCase))
+            if (status == ServiceState.Running)
             {
                 AnsiConsole.MarkupLine($"[dim]? {Markup.Escape(service)} is already running[/]");
                 continue;
@@ -456,13 +432,13 @@ public class ServiceManagementTask : BaseTask
             if (startError is null)
             {
                 fixes.Add($"Started critical service: {service}");
-                AnsiConsole.MarkupLine($"[green]? Started {Markup.Escape(service)}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Started {Markup.Escape(service)}[/]");
             }
             else
             {
                 issues.Add($"Could not start critical service {service}: {startError}");
                 AnsiConsole.MarkupLine(
-                    $"[red]? Could not start {Markup.Escape(service)}: {Markup.Escape(startError ?? "")}[/]"
+                    $"[red]✗ Could not start {Markup.Escape(service)}: {Markup.Escape(startError ?? "")}[/]"
                 );
             }
         }
@@ -476,7 +452,7 @@ public class ServiceManagementTask : BaseTask
     {
         if (toEnable.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]? No additional services need to be enabled[/]");
+            AnsiConsole.MarkupLine("[green]✓ No additional services need to be enabled[/]");
             return;
         }
 
@@ -493,7 +469,7 @@ public class ServiceManagementTask : BaseTask
             if (configError is null)
             {
                 fixes.Add($"Enabled service: {service}");
-                AnsiConsole.MarkupLine($"[green]? Enabled {service}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Enabled {service}[/]");
             }
             else
             {
@@ -608,7 +584,7 @@ public class ServiceManagementTask : BaseTask
             if (success)
             {
                 fixes.Add($"Disabled feature: {feature}");
-                AnsiConsole.MarkupLine($"[green]? Disabled feature: {feature}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Disabled feature: {feature}[/]");
             }
             else
             {

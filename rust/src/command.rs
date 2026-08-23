@@ -267,7 +267,6 @@ pub async fn powershell_query(script: &str) -> CommandOutput {
     execute("powershell", Some(&powershell_args(script, false))).await
 }
 
-
 /// Download `url` to `dest`, returning the reason on failure.
 ///
 /// Shells out rather than linking an HTTP client: TLS, the certificate store
@@ -338,7 +337,10 @@ mod tests {
         let args = powershell_args("Set-Thing -Value 1", true);
         assert!(args.contains("$ErrorActionPreference = 'Stop'"));
         assert!(args.contains("Set-Thing -Value 1"));
-        assert!(args.contains("exit 1"), "failures must map to a non-zero exit");
+        assert!(
+            args.contains("exit 1"),
+            "failures must map to a non-zero exit"
+        );
         assert!(args.contains("-NonInteractive"));
     }
 

@@ -18,8 +18,29 @@ namespace PinnacleCyPat.Core.Utilities;
 /// </remarks>
 public static class RegistryOps
 {
-    /// <summary>Write a REG_DWORD, creating the key if needed.</summary>
-    public static async Task<string?> SetDwordAsync(string key, string name, int value)
+    /// <summary>
+    /// Write a REG_DWORD, creating the key if needed, and prove the result.
+    /// </summary>
+    /// <param name="why">
+    /// What the value is for, in words - it lands in the run log next to the
+    /// path, so a reader does not have to know what fDenyTSConnections means.
+    /// </param>
+    public static Task<string?> SetDwordAsync(
+        string key,
+        string name,
+        int value,
+        string? why = null
+    ) =>
+        Remediation.ApplyAsync(
+            target: $"{key}\\{name}",
+            intent: why is null ? $"REG_DWORD = {value}" : $"REG_DWORD = {value} ({why})",
+            readState: async () => (await GetDwordAsync(key, name))?.ToString(),
+            isCompliant: state => state == value.ToString(),
+            action: $"wrote REG_DWORD {value}",
+            apply: () => WriteDwordAsync(key, name, value)
+        );
+
+    private static async Task<string?> WriteDwordAsync(string key, string name, int value)
     {
 #if WINDOWS
         return Native.NativeRegistry.SetDword(key, name, value);
@@ -32,8 +53,23 @@ public static class RegistryOps
 #endif
     }
 
-    /// <summary>Write a REG_SZ, creating the key if needed.</summary>
-    public static async Task<string?> SetStringAsync(string key, string name, string value)
+    /// <summary>Write a REG_SZ, creating the key if needed, and prove the result.</summary>
+    public static Task<string?> SetStringAsync(
+        string key,
+        string name,
+        string value,
+        string? why = null
+    ) =>
+        Remediation.ApplyAsync(
+            target: $"{key}\\{name}",
+            intent: why is null ? $"REG_SZ = \"{value}\"" : $"REG_SZ = \"{value}\" ({why})",
+            readState: async () => await GetStringAsync(key, name),
+            isCompliant: state => state == value,
+            action: $"wrote REG_SZ \"{value}\"",
+            apply: () => WriteStringAsync(key, name, value)
+        );
+
+    private static async Task<string?> WriteStringAsync(string key, string name, string value)
     {
 #if WINDOWS
         return Native.NativeRegistry.SetString(key, name, value);
@@ -44,6 +80,44 @@ public static class RegistryOps
         );
         return success ? null : error ?? "reg add failed";
 #endif
+    }
+
+    /// <summary>Read a REG_SZ, or null when the key or value is absent.</summary>
+    public static async Task<string?> GetStringAsync(string key, string name)
+    {
+#if WINDOWS
+        return Native.NativeRegistry.GetValue(key, name) as string;
+#else
+        var (success, output, _) = await CommandExecutor.ExecuteAsync(
+            "reg",
+            $"query \"{key}\" /v {name}"
+        );
+        return success ? ParseRegString(output, name) : null;
+#endif
+    }
+
+    /// <summary>
+    /// Read a REG_SZ value out of <c>reg query</c> output.
+    /// </summary>
+    /// <remarks>
+    /// Same shape as <see cref="ParseRegDword"/>, except the value may contain
+    /// spaces, so everything after the type column is the value.
+    /// </remarks>
+    public static string? ParseRegString(string output, string name)
+    {
+        foreach (
+            var line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        )
+        {
+            var fields = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            if (
+                fields.Length >= 3
+                && fields[0].Equals(name, StringComparison.OrdinalIgnoreCase)
+                && fields[1].Equals("REG_SZ", StringComparison.OrdinalIgnoreCase)
+            )
+                return string.Join(' ', fields.Skip(2));
+        }
+        return null;
     }
 
     /// <summary>Create a key, with no values. Returns null on success.</summary>
@@ -57,6 +131,17 @@ public static class RegistryOps
 #else
         var (success, _, error) = await CommandExecutor.ExecuteAsync("reg", $"add \"{key}\" /f");
         return success ? null : error ?? "reg add failed";
+#endif
+    }
+
+    /// <summary>Does a key exist?</summary>
+    public static async Task<bool> KeyExistsAsync(string key)
+    {
+#if WINDOWS
+        return Native.NativeRegistry.KeyExists(key);
+#else
+        var (success, _, _) = await CommandExecutor.ExecuteAsync("reg", $"query \"{key}\"");
+        return success;
 #endif
     }
 
@@ -123,8 +208,25 @@ public static class RegistryOps
     public static async Task<bool> DwordEqualsAsync(string key, string name, int expected) =>
         await GetDwordAsync(key, name) == expected;
 
-    /// <summary>Delete a value. Already absent counts as success.</summary>
-    public static async Task<string?> DeleteValueAsync(string key, string name)
+    /// <summary>
+    /// Delete a value, and prove it is gone. Already absent counts as success.
+    /// </summary>
+    public static Task<string?> DeleteValueAsync(string key, string name, string? why = null) =>
+        Remediation.ApplyAsync(
+            target: $"{key}\\{name}",
+            intent: why is null ? "value removed" : $"value removed ({why})",
+            // "absent" is the wanted state, so it has to be a readable one
+            // rather than the null that means "could not look".
+            readState: async () =>
+                (await GetDwordAsync(key, name))?.ToString()
+                ?? await GetStringAsync(key, name)
+                ?? "absent",
+            isCompliant: state => state == "absent",
+            action: "deleted the value",
+            apply: () => RemoveValueAsync(key, name)
+        );
+
+    private static async Task<string?> RemoveValueAsync(string key, string name)
     {
 #if WINDOWS
         return Native.NativeRegistry.DeleteValue(key, name);

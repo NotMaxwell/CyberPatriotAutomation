@@ -330,10 +330,15 @@ public class Program
             task.DryRun = dryRun;
         }
 
+        // The utilities record every change against whichever task is running,
+        // and hold back from writing anything at all during a dry run.
+        RunLog.DryRun = dryRun;
+
         // Run all tasks
         var results = new List<TaskResult>();
         foreach (var task in tasks)
         {
+            RunLog.BeginTask(task.Name);
             AnsiConsole.WriteLine();
             AnsiConsole.Write(new Rule($"[bold blue]{task.Name}[/]").RuleStyle("blue"));
             AnsiConsole.WriteLine();
@@ -444,11 +449,14 @@ public class Program
             AnsiConsole.WriteLine();
         }
         // Display summary
+        RunLog.BeginTask("(summary)");
         DisplaySummary(results);
+        DisplayLedgerSummary();
         AnsiConsole.WriteLine();
         AnsiConsole.Write(new Rule("[bold green]✓ Automation Complete[/]").RuleStyle("green"));
         AnsiConsole.WriteLine();
 
+        RunLog.AppendLedger();
         RunLog.AppendResults(results);
         await FinishLogAsync(logPath);
     }
@@ -654,6 +662,87 @@ public class Program
 
         // Calculate and display overall statistics
         DisplayOverallStatistics(results);
+    }
+
+    /// <summary>
+    /// Show what the run actually changed, and how much of it was confirmed.
+    /// </summary>
+    /// <remarks>
+    /// The task summary above answers "did each task run"; this answers "what is
+    /// different about this machine now, and how do we know". The two disagree
+    /// more often than is comfortable - a task that reports success while every
+    /// change it made reads back unverified is exactly the case worth surfacing
+    /// before the round ends, so anything not confirmed is listed by name.
+    /// </remarks>
+    static void DisplayLedgerSummary()
+    {
+        var fixes = RunLog.FixSnapshot();
+        if (fixes.Count == 0)
+            return;
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.Write(new Rule("[bold blue]Changes and Proof[/]").RuleStyle("blue"));
+        AnsiConsole.WriteLine();
+
+        int Count(FixOutcome outcome) => fixes.Count(f => f.Outcome == outcome);
+
+        var table = new Table()
+            .Border(TableBorder.Rounded)
+            .BorderColor(Color.Grey)
+            .AddColumn(new TableColumn("[bold]Outcome[/]"))
+            .AddColumn(new TableColumn("[bold]Count[/]").Centered())
+            .AddColumn(new TableColumn("[bold]Meaning[/]"));
+
+        table.AddRow(
+            new Markup("[green]Fixed[/]"),
+            new Markup($"{Count(FixOutcome.Fixed)}"),
+            new Markup("[dim]changed, and reading it back confirms it[/]")
+        );
+        table.AddRow(
+            new Markup("[green]Already OK[/]"),
+            new Markup($"{Count(FixOutcome.AlreadyCompliant)}"),
+            new Markup("[dim]nothing to do; the machine was already right[/]")
+        );
+        table.AddRow(
+            new Markup("[red]Failed[/]"),
+            new Markup($"{Count(FixOutcome.Failed)}"),
+            new Markup("[dim]attempted and did not take[/]")
+        );
+        table.AddRow(
+            new Markup("[yellow]Unverified[/]"),
+            new Markup($"{Count(FixOutcome.Unverified)}"),
+            new Markup("[dim]the write reported success but could not be confirmed[/]")
+        );
+        table.AddRow(
+            new Markup("[dim]Skipped[/]"),
+            new Markup($"{Count(FixOutcome.Skipped)}"),
+            new Markup("[dim]not attempted[/]")
+        );
+
+        AnsiConsole.Write(table);
+
+        var needsAttention = fixes
+            .Where(f => f.Outcome is FixOutcome.Failed or FixOutcome.Unverified)
+            .ToList();
+
+        if (needsAttention.Count > 0)
+        {
+            AnsiConsole.WriteLine();
+            AnsiConsole.MarkupLine("[yellow]Not confirmed - check these by hand:[/]");
+            foreach (var fix in needsAttention)
+            {
+                AnsiConsole.MarkupLine(
+                    $"  [dim]{fix.Tag, -10}[/] {Markup.Escape(fix.Target)} "
+                        + $"[dim]- {Markup.Escape(fix.Evidence)}[/]"
+                );
+            }
+        }
+
+        AnsiConsole.WriteLine();
+        AnsiConsole.MarkupLine(
+            "[dim]Every change, with what it wanted and the read-back that proves it, "
+                + "is in the run log.[/]"
+        );
     }
 
     static void DisplayOverallStatistics(List<TaskResult> results)
