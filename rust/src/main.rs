@@ -1,7 +1,8 @@
 // =============================================================================
 // PinnacleCyPat (Rust port) - Entry point
 // Author: Maxwell McCormick
-// Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+// Copyright 2026 Maxwell McCormick
+// SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
 use std::future::Future;

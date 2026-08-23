@@ -435,5 +435,5 @@ changing the code they describe.
   Windows 11 image warning against "going back to Windows 10" is not
   misidentified, and recognises Server 2012–2025, Windows 7/8.1 and Fedora.
 
-Author: Maxwell McCormick · Proprietary, see `../LICENSE` · "PinnacleCyPat" is
+Author: Maxwell McCormick · Apache 2.0, see `../LICENSE` · "PinnacleCyPat" is
 an unregistered trademark of Maxwell McCormick (see `../NOTICE`).

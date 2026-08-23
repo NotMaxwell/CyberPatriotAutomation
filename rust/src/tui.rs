@@ -1,7 +1,8 @@
 // =============================================================================
 // PinnacleCyPat - Interactive terminal UI
 // Author: Maxwell McCormick
-// Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+// Copyright 2026 Maxwell McCormick
+// SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
 //! The interactive front end: a guided menu that asks which README to use, which

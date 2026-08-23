@@ -10,6 +10,25 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.15.1
+
+### Changed
+
+- **Back to the Apache License 2.0.** The proprietary licence adopted on
+  2026-08-22 is withdrawn; every release before and since is Apache-2.0.
+
+  `LICENSE` is now byte-identical to the canonical text from apache.org. The
+  copy that had been in this repository before the proprietary switch was not:
+  it read "submitted to the Licensor" where upstream reads "submitted to
+  Licensor". A reworded licence is a different licence, and it stops automated
+  scanners recognising it.
+
+  `NOTICE` carries the copyright, the trademark disclaimer and the third-party
+  attributions. Source headers now carry `SPDX-License-Identifier: Apache-2.0`
+  in place of "All Rights Reserved", and `Cargo.toml` declares
+  `license = "Apache-2.0"`. `publish = false` stays, now as a choice rather than
+  a restriction: this is an application, and nothing here is worth depending on.
+
 ## 1.15.0
 
 ### Changed
@@ -236,6 +255,9 @@ entry here.** Patch for fixes, minor for new behaviour or tasks.
   `cargo publish` from uploading a crate whose licence forbids redistribution.
   Releases before 2026-08-22 remain under Apache-2.0 for copies already
   distributed under it.
+
+  > Reverted in 1.15.1 - the project is Apache-2.0 again, and always was either
+  > side of this one-day window.
 
 - The help text no longer claims that every task runs when none is named. That
   stopped being true when a bare invocation was made safe, and the line had not

@@ -12,9 +12,14 @@ alongside it until 2026-08-23 and is now frozen under `archive/csharp/`. Do not
 change it, do not mirror changes into it, and do not treat it as a second
 target — it is kept only as the reference the Rust port was written against.
 
-**The project is proprietary — see [LICENSE](../LICENSE).** It is not open
-source. The crate is deliberately marked unpublishable (`publish = false`); do
-not suggest publishing it.
+**Licensed under Apache 2.0 — see [LICENSE](../LICENSE).** `publish = false`
+in `Cargo.toml` is a choice, not a licence restriction: this is an application,
+not a library, so there is nothing for another crate to depend on.
+
+Keep `LICENSE` byte-identical to the canonical Apache 2.0 text — a reworded
+licence stops being detectable by scanners, and a previous edit to it had
+already drifted from upstream. New source files carry the two-line header:
+`Copyright 2026 Maxwell McCormick` and `SPDX-License-Identifier: Apache-2.0`.
 
 The full reference — every task, why it exists, what it changes and how — is
 [ARCHITECTURE.md](ARCHITECTURE.md). Read it before changing a task.

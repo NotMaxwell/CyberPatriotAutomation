@@ -1,6 +1,6 @@
 # PinnacleCyPat — Reference
 
-Copyright (c) 2026 Maxwell McCormick. All Rights Reserved. See [LICENSE](../LICENSE).
+Copyright 2026 Maxwell McCormick. Licensed under Apache 2.0 — see [LICENSE](../LICENSE).
 
 This is the long-form reference: what every task does, why it exists, and how it
 does it; then every utility, and how the pieces fit together. [README.md](../README.md)

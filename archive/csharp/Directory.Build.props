@@ -7,7 +7,7 @@
     <!-- Author Information -->
     <Authors>Maxwell McCormick</Authors>
     <Company>Maxwell McCormick</Company>
-    <Copyright>Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.</Copyright>
+    <Copyright>Copyright 2026 Maxwell McCormick. Licensed under Apache-2.0.</Copyright>
 
     <!-- Code Analysis & Formatting -->
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

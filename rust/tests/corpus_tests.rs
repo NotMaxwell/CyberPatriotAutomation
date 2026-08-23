@@ -1,7 +1,8 @@
 // =============================================================================
 // PinnacleCyPat - README corpus snapshot tests
 // Author: Maxwell McCormick
-// Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+// Copyright 2026 Maxwell McCormick
+// SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 //! Every README in `tests/corpus/` is parsed and the whole result snapshotted.
 //!

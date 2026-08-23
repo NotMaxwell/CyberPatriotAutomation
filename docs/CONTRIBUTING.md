@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the PinnacleCyPat tool! This docu
 
 > **This repository is the canonical and official source of the PinnacleCyPat, authored and maintained by Maxwell McCormick.**
 >
-> PinnacleCyPat is **proprietary software** — see [LICENSE](../LICENSE). It is not open source, and unsolicited contributions are not accepted. This document is retained as the coding standard for work done **with the copyright holder's written permission**; forking, modifying and redistributing the project are prohibited regardless of how well the result follows it.
+> PinnacleCyPat is licensed under **[Apache 2.0](../LICENSE)**. Contributions are welcome; under Section 5 of the licence, anything you deliberately submit for inclusion is licensed under the same terms unless you say otherwise in writing.
 
 ## Contributor License Agreement
 

@@ -88,7 +88,7 @@
 | `CLAUDE.md` | AI assistant instructions (Claude) |
 | `.github/copilot-instructions.md` | GitHub Copilot instructions |
 | `TASK_ANALYSIS.md` | This file - task roadmap |
-| `LICENSE` | Proprietary licence |
+| `LICENSE` | Apache License 2.0 |
 
 ---
 

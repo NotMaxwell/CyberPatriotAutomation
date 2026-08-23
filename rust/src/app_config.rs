@@ -1,7 +1,8 @@
 // =============================================================================
 // PinnacleCyPat
 // Author: Maxwell McCormick
-// Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+// Copyright 2026 Maxwell McCormick
+// SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
 //! Application configuration and default paths.

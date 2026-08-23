@@ -7,7 +7,8 @@ images. One Rust implementation under `rust/`; the retired C# port is frozen
 under `archive/csharp/` and must not be changed. Formerly written as
 Rust under `rust/`. Changes to behaviour generally belong in both.
 
-**This project is proprietary (see LICENSE).** Do not add code copied from
+**Apache 2.0 (see LICENSE).** Contributions are covered by Section 5 of the
+licence. Do not add code copied from
 elsewhere without checking its licence, and do not suggest publishing the package
 to NuGet or crates.io — both projects are deliberately marked unpublishable.
 

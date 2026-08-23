@@ -1,115 +1,90 @@
 PinnacleCyPat
-Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+Copyright 2026 Maxwell McCormick
 
-================================================================================
-                                   LICENSE
-================================================================================
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
 
-PinnacleCyPat is PROPRIETARY software. It is NOT open source.
+    http://www.apache.org/licenses/LICENSE-2.0
 
-Use is governed solely by the LICENSE file in this repository. In summary, and
-without replacing that document:
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
 
-  PERMITTED   Installing and running unmodified copies on systems you own or are
-              authorized to administer.
-
-  PROHIBITED  Copying (beyond installation and one backup), modifying, forking,
-              redistributing, sublicensing, hosting, mirroring, selling,
-              reverse engineering, removing attribution, re-implementing the
-              logic elsewhere, and use as machine-learning training data.
-
-Source code is published for review and auditing. Its visibility grants no right
-to copy, modify, compile or redistribute it. Written permission from Maxwell
-McCormick is required for any use beyond running the Software.
-
-This project was distributed under the Apache License 2.0 until 2026-08-22.
-Copies obtained under that license before that date remain governed by it as to
-those copies; everything after is governed by the LICENSE file here.
-
-================================================================================
-                              ATTRIBUTION NOTICE
-================================================================================
-
-This project was created and is maintained by Maxwell McCormick.
 Canonical repository: https://github.com/NotMaxwell/CyberPatriotAutomation
 
-The attribution shown in the tool's console output and written into its run logs
-is part of the Software. Removing or altering it is a breach of the LICENSE.
+================================================================================
+                              WHAT THIS TOOL DOES
+================================================================================
+
+Read Section 7 (Disclaimer of Warranty) and Section 8 (Limitation of Liability)
+of the License before running this. They are not boilerplate here.
+
+PinnacleCyPat makes broad, largely irreversible changes to a Windows system. It
+deletes local user accounts, resets passwords, disables and reconfigures
+services, rewrites registry values and security policy, uninstalls software,
+changes firewall rules, and deletes files it judges to be prohibited media.
+
+It is built for disposable competition images. It is NOT built for, and must not
+be run on, a machine whose contents matter: a personal computer, a work
+computer, a server, or anything you are not prepared to rebuild from scratch.
+
+Use `--dry-run` first. It previews every change and applies none.
 
 ================================================================================
                               TRADEMARK NOTICE
 ================================================================================
 
-"PinnacleCyPat" is an unregistered trademark of Maxwell McCormick. No right to
-use the name or any associated branding is granted for any purpose.
-
 CyberPatriot is a program of the Air & Space Forces Association. PinnacleCyPat is
 an independent work and is not affiliated with, endorsed by, or sponsored by the
 Air & Space Forces Association or the CyberPatriot program. References to
 CyberPatriot identify the competition this tool is designed to assist with, and
-are nominative fair use.
+are nominative use only.
+
+Windows, PowerShell and Microsoft are trademarks of Microsoft Corporation. Other
+product and company names mentioned are the trademarks of their respective
+owners, referred to only to identify the software this tool manages.
+
+Under Section 6 of the License, this notice grants no rights to use the names,
+trademarks, or product names of the licensor.
 
 ================================================================================
                            THIRD-PARTY COMPONENTS
 ================================================================================
 
-These components are governed by their own licenses, which are unaffected by the
-LICENSE file here. Nothing in that file limits your rights in these components
-when you obtain them from their own sources.
+This product includes software developed by third parties.
 
-C# port (src/, tests/)
+Rust (rust/):
+
+  - windows (MIT OR Apache-2.0) — Microsoft's official Win32 bindings
+  - scraper, html5ever, ego-tree (MIT OR Apache-2.0) — HTML parsing
+  - tokio, async-trait, regex, html-escape, chrono, uuid, comfy-table,
+    indicatif, owo-colors — each MIT OR Apache-2.0 unless the crate states
+    otherwise
+  - insta (Apache-2.0) — snapshot testing, development only
+
+  Run `cargo tree` for the full resolved dependency graph and each crate's own
+  licence.
+
+Archived C# port (archive/csharp/), retained for reference and not built:
 
   - Spectre.Console (MIT License)
-    Copyright (c) 2020 Patrik Svensson, Phil Scott, Nils Andresen
-    https://github.com/spectreconsole/spectre.console
-
   - System.CommandLine (MIT License)
-    Copyright (c) .NET Foundation and Contributors
-    https://github.com/dotnet/command-line-api
-
   - Microsoft.Windows.CsWin32 (MIT License)
-    Copyright (c) Microsoft Corporation
-    https://github.com/microsoft/CsWin32
-
   - CSharpier (MIT License) — build-time formatter
-    https://github.com/belav/csharpier
+  - xUnit, FluentAssertions, coverlet (MIT / Apache-2.0) — test only
 
-  - xUnit (Apache License 2.0) — test only
-    Copyright (c) .NET Foundation and Contributors
-    https://github.com/xunit/xunit
-
-  - FluentAssertions (Apache License 2.0) — test only
-    Copyright (c) Dennis Doomen
-    https://github.com/fluentassertions/fluentassertions
-
-  - Moq (BSD 3-Clause) — test only
-    https://github.com/devlooped/moq
-
-  - coverlet (MIT License) — test only
-    https://github.com/coverlet-coverage/coverlet
-
-Rust port (rust/)
-
-  - windows (MIT OR Apache-2.0)
-    Copyright (c) Microsoft Corporation
-    https://github.com/microsoft/windows-rs
-
-  - tokio, async-trait, regex, html-escape, chrono, uuid,
-    comfy-table, indicatif, owo-colors
-    Each MIT OR Apache-2.0 unless stated by the crate itself; see
-    rust/Cargo.toml for the exact set and versions.
-
-External tools invoked at run time (not distributed with this Software)
-
-  - Chocolatey (Apache License 2.0) — https://chocolatey.org
-    Downloaded and installed at run time when software installation or updating
-    is requested and Chocolatey is absent.
+Each third-party component is governed by its own licence. Nothing in this
+NOTICE modifies those terms.
 
 ================================================================================
-                                   CONTACT
+                                 CONTRIBUTING
 ================================================================================
 
-Licensing enquiries, permission requests, and reports of unauthorized use:
+Contributions are accepted under Section 5 of the License: unless you state
+otherwise in writing, anything you deliberately submit for inclusion in this
+work is licensed under Apache 2.0, with no additional terms.
+
   - Open an issue at https://github.com/NotMaxwell/CyberPatriotAutomation
-  - Title license reports "License Violation Report" and include links to the
-    infringing content.
+  - See docs/CONTRIBUTING.md

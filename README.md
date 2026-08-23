@@ -1,7 +1,7 @@
 # PinnacleCyPat
 
 [![Rust](https://img.shields.io/badge/Rust-2021-000000)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/Tests-182-brightgreen)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick, all rights reserved
@@ -270,7 +270,7 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
 ```
 PinnacleCyPat/
 ├── RUN.bat / RUN.ps1              Double-click launchers → the built-in menu
-├── LICENSE                        Proprietary licence
+├── LICENSE                        Apache License 2.0
 ├── NOTICE                         Attribution, trademark, third-party components
 ├── rust/
 │   ├── src/
@@ -300,23 +300,19 @@ PinnacleCyPat/
 
 ## Licence
 
-**PinnacleCyPat is proprietary software. It is not open source.**
+Licensed under the **[Apache License 2.0](LICENSE)**.
 
-You may install and run unmodified copies on systems you own or are authorized to
-administer. You may **not** copy (beyond installation and one backup), modify,
-fork, redistribute, sublicense, host, mirror, sell, reverse engineer, or
-re-implement it elsewhere. Source is published for review and auditing only; its
-visibility grants no right to reuse it.
+Use it, modify it, redistribute it, run it in a competition, build something else
+out of it. Keep the licence and NOTICE with any copy you pass on, and state what
+you changed. See [NOTICE](NOTICE) for attribution and third-party components.
 
-See [LICENSE](LICENSE) for the full terms and [NOTICE](NOTICE) for attribution
-and third-party components. Written permission from Maxwell McCormick is required
-for any use beyond running the software.
+**It comes with no warranty of any kind, and the author is not liable for what it
+does to your machine.** Sections 7 and 8 of the licence say so in the formal
+words; the plain version is in [NOTICE](NOTICE) and in the disclaimer below, and
+neither is boilerplate for a tool that deletes accounts and uninstalls software.
 
-Releases before 2026-08-22 were distributed under the Apache License 2.0. Copies
-lawfully obtained under that licence remain governed by it; everything from that
-date forward is governed by the LICENSE file here.
-
-"PinnacleCyPat" is an unregistered trademark of Maxwell McCormick.
+> This project was briefly relicensed as proprietary in August 2026 and returned
+> to Apache 2.0 on 2026-08-23. Every release, before and since, is Apache 2.0.
 
 CyberPatriot is a program of the Air & Space Forces Association. This tool is an
 independent work and is not affiliated with, endorsed by, or sponsored by the Air

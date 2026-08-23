@@ -1,7 +1,7 @@
 // =============================================================================
 // PinnacleCyPat - Unit Tests
 // Author: Maxwell McCormick
-// Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
+// Copyright 2026 Maxwell McCormick. Licensed under Apache-2.0.
 // =============================================================================
 
 using PinnacleCyPat.Core.Models;
