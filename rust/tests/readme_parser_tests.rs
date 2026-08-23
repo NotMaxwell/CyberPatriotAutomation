@@ -295,3 +295,88 @@ async fn parse_inline_does_not_flag_do_not_disable_as_prohibited() {
         .iter()
         .any(|s| s.to_lowercase().contains("ccs")));
 }
+
+/// Parse an arbitrary HTML fragment through the real file-based entry point.
+async fn parse_html(html: &str) -> pinnacle_cypat::models::ReadmeData {
+    let path = std::env::temp_dir().join(format!("cpa_group_{}.html", uuid_like()));
+    std::fs::write(&path, html).unwrap();
+    let data = readme_parser::parse_html_readme_async(&path.to_string_lossy()).await;
+    let _ = std::fs::remove_file(&path);
+    data
+}
+
+/// The sentence is verbatim from a competition README, and the run it produced
+/// recorded `Members: users, ggoddard, ealderson, amoss, lchong, group` - so
+/// `net localgroup allsafe "group" /add` was issued and failed.
+///
+/// The member capture is prose, and the regex only knew the phrasing "add the
+/// following users to the X group:". Against "add the users ... into the group"
+/// the optional prefix did not match, so the connectives were captured with the
+/// names. "the", "and" and "into" were filtered as common words; "users" and
+/// "group" were not.
+#[tokio::test]
+async fn group_members_exclude_the_connective_prose() {
+    let data = parse_html(
+        "<html><body><h1>Windows 11</h1><p>Please make a group called allsafe \
+         and add the users ggoddard, ealderson, amoss, and lchong into the group.</p></body></html>",
+    )
+    .await;
+
+    let group = data
+        .group_requirements
+        .iter()
+        .find(|g| g.group_name == "allsafe")
+        .expect("allsafe group");
+    assert_eq!(group.members, ["ggoddard", "ealderson", "amoss", "lchong"]);
+}
+
+/// The phrasing the regex already handled must keep working.
+#[tokio::test]
+async fn group_members_still_parse_the_following_users_phrasing() {
+    let data = parse_html(
+        "<html><body><h1>Windows 11</h1><p>Create a new group called auditors and add \
+         the following users to the auditors group: lchong, pprice.</p></body></html>",
+    )
+    .await;
+
+    let group = data
+        .group_requirements
+        .iter()
+        .find(|g| g.group_name == "auditors")
+        .expect("auditors group");
+    assert_eq!(group.members, ["lchong", "pprice"]);
+}
+
+#[test]
+fn extract_group_members_keeps_only_the_names() {
+    let cases: &[(&str, &[&str])] = &[
+        // The two that reached a live command line.
+        (
+            "the users ggoddard, ealderson into the group",
+            &["ggoddard", "ealderson"],
+        ),
+        // Other shapes of the same prose.
+        ("the following users: amoss and lchong", &["amoss", "lchong"]),
+        (
+            "these accounts amoss, lchong to the group",
+            &["amoss", "lchong"],
+        ),
+        (
+            "users amoss and lchong as members of the group",
+            &["amoss", "lchong"],
+        ),
+        // No connectives at all - the shape the original tests covered.
+        (
+            "ggoddard, ealderson, amoss",
+            &["ggoddard", "ealderson", "amoss"],
+        ),
+    ];
+
+    for (prose, expected) in cases {
+        assert_eq!(
+            readme_parser::extract_group_members(prose),
+            *expected,
+            "prose: {prose}"
+        );
+    }
+}

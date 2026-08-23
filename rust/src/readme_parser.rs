@@ -539,13 +539,7 @@ fn parse_group_requirements(content: &str, data: &mut ReadmeData) {
     // groups only ever produced the first one. Iterate over every match.
     for caps in group.captures_iter(content) {
         let group_name = caps[1].trim().to_string();
-        let members_text = strip_html_tags(&caps[2]);
-        let splitter = re(r"[,\s]+");
-        let members: Vec<String> = splitter
-            .split(&members_text)
-            .map(|m| m.trim().trim_matches(|c| c == ',' || c == '.').to_string())
-            .filter(|m| !m.is_empty() && is_valid_username(m))
-            .collect();
+        let members = extract_group_members(&strip_html_tags(&caps[2]));
         let already_present = data
             .group_requirements
             .iter()
@@ -557,6 +551,51 @@ fn parse_group_requirements(content: &str, data: &mut ReadmeData) {
             });
         }
     }
+}
+
+/// Words that describe the membership rather than name a member.
+///
+/// A README writes the list as prose - "add the users a, b and c into the
+/// group" - and the connective words are captured along with the names. Most
+/// are already rejected by [`is_common_word`], but "users" and "group" were
+/// not: a real run parsed `Members: users, ggoddard, ealderson, amoss, lchong,
+/// group` and issued `net localgroup allsafe "group" /add`, which failed.
+///
+/// This is deliberately a separate set from [`is_common_word`]. That one also
+/// gates account names, where erring permissive is right because a wrongly
+/// rejected user is deleted rather than protected. Here the opposite holds - a
+/// junk member is a command that cannot succeed.
+const MEMBERSHIP_WORDS: &[&str] = &[
+    "user", "users", "account", "accounts", "group", "groups", "member", "members", "add", "to",
+    "in", "as", "of",
+];
+
+/// Pull the member names out of the prose that follows "and add".
+pub fn extract_group_members(members_text: &str) -> Vec<String> {
+    // "... a, b and c into the group." - the trailing clause names the group
+    // again. Only strip it at the end of the capture, so a lead-in like "the
+    // following users to the allsafe group: a, b, c" is left for the word
+    // filter rather than taking the whole list with it.
+    let trailing = re(r#"(?is)\b(?:in|into|on|onto|to)\s+(?:the\s+)?["']?\w*["']?\s*group\s*[.,]?\s*$"#);
+    let text = trailing.replace(members_text, "");
+
+    // "the users", "the following users:", "these accounts" - lead-ins to the
+    // list rather than part of it.
+    let leading = re(
+        r"(?i)^\s*(?:the\s+|these\s+|those\s+|following\s+|new\s+)*(?:users?|accounts?|members?)\s*:?\s*",
+    );
+    let text = leading.replace(&text, "");
+
+    let splitter = re(r"[,\s]+");
+    splitter
+        .split(&text)
+        .map(|m| m.trim().trim_matches(|c| c == ',' || c == '.').to_string())
+        .filter(|m| {
+            !m.is_empty()
+                && !MEMBERSHIP_WORDS.iter().any(|w| w.eq_ignore_ascii_case(m))
+                && is_valid_username(m)
+        })
+        .collect()
 }
 
 fn parse_users_to_create(content: &str, data: &mut ReadmeData) {

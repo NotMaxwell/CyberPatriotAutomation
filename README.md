@@ -235,7 +235,7 @@ from the command echo.
 |---|---|---|
 | Location | `src/`, `tests/` | `rust/` |
 | Version | 1.8.0 | 1.13.0 |
-| Tests | 172 | 139 |
+| Tests | 202 | 155 |
 | Published size | ~42 MB self-contained | ~2.1 MB |
 
 Same flags, same tasks, same run-log format. The Rust port additionally has a

@@ -752,14 +752,7 @@ public class ReadmeParser
         )
         {
             var groupName = groupMatch.Groups[1].Value.Trim();
-            var membersText = StripHtmlTags(groupMatch.Groups[2].Value);
-
-            // Parse member names
-            var members = Regex
-                .Split(membersText, @"[,\s]+")
-                .Select(m => m.Trim().Trim(',', '.'))
-                .Where(m => !string.IsNullOrWhiteSpace(m) && IsValidUsername(m))
-                .ToList();
+            var members = ExtractGroupMembers(StripHtmlTags(groupMatch.Groups[2].Value));
 
             var alreadyPresent = data.GroupRequirements.Any(g =>
                 g.GroupName.Equals(groupName, StringComparison.OrdinalIgnoreCase)
@@ -772,6 +765,76 @@ public class ReadmeParser
                 );
             }
         }
+    }
+
+    /// <summary>
+    /// Words that describe the membership rather than name a member.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A README writes the list as prose - "add the users a, b and c into the
+    /// group" - and the connective words are captured along with the names.
+    /// Most are already rejected by <see cref="IsCommonWord"/>, but "users" and
+    /// "group" were not: a real run parsed
+    /// <c>Members: users, ggoddard, ealderson, amoss, lchong, group</c> and
+    /// issued <c>net localgroup allsafe "group" /add</c>, which failed.
+    /// </para>
+    /// <para>
+    /// This is deliberately a separate set from <see cref="IsCommonWord"/>.
+    /// That one also gates account names, where erring permissive is the right
+    /// call because a wrongly rejected user is deleted rather than protected.
+    /// Here the opposite holds - a junk member is a command that cannot succeed.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> MembershipWords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "user",
+        "users",
+        "account",
+        "accounts",
+        "group",
+        "groups",
+        "member",
+        "members",
+        "add",
+        "to",
+        "in",
+        "as",
+        "of",
+    };
+
+    /// <summary>
+    /// Pull the member names out of the prose that follows "and add".
+    /// </summary>
+    public static List<string> ExtractGroupMembers(string membersText)
+    {
+        // "... a, b and c into the group." - the trailing clause names the
+        // group again. Only strip it at the end of the capture, so a lead-in
+        // like "the following users to the allsafe group: a, b, c" is left for
+        // the word filter rather than taking the whole list with it.
+        membersText = Regex.Replace(
+            membersText,
+            @"\b(?:in|into|on|onto|to)\s+(?:the\s+)?[""']?\w*[""']?\s*group\s*[.,]?\s*$",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.Singleline
+        );
+
+        // "the users", "the following users:", "these accounts" - lead-ins to
+        // the list rather than part of it.
+        membersText = Regex.Replace(
+            membersText,
+            @"^\s*(?:the\s+|these\s+|those\s+|following\s+|new\s+)*(?:users?|accounts?|members?)\s*:?\s*",
+            string.Empty,
+            RegexOptions.IgnoreCase
+        );
+
+        return Regex
+            .Split(membersText, @"[,\s]+")
+            .Select(m => m.Trim().Trim(',', '.'))
+            .Where(m =>
+                !string.IsNullOrWhiteSpace(m) && !MembershipWords.Contains(m) && IsValidUsername(m)
+            )
+            .ToList();
     }
 
     /// <summary>

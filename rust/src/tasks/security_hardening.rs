@@ -3,10 +3,18 @@
 use crate::command;
 use crate::impl_task_meta;
 use crate::models::{SystemInfo, TaskResult};
+use crate::readme_services;
 use crate::tasks::Task;
 use crate::ui;
 use async_trait::async_trait;
 use indicatif::{ProgressBar, ProgressStyle};
+
+/// The values that turn Remote Desktop off.
+///
+/// Named rather than filtered by path: the Terminal Server key also carries
+/// `fAllowToGetHelp`, which disables Remote *Assistance* - a different feature,
+/// never required by a README, and still worth turning off.
+const REMOTE_DESKTOP_VALUES: &[&str] = &["fDenyTSConnections", "AllowTSConnections"];
 
 /// Registry settings to apply: (path, name, type, value, description).
 const REGISTRY_SETTINGS: &[(&str, &str, &str, &str, &str)] = &[
@@ -84,6 +92,7 @@ pub struct SecurityHardeningTask {
     name: String,
     description: String,
     dry_run: bool,
+    readme_data: Option<crate::models::ReadmeData>,
 }
 
 impl SecurityHardeningTask {
@@ -94,14 +103,32 @@ impl SecurityHardeningTask {
                 "Apply additional security hardening settings via registry and system configuration"
                     .to_string(),
             dry_run: false,
+            readme_data: None,
         }
     }
 
-    async fn apply_registry_settings(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
+    pub fn set_readme_data(&mut self, data: crate::models::ReadmeData) {
+        self.readme_data = Some(data);
+    }
+
+    async fn apply_registry_settings(&self, fixes: &mut Vec<String>, issues: &mut Vec<String>) {
         ui::markup_line(&format!("[cyan]Applying {} registry settings...[/]", REGISTRY_SETTINGS.len()));
+
+        // An image whose scenario is "this machine is administered remotely"
+        // scores RDP being *available*. Denying it loses that point while every
+        // other hardening step still applies, so honour the README here rather
+        // than fighting the service management task, which already protects
+        // TermService in the same situation.
+        let skip_remote_desktop = readme_services::is_remote_desktop_required(self.readme_data.as_ref());
+        if skip_remote_desktop {
+            ui::markup_line(
+                "[yellow]! Leaving Remote Desktop enabled: the README lists it as a critical service[/]",
+            );
+        }
 
         let mut success_count = 0;
         let mut fail_count = 0;
+        let mut skipped_count = 0;
 
         let bar = ProgressBar::new(REGISTRY_SETTINGS.len() as u64);
         bar.set_style(
@@ -112,6 +139,11 @@ impl SecurityHardeningTask {
         bar.set_message("Applying registry settings...");
 
         for (path, name, ty, value, description) in REGISTRY_SETTINGS {
+            if skip_remote_desktop && REMOTE_DESKTOP_VALUES.contains(name) {
+                skipped_count += 1;
+                bar.inc(1);
+                continue;
+            }
             let (success, _o, error) = command::execute(
                 "reg",
                 Some(&format!("add \"{path}\" /v {name} /t {ty} /d {value} /f")),
@@ -138,6 +170,11 @@ impl SecurityHardeningTask {
         bar.finish_and_clear();
 
         ui::markup_line(&format!("[green]? Applied {success_count} settings[/]"));
+        if skipped_count > 0 {
+            ui::markup_line(&format!(
+                "[dim]{skipped_count} Remote Desktop settings skipped at the README's request[/]"
+            ));
+        }
         if fail_count > 0 {
             ui::markup_line(&format!("[yellow]? {fail_count} settings could not be applied[/]"));
         }
@@ -311,7 +348,7 @@ impl Task for SecurityHardeningTask {
 
         ui::write_line();
         ui::rule("[bold yellow]Step 1: Apply Registry Settings[/]");
-        Self::apply_registry_settings(&mut fixes, &mut issues).await;
+        self.apply_registry_settings(&mut fixes, &mut issues).await;
 
         ui::write_line();
         ui::rule("[bold yellow]Step 2: Disable Insecure Features[/]");
@@ -355,7 +392,11 @@ impl Task for SecurityHardeningTask {
             Some(r#"query "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections"#),
         )
         .await;
-        if rdp_success && rdp_output.contains("0x1") {
+        if readme_services::is_remote_desktop_required(self.readme_data.as_ref()) {
+            // Deliberately left enabled; verifying it as "must be denied" would
+            // report a failure for having done the right thing.
+            ui::markup_line("[dim]? Remote Desktop left enabled at the README's request[/]");
+        } else if rdp_success && rdp_output.contains("0x1") {
             ui::markup_line("[green]? Remote Desktop is disabled[/]");
         } else {
             ui::markup_line("[red]? Remote Desktop is not disabled[/]");

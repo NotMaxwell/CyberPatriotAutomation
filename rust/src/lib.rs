@@ -8,6 +8,7 @@
 //! be exercised by integration tests, mirroring the C# `Core` namespace.
 
 pub mod app_config;
+pub mod chocolatey;
 pub mod command;
 pub mod models;
 pub mod native;

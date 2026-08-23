@@ -122,7 +122,7 @@ The repository holds two complete implementations of the same tool.
 | Framework | .NET 10 (`net10.0` + `net10.0-windows`) | Rust 2021 |
 | Win32 bindings | CsWin32, generated from `NativeMethods.txt` | `windows` crate |
 | Console UI | Spectre.Console | hand-rolled `ui` module |
-| Tests | 172 (xUnit) | 139 (built-in) |
+| Tests | 202 (xUnit) | 155 (built-in) |
 | Published size | ~42 MB self-contained | ~2.1 MB |
 
 They share the flag set, the task pipeline, the parser behaviour and the run-log
@@ -994,6 +994,23 @@ before validation, so `bob (Admin)` yields `bob`.
 > Erring permissive is deliberate. A real user wrongly rejected is absent from the
 > authorised set and gets **deleted**; a junk entry only ever protects an account
 > that would otherwise be removed.
+
+**Group members** are extracted from prose, so the connective words around the
+list are stripped before the names are validated: a trailing "into the group" /
+"to the X group" clause, and a leading "the users" / "the following accounts:"
+lead-in. What survives is then filtered against a small membership vocabulary
+(`user`, `users`, `group`, `members`, `add`, `to`, …).
+
+> A README reading *"make a group called allsafe and add the users ggoddard,
+> ealderson, amoss, and lchong into the group"* parsed as
+> `Members: users, ggoddard, ealderson, amoss, lchong, group`. The optional
+> regex prefix only knew the phrasing "add the following users to the X group:",
+> so against this sentence it did not match and the connectives were captured
+> with the names. `the`, `and` and `into` were rejected as common words; "users"
+> and "group" were not, and the run issued `net localgroup allsafe "group" /add`.
+> That vocabulary is kept **separate** from the common-word list above, because
+> the permissive rule that is right for account names is exactly wrong here — a
+> junk member is a command that cannot succeed.
 
 **Service classification** is the highest-stakes part:
 

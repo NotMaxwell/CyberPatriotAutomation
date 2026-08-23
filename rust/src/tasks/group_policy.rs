@@ -254,8 +254,11 @@ impl Task for GroupPolicyTask {
             reg_dword_equals(LANMAN_WORKSTATION, "RequireSecuritySignature", 1).await;
         let server_signing_ok =
             reg_dword_equals(LANMAN_SERVER, "RequireSecuritySignature", 1).await;
-        // fDenyTSConnections = 1 means Remote Desktop is refused.
-        let rdp_ok = reg_dword_equals(TERMINAL_SERVER, "fDenyTSConnections", 1).await;
+        // fDenyTSConnections = 1 means Remote Desktop is refused. When the README
+        // requires RDP this step was deliberately skipped, so verifying it as
+        // "must be denied" would report a failure for doing the right thing.
+        let rdp_ok = readme_services::is_remote_desktop_required(self.readme_data.as_ref())
+            || reg_dword_equals(TERMINAL_SERVER, "fDenyTSConnections", 1).await;
 
         if !client_signing_ok {
             ui::markup_line("[red]? Microsoft network client does not require SMB signing[/]");

@@ -402,7 +402,11 @@ async fn run_automation() {
         tasks.push(Box::new(FirewallConfigurationTask::new()));
     }
     if run_security_hardening || run_all {
-        tasks.push(Box::new(SecurityHardeningTask::new()));
+        let mut task = SecurityHardeningTask::new();
+        if let Some(rd) = &readme_data {
+            task.set_readme_data(rd.clone());
+        }
+        tasks.push(Box::new(task));
     }
     if run_group_policy || run_all {
         let mut task = GroupPolicyTask::new();

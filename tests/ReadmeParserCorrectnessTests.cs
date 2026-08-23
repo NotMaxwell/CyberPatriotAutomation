@@ -185,4 +185,60 @@ public class ReadmeParserCorrectnessTests
             .Should()
             .Contain(new[] { "allsafe", "auditors" });
     }
+
+    /// <summary>
+    /// The sentence below is verbatim from a competition README, and the run it
+    /// produced recorded
+    /// <c>Members: users, ggoddard, ealderson, amoss, lchong, group</c>.
+    /// </summary>
+    /// <remarks>
+    /// The member capture is prose, and the regex only knew the phrasing
+    /// "add the following users to the X group:". Against "add the users ...
+    /// into the group" the optional prefix did not match, so the connectives
+    /// were captured with the names. "the", "and" and "into" were filtered as
+    /// common words; "users" and "group" were not, and the run issued
+    /// <c>net localgroup allsafe "group" /add</c>.
+    /// </remarks>
+    [Fact]
+    public async Task GroupMembers_ShouldNotIncludeTheConnectiveProse()
+    {
+        var html =
+            "<html><body><h1>Windows 11</h1><p>Please make a group called allsafe "
+            + "and add the users ggoddard, ealderson, amoss, and lchong into the group.</p>"
+            + "</body></html>";
+
+        var data = await ParseAsync(html);
+
+        var group = data.GroupRequirements.Single(g => g.GroupName == "allsafe");
+        group.Members.Should().Equal("ggoddard", "ealderson", "amoss", "lchong");
+    }
+
+    /// <summary>The phrasing the regex already handled must keep working.</summary>
+    [Fact]
+    public async Task GroupMembers_ShouldStillParseTheFollowingUsersPhrasing()
+    {
+        var html =
+            "<html><body><h1>Windows 11</h1><p>Create a new group called auditors and add "
+            + "the following users to the auditors group: lchong, pprice.</p></body></html>";
+
+        var data = await ParseAsync(html);
+
+        data.GroupRequirements.Single(g => g.GroupName == "auditors")
+            .Members.Should()
+            .Equal("lchong", "pprice");
+    }
+
+    [Theory]
+    // The two that reached a live command line.
+    [InlineData("the users ggoddard, ealderson into the group", "ggoddard|ealderson")]
+    // Other shapes of the same prose.
+    [InlineData("the following users: amoss and lchong", "amoss|lchong")]
+    [InlineData("these accounts amoss, lchong to the group", "amoss|lchong")]
+    [InlineData("users amoss and lchong as members of the group", "amoss|lchong")]
+    // No connectives at all - the shape the original tests covered.
+    [InlineData("ggoddard, ealderson, amoss", "ggoddard|ealderson|amoss")]
+    public void ExtractGroupMembers_KeepsOnlyTheNames(string prose, string expected)
+    {
+        ReadmeParser.ExtractGroupMembers(prose).Should().Equal(expected.Split('|'));
+    }
 }
