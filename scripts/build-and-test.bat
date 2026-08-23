@@ -1,11 +1,11 @@
 ﻿@echo off
-REM Build and Test Script for CyberPatriot Automation Tool
+REM Build and Test Script for PinnacleCyPat
 REM Run this script to build the project and run all unit tests
 
 chcp 65001 > nul
 echo.
 echo ======================================
-echo Building CyberPatriot Automation Tool
+echo Building PinnacleCyPat
 echo ======================================
 
 cd /d "%~dp0"
@@ -25,7 +25,7 @@ echo ======================================
 echo Unit Test Results
 echo ======================================
 echo.
-dotnet test Tests\CyberPatriotAutomation.Tests.csproj --configuration Release --no-build -v n
+dotnet test Tests\PinnacleCyPat.Tests.csproj --configuration Release --no-build -v n
 
 echo.
 echo ======================================

@@ -1,35 +1,68 @@
-﻿# GitHub Copilot Instructions
+# GitHub Copilot Instructions
 
 ## Project Context
-This is a CyberPatriot competition automation tool in C# (.NET 9.0) that automates Windows security hardening.
+
+PinnacleCyPat: a Windows security-hardening tool for CyberPatriot competition
+images. Two complete implementations of the same tool — C# (.NET 10) under `src/`,
+Rust under `rust/`. Changes to behaviour generally belong in both.
+
+**This project is proprietary (see LICENSE).** Do not add code copied from
+elsewhere without checking its licence, and do not suggest publishing the package
+to NuGet or crates.io — both projects are deliberately marked unpublishable.
 
 ## Key Patterns
 
-### Task Implementation
-All tasks inherit from `BaseTask` and implement:
-- `ReadSystemStateAsync()` - Read current system state
-- `ExecuteAsync()` - Apply security fixes
-- `VerifyAsync()` - Verify fixes were applied
+### Task implementation
 
-### Command Execution
+All tasks inherit `BaseTask` (C#) / implement the `Task` trait (Rust) and provide:
+
+- `ReadSystemStateAsync()` — read current state, display it, change nothing
+- `ExecuteAsync()` — apply remediation, return a `TaskResult`
+- `VerifyAsync()` — **re-read the machine** and confirm; never trust `Execute`'s report
+
+### Command execution
+
 ```csharp
 var (success, output, error) = await CommandExecutor.ExecuteAsync("command", "args");
+await CommandExecutor.PowerShellAsync(script);       // state changes; errors surface
+await CommandExecutor.PowerShellQueryAsync(script);  // reads; absence is not failure
 ```
 
-### Console Output (Spectre.Console)
+Interpolated values go through `CommandExecutor.PsQuote`.
+
+### Console output (Spectre.Console)
+
 ```csharp
 AnsiConsole.MarkupLine("[green]✓ Success[/]");
 AnsiConsole.MarkupLine("[red]✗ Failed[/]");
 ```
 
-## Testing
-- Use xUnit with FluentAssertions
-- All new features need unit tests
-- Test file naming: `{ClassName}Tests.cs`
+Escape untrusted text with `Markup.Escape`. Everything printed is mirrored into
+the run log automatically — do not add separate logging calls.
 
-## Important Rules
-1. Never disable CCS Client service
-2. Always support dry-run mode
-3. Back up files before deletion
-4. Use async/await for I/O
-5. Follow Microsoft C# conventions
+## Adding a task
+
+1. Create the task under `Core/Tasks/` (C#) or `src/tasks/` (Rust)
+2. Add its flag to `Program.Flags` / `FLAGS` — the single source of truth for
+   both the help text and the unknown-argument check
+3. Register it in the task-list builder
+4. Add it to the menu's task list in `Core/Tui.cs` / `src/tui.rs`
+5. Add tests
+6. Update `README.md` and `docs/ARCHITECTURE.md`
+
+## Testing
+
+- xUnit + FluentAssertions (C#), built-in test harness (Rust)
+- Test file naming: `{ClassName}Tests.cs`
+- Tests run on Linux, so anything under `Core/Native/` (`#if WINDOWS`) is not
+  covered by them — check Windows paths with
+  `cargo check --target x86_64-pc-windows-gnu` on the Rust side
+
+## Important rules
+
+1. Never disable the CCS Client service — it is the scoring engine
+2. Every task must honour `--dry-run` and change nothing under it
+3. Never delete accounts when the authorised set is empty (a parsing failure)
+4. A service named critical must never also be queued for disabling
+5. Return the *reason* for a failure, not a bare boolean
+6. Prefer the native Win32 path over parsing localised command output

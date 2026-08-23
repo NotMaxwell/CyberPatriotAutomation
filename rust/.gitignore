@@ -2,4 +2,4 @@
 Cargo.lock
 
 # Run logs are per-execution artefacts written next to wherever the tool ran.
-CyberPatriot_RunLog_*.txt
+PinnacleCyPat_RunLog_*.txt

@@ -55,6 +55,118 @@ fn push(line: String) {
 }
 
 /// Everything recorded so far.
+/// Record a diagnostic: something the operator does not need to see while the
+/// run is happening, but needs afterwards to work out why it did what it did.
+///
+/// The console narrative reports outcomes - "Failed to remove: CCleaner" - but
+/// not the evidence. When the reason comes back empty, which is what happens
+/// whenever a tool reports failure only through an exit code, that line degrades
+/// to "Failed to remove: CCleaner ()" and there is nothing left to investigate
+/// with. Diagnostics carry the evidence: the exact command, its exit code, and
+/// what it printed.
+///
+/// These go to the log only, never to the console. They exist to be read after
+/// the fact, and putting them on screen would bury the narrative the operator
+/// does have to follow live.
+pub fn diagnostic(category: &str, detail: &str) {
+    let detail = detail.trim_end();
+    if detail.is_empty() {
+        return;
+    }
+
+    let stamp = chrono::Local::now().format("%H:%M:%S");
+    let mut lines = detail.lines();
+    if let Some(first) = lines.next() {
+        push(format!("[{stamp}] [{category}] {}", first.trim_end()));
+    }
+    // Indented continuation lines keep a multi-line payload - a captured stderr,
+    // say - visibly attached to its own entry rather than reading as separate
+    // events.
+    for line in lines {
+        push(format!("                      {}", line.trim_end()));
+    }
+}
+
+/// Longest captured output kept per failed command.
+const MAX_CAPTURED_OUTPUT: usize = 600;
+
+/// Record the outcome of an external command, with enough to reproduce it.
+///
+/// Output is captured only on failure, and truncated. A successful command's
+/// output is usually large and never interesting; a failure's first few lines
+/// are almost always the whole story.
+pub fn record_command(
+    program: &str,
+    arguments: Option<&str>,
+    exit_code: Option<i32>,
+    output: &str,
+    error: Option<&str>,
+    elapsed: std::time::Duration,
+) {
+    let status = match exit_code {
+        Some(code) => format!("exit {code}"),
+        None => "no exit code (timed out or never ran)".to_string(),
+    };
+
+    diagnostic(
+        "cmd",
+        format!("{program} {}", redact(arguments.unwrap_or_default())).trim_end(),
+    );
+    diagnostic(
+        "cmd",
+        &format!("  -> {status} in {:.1}s", elapsed.as_secs_f64()),
+    );
+
+    if exit_code == Some(0) {
+        return;
+    }
+
+    if let Some(err) = error.filter(|e| !e.trim().is_empty()) {
+        diagnostic("cmd", &format!("  stderr: {}", truncate(err)));
+    }
+    if !output.trim().is_empty() {
+        diagnostic("cmd", &format!("  stdout: {}", truncate(output)));
+    }
+}
+
+fn truncate(text: &str) -> String {
+    let text = text.trim();
+    if text.chars().count() <= MAX_CAPTURED_OUTPUT {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(MAX_CAPTURED_OUTPUT).collect();
+    let remaining = text.chars().count() - MAX_CAPTURED_OUTPUT;
+    format!("{kept}... [{remaining} more chars]")
+}
+
+/// Blank out plaintext passwords before a command line reaches the log.
+///
+/// Account passwords are interpolated into `ConvertTo-SecureString` calls. The
+/// log does deliberately record each generated password once, where the task
+/// announces it - but that is a considered disclosure in one place, not a reason
+/// to scatter the same secret through every command echo.
+pub fn redact(command_line: &str) -> String {
+    let Some(at) = command_line.find("ConvertTo-SecureString") else {
+        return command_line.to_string();
+    };
+
+    let rest = &command_line[at..];
+    let Some(open) = rest.find('\'') else {
+        return command_line.to_string();
+    };
+    let Some(close_rel) = rest[open + 1..].find('\'') else {
+        return command_line.to_string();
+    };
+    let close = open + 1 + close_rel;
+
+    format!(
+        "{}{}'***'{}",
+        &command_line[..at],
+        &rest[..open],
+        &rest[close + 1..]
+    )
+}
+
 pub fn entries() -> Vec<String> {
     match ENTRIES.lock() {
         Ok(entries) => entries.clone(),
@@ -77,7 +189,7 @@ pub fn clear() {
 /// distinguishable at a glance, without opening them.
 pub fn default_log_path() -> PathBuf {
     crate::app_config::desktop_dir().join(format!(
-        "CyberPatriot_RunLog_v{}_{}.txt",
+        "PinnacleCyPat_RunLog_v{}_{}.txt",
         crate::app_config::VERSION,
         Local::now().format("%Y%m%d_%H%M%S")
     ))
@@ -99,7 +211,7 @@ pub fn write_to(path: &Path) -> std::io::Result<()> {
 pub fn header(command_line: &str) -> Vec<String> {
     vec![
         "=".repeat(79),
-        "CyberPatriot Automation Tool - Run Log".to_string(),
+        "PinnacleCyPat - Run Log".to_string(),
         format!("Version:   {}", crate::app_config::version_string()),
         format!("Started:   {}", Local::now().format("%Y-%m-%d %H:%M:%S")),
         format!("Command:   {command_line}"),

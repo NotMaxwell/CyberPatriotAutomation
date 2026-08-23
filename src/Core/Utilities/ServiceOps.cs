@@ -1,9 +1,9 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Service operations
+// PinnacleCyPat - Service operations
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>What a service is currently doing.</summary>
 public enum ServiceState

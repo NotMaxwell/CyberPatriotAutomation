@@ -1,15 +1,15 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Unit Tests
+// PinnacleCyPat - Unit Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Tasks;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Tasks;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// Unit tests for all security tasks

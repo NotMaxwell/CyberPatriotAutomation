@@ -1,5 +1,5 @@
 // =============================================================================
-// CyberPatriot Automation Tool
+// PinnacleCyPat
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
@@ -26,7 +26,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// The date the binary was compiled disambiguates two builds of the same
 /// version, which happens while iterating between releases.
-pub const BUILD_DATE: &str = env!("CPA_BUILD_DATE");
+pub const BUILD_DATE: &str = env!("PCP_BUILD_DATE");
 
 /// Version and build stamp as one display string.
 pub fn version_string() -> String {
@@ -238,7 +238,7 @@ pub fn is_remote_target(target: &str) -> bool {
 
 /// Where a downloaded README is cached.
 fn downloaded_readme_path() -> PathBuf {
-    std::env::temp_dir().join("cyberpatriot_readme.html")
+    std::env::temp_dir().join("pinnaclecypat_readme.html")
 }
 
 /// Fetch a remotely hosted README and return the local path it was saved to.

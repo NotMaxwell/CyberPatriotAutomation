@@ -1,5 +1,5 @@
 ﻿// =============================================================================
-// CyberPatriot Automation Tool - Hosts File Audit Task
+// PinnacleCyPat - Hosts File Audit Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
@@ -7,11 +7,11 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Audits the Windows hosts file for unauthorized entries

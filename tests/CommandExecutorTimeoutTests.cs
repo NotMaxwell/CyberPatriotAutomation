@@ -1,5 +1,5 @@
 // =============================================================================
-// CyberPatriot Automation Tool - CommandExecutor timeout tests
+// PinnacleCyPat - CommandExecutor timeout tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
@@ -7,11 +7,11 @@ using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// The timeout has to bound a child that never exits on its own.

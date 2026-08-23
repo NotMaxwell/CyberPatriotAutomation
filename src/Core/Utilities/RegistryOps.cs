@@ -1,9 +1,9 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Registry operations
+// PinnacleCyPat - Registry operations
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Registry access for the tasks: the Windows API where available, otherwise

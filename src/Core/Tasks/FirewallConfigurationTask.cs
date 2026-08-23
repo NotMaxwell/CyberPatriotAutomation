@@ -1,8 +1,8 @@
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Task to configure Windows Firewall and block insecure ports
@@ -295,7 +295,7 @@ public class FirewallConfigurationTask : BaseTask
 
         foreach (var (port, protocol, description) in PortsToBlock)
         {
-            var ruleName = $"CyberPatriot_Block_{description.Replace(" ", "")}_{protocol}_{port}";
+            var ruleName = $"PinnacleCyPat_Block_{description.Replace(" ", "")}_{protocol}_{port}";
 
             // Create inbound rule
             var (success, _, _) = await CommandExecutor.ExecuteAsync(

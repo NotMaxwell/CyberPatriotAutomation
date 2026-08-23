@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
-    <RootNamespace>CyberPatriotAutomation.Tests</RootNamespace>
+    <RootNamespace>PinnacleCyPat.Tests</RootNamespace>
 
     <!-- Author Information -->
     <Authors>Maxwell McCormick</Authors>
@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\CyberPatriotAutomation.csproj" />
+    <ProjectReference Include="..\src\PinnacleCyPat.csproj" />
   </ItemGroup>
 
   <ItemGroup>

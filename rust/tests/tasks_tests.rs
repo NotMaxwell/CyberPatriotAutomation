@@ -1,9 +1,9 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Task Tests
+// PinnacleCyPat - Task Tests
 // =============================================================================
 
-use cyberpatriot_automation::models::ReadmeData;
-use cyberpatriot_automation::tasks::*;
+use pinnacle_cypat::models::ReadmeData;
+use pinnacle_cypat::tasks::*;
 
 #[tokio::test]
 async fn software_update_task_should_have_correct_name_and_description() {

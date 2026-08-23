@@ -29,6 +29,13 @@ pub struct InstalledProgram {
     pub name: String,
     pub version: Option<String>,
     pub publisher: Option<String>,
+    /// The registered uninstall command. This is what actually removes the
+    /// software; without it the caller has nothing but `wmic`, which cannot see
+    /// non-MSI installs at all.
+    pub uninstall_string: Option<String>,
+    /// True when the command came from `QuietUninstallString`, which the
+    /// publisher has already made unattended.
+    pub uninstall_is_quiet: bool,
 }
 
 /// Every visible installed program.
@@ -138,10 +145,20 @@ fn read_entry(key: HKEY) -> Option<InstalledProgram> {
         return None;
     }
 
+    // QuietUninstallString is the publisher's own unattended form; when it
+    // exists it needs no silent switch added, and adding one can break it.
+    // UninstallString is the interactive uninstaller, which has to be made
+    // silent before it can run with no human at the screen.
+    let quiet = string_value(key, "QuietUninstallString").filter(|q| !q.trim().is_empty());
+    let interactive = string_value(key, "UninstallString").filter(|u| !u.trim().is_empty());
+    let uninstall_is_quiet = quiet.is_some();
+
     Some(InstalledProgram {
         name: name.trim().to_string(),
         version: string_value(key, "DisplayVersion"),
         publisher: string_value(key, "Publisher"),
+        uninstall_string: quiet.or(interactive),
+        uninstall_is_quiet,
     })
 }
 

@@ -1,8 +1,8 @@
 using System.Text;
-using CyberPatriotAutomation.Core;
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Tasks;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Tasks;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
 public class Program
@@ -27,6 +27,27 @@ public class Program
         {
             PrintHelp();
             return;
+        }
+
+        // The interactive menu, either asked for or offered.
+        //
+        // A bare launch - which is what double-clicking the executable does -
+        // has nothing to act on, and printing help at someone who cannot see a
+        // command line does not help them. The menu is offered instead, but only
+        // with a human at a terminal: redirected streams mean a script or a pipe,
+        // where a prompt would wait forever for an answer that never comes.
+        // Whatever the menu returns is a command line, so everything below this
+        // point is unchanged by its presence.
+        if (
+            cliArgs.Contains("--tui")
+            || cliArgs.Contains("-i")
+            || (cliArgs.Length == 0 && Tui.IsInteractiveConsole())
+        )
+        {
+            var chosen = Tui.BuildArguments();
+            if (chosen is null)
+                return;
+            cliArgs = chosen;
         }
 
         // Reject anything unrecognised rather than letting it fall through.
@@ -57,8 +78,23 @@ public class Program
         var runSecurityHardening =
             cliArgs.Contains("--security-hardening") || cliArgs.Contains("-H");
         var runMediaScan = cliArgs.Contains("--media-scan") || cliArgs.Contains("-m");
+
+        // These five used to run only under --all, so there was no way to run one
+        // on its own - or to offer them individually in the menu, which is what
+        // prompted giving them flags.
+        var runSoftwareManagement = cliArgs.Contains("--software-management");
+        var runSharedFolders = cliArgs.Contains("--shared-folders");
+        var runHostsFile = cliArgs.Contains("--hosts-file");
+        var runDnsSettings = cliArgs.Contains("--dns-settings");
+        var runScheduledTasks = cliArgs.Contains("--scheduled-tasks");
+
         var parseReadmeOnly = cliArgs.Contains("--parse-readme");
-        var anyTaskNamed =
+
+        // Split out from anyTaskNamed because --parse-readme is a report rather
+        // than a task: combining it with real task flags has to be called out,
+        // and testing "any task named" there would have flagged --parse-readme
+        // on its own.
+        var anyRemediationNamed =
             runPasswordPolicy
             || runAccountPermissions
             || runUserManagement
@@ -67,7 +103,24 @@ public class Program
             || runFirewall
             || runSecurityHardening
             || runMediaScan
-            || parseReadmeOnly;
+            || runSoftwareManagement
+            || runSharedFolders
+            || runHostsFile
+            || runDnsSettings
+            || runScheduledTasks;
+
+        var anyTaskNamed = anyRemediationNamed || parseReadmeOnly;
+
+        // The version, before the no-task guard below.
+        //
+        // --version names no task, so the guard treated it as "nothing to do",
+        // printed the help and returned - the version never appeared. The Rust
+        // port has always answered it here.
+        if (cliArgs.Contains("--version") || cliArgs.Contains("-V"))
+        {
+            Console.WriteLine($"PinnacleCyPat {AppConfig.VersionString}");
+            return;
+        }
 
         // Running everything has to be asked for.
         //
@@ -84,12 +137,6 @@ public class Program
                 "\n[yellow]No task selected. Pass --all to run every task, or name individual tasks.[/]"
             );
             AnsiConsole.MarkupLine("[dim]Pass --dry-run first to preview the changes.[/]");
-            return;
-        }
-
-        if (cliArgs.Contains("--version") || cliArgs.Contains("-V"))
-        {
-            Console.WriteLine($"CyberPatriot Automation Tool {AppConfig.VersionString}");
             return;
         }
 
@@ -190,17 +237,7 @@ public class Program
             // --parse-readme is a report, not a run. Combining it with task flags
             // silently did nothing, which reads as the tasks having been skipped
             // for some other reason.
-            if (
-                runAll
-                || runPasswordPolicy
-                || runAccountPermissions
-                || runUserManagement
-                || runServiceManagement
-                || runAuditPolicy
-                || runFirewall
-                || runSecurityHardening
-                || runMediaScan
-            )
+            if (runAll || anyRemediationNamed)
             {
                 AnsiConsole.WriteLine();
                 AnsiConsole.MarkupLine(
@@ -257,12 +294,16 @@ public class Program
                 mediaTask.SetReadmeData(readmeData);
             tasks.Add(mediaTask);
         }
-        if (runAll)
-        {
+        if (runSharedFolders || runAll)
             tasks.Add(new SharedFoldersAuditTask());
+        if (runHostsFile || runAll)
             tasks.Add(new HostsFileAuditTask());
+        if (runDnsSettings || runAll)
             tasks.Add(new DnsSettingsAuditTask());
+        if (runScheduledTasks || runAll)
             tasks.Add(new SuspiciousScheduledTasksAuditTask());
+        if (runSoftwareManagement || runAll)
+        {
             var softwareTask = new SoftwareManagementTask();
             if (readmeData != null)
                 softwareTask.SetReadmeData(readmeData);
@@ -428,12 +469,13 @@ public class Program
     private static readonly (string Long, string Short, string Description)[] Flags =
     [
         ("--help", "-h", "Show this help and exit"),
+        ("--tui", "-i", "Open the interactive menu"),
         ("--version", "-V", "Print the version and build date, then exit"),
         ("--readme <path>", "-r", "Read the competition README at <path>"),
         ("--auto-readme", "-R", "Find the README automatically"),
         ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
         ("--dry-run", "-d", "Report what would change without changing it"),
-        ("--all", "", "Run every task (the default when no task is named)"),
+        ("--all", "", "Run every task"),
         ("--password-policy", "-p", "Password and lockout policy"),
         ("--account-permissions", "-a", "Account permissions and group membership"),
         ("--user-management", "-u", "Create, remove and correct user accounts"),
@@ -442,6 +484,11 @@ public class Program
         ("--firewall", "-f", "Windows Firewall profiles and rules"),
         ("--security-hardening", "-H", "General security hardening"),
         ("--media-scan", "-m", "Find and remove prohibited media"),
+        ("--software-management", "", "Remove prohibited and install required software"),
+        ("--shared-folders", "", "Remove shares beyond ADMIN$, C$ and IPC$"),
+        ("--hosts-file", "", "Remove unauthorised hosts file entries"),
+        ("--dns-settings", "", "Report public DNS resolvers"),
+        ("--scheduled-tasks", "", "Disable suspicious scheduled tasks"),
         ("--log <path>", "", "Write the run log to <path>"),
     ];
 
@@ -485,13 +532,14 @@ public class Program
 
     private static void PrintHelp()
     {
-        Console.WriteLine($"CyberPatriot Automation Tool {AppConfig.VersionString}");
+        Console.WriteLine($"PinnacleCyPat {AppConfig.VersionString}");
         Console.WriteLine();
         Console.WriteLine("USAGE:");
-        Console.WriteLine("    CyberPatriotAutomation.exe [OPTIONS]");
+        Console.WriteLine("    PinnacleCyPat.exe [OPTIONS]");
         Console.WriteLine();
-        Console.WriteLine("Run as Administrator. With no task named, every task runs.");
+        Console.WriteLine("Run as Administrator. Name a task, or pass --all to run every task.");
         Console.WriteLine("Pass --dry-run first to see what would change.");
+        Console.WriteLine("Not sure? Run --tui for a guided menu.");
         Console.WriteLine();
         Console.WriteLine("OPTIONS:");
         foreach (var (longName, shortName, description) in Flags)
@@ -501,13 +549,10 @@ public class Program
         }
         Console.WriteLine();
         Console.WriteLine("EXAMPLES:");
-        Console.WriteLine(
-            "    CyberPatriotAutomation.exe --auto-readme --parse-readme   # read-only"
-        );
-        Console.WriteLine(
-            "    CyberPatriotAutomation.exe --auto-readme --dry-run        # preview"
-        );
-        Console.WriteLine("    CyberPatriotAutomation.exe --auto-readme --all            # apply");
+        Console.WriteLine("    PinnacleCyPat.exe --tui                          # guided menu");
+        Console.WriteLine("    PinnacleCyPat.exe --auto-readme --parse-readme   # read-only");
+        Console.WriteLine("    PinnacleCyPat.exe --auto-readme --all --dry-run  # preview");
+        Console.WriteLine("    PinnacleCyPat.exe --auto-readme --all            # apply");
     }
 
     // Helper functions

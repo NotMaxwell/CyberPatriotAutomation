@@ -1,16 +1,16 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Suspicious Scheduled Tasks Audit Task
+// PinnacleCyPat - Suspicious Scheduled Tasks Audit Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 using System;
 using System.Linq;
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Audits and disables suspicious scheduled tasks

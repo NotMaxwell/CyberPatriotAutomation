@@ -1,8 +1,8 @@
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Task to scan for and remove prohibited media files from user directories.
@@ -223,7 +223,7 @@ public class ProhibitedMediaTask : BaseTask
 
             var logEntries = new List<string>
             {
-                "CyberPatriot Prohibited Files Removal Log",
+                "PinnacleCyPat Prohibited Files Removal Log",
                 $"Date: {DateTime.Now}",
                 $"Total files found: {_foundFiles.Count}",
                 "",

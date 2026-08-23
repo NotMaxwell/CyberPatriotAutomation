@@ -1,13 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Command line parsing tests
+// PinnacleCyPat - Command line parsing tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
-using CyberPatriotAutomation;
+using PinnacleCyPat;
+using PinnacleCyPat.Core;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// An unrecognised argument must be rejected rather than ignored.
@@ -72,5 +73,45 @@ public class CommandLineTests
     public void NoArgumentsIsNotAnError()
     {
         Program.FirstUnknownArgument([]).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("--tui")]
+    [InlineData("-i")]
+    public void TheInteractiveMenuHasAFlag(string flag)
+    {
+        Program.FirstUnknownArgument([flag]).Should().BeNull();
+    }
+
+    /// <summary>
+    /// The five tasks that used to run only under <c>--all</c> are selectable.
+    /// </summary>
+    /// <remarks>
+    /// The menu offers every task by flag, so a flag it names but the parser
+    /// does not accept would exit 2 with "Unrecognised argument" the moment that
+    /// task was picked.
+    /// </remarks>
+    [Theory]
+    [InlineData("--software-management")]
+    [InlineData("--shared-folders")]
+    [InlineData("--hosts-file")]
+    [InlineData("--dns-settings")]
+    [InlineData("--scheduled-tasks")]
+    public void TasksOnceReachableOnlyViaAllHaveTheirOwnFlag(string flag)
+    {
+        Program.FirstUnknownArgument([flag]).Should().BeNull();
+    }
+
+    /// <summary>Every flag the menu can emit must be one the parser accepts.</summary>
+    [Fact]
+    public void EveryMenuFlagIsAcceptedByTheParser()
+    {
+        foreach (var flag in Tui.OfferedFlags)
+        {
+            Program
+                .FirstUnknownArgument([flag])
+                .Should()
+                .BeNull($"the menu offers {flag}, so the parser has to accept it");
+        }
     }
 }

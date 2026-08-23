@@ -1,8 +1,8 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Audit / misc task tests
+// PinnacleCyPat - Audit / misc task tests
 // =============================================================================
 
-use cyberpatriot_automation::tasks::*;
+use pinnacle_cypat::tasks::*;
 
 // --- Group membership parsing -------------------------------------------------
 //

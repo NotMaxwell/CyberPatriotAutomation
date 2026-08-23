@@ -1,6 +1,6 @@
-using CyberPatriotAutomation.Core.Models;
+using PinnacleCyPat.Core.Models;
 
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Local account and group operations shared by the account-related tasks.

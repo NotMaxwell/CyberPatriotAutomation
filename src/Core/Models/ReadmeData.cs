@@ -1,4 +1,4 @@
-namespace CyberPatriotAutomation.Core.Models;
+namespace PinnacleCyPat.Core.Models;
 
 /// <summary>
 /// Represents parsed data from a CyberPatriot README file

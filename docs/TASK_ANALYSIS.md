@@ -1,4 +1,4 @@
-﻿﻿# CyberPatriot Automation - Task Analysis
+﻿﻿# PinnacleCyPat - Task Analysis
 
 ## Implemented Tasks
 
@@ -79,11 +79,12 @@ All tasks have comprehensive unit tests:
 | File | Purpose |
 |------|---------|
 | `README.md` | Main documentation, usage, installation |
+| `ARCHITECTURE.md` | Full reference: every task and utility, in detail |
 | `CONTRIBUTING.md` | How to contribute, coding standards |
 | `CLAUDE.md` | AI assistant instructions (Claude) |
 | `.github/copilot-instructions.md` | GitHub Copilot instructions |
 | `TASK_ANALYSIS.md` | This file - task roadmap |
-| `LICENSE` | MIT License |
+| `LICENSE` | Proprietary licence |
 
 ---
 

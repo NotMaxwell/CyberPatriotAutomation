@@ -1,11 +1,11 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Chocolatey package manager
+// PinnacleCyPat - Chocolatey package manager
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Package installs and upgrades through Chocolatey.

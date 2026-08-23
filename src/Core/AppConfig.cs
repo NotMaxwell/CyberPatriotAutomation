@@ -1,12 +1,12 @@
 // =============================================================================
-// CyberPatriot Automation Tool
+// PinnacleCyPat
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Utilities;
 
-namespace CyberPatriotAutomation.Core;
+namespace PinnacleCyPat.Core;
 
 /// <summary>
 /// Application configuration and default paths
@@ -375,7 +375,7 @@ public static class AppConfig
     /// Where a downloaded README is cached.
     /// </summary>
     public static string DownloadedReadmePath =>
-        Path.Combine(Path.GetTempPath(), "cyberpatriot_readme.html");
+        Path.Combine(Path.GetTempPath(), "pinnaclecypat_readme.html");
 
     /// <summary>
     /// Fetch a remotely hosted README and return the local path it was saved to.

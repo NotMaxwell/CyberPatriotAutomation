@@ -1,14 +1,112 @@
-# Changelog — CyberPatriot Automation Tool (Rust port)
+# Changelog — PinnacleCyPat (Rust port)
 
 The version in `Cargo.toml` is stamped into the run log's header and file name,
 so every log ties back to the build that produced it. Check a binary with:
 
 ```powershell
-cyberpatriot-automation.exe --version
+pinnacle-cypat.exe --version
 ```
 
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
+
+## 1.13.0
+
+### Fixed
+
+- **Prohibited software was not being removed** - CCleaner, Python and Jellyfin
+  Media Player all survived a run. Four separate causes:
+
+  - `wmic product call uninstall` reads `Win32_Product`, which lists **only
+    MSI-installed** software. All three of those ship NSIS installers, so they
+    were never in it. Worse, `wmic` exits **0** when its `where` clause matches
+    nothing, so the run reported "Removed: CCleaner" while CCleaner sat
+    untouched. Removal now runs the uninstaller the program actually registered,
+    made unattended per installer family (NSIS `/S`, Inno `/VERYSILENT`, MSI
+    rewritten to `/x {code} /qn`, Python's bundle `/quiet`). `wmic` is gone from
+    the removal path entirely.
+  - The uninstall registry reader did not read `UninstallString` at all, so
+    there was nothing to run even had the caller wanted to. It now reads it,
+    preferring `QuietUninstallString` where the publisher provides one.
+  - The default prohibitions (Python, CCleaner, Jellyfin) were applied only
+    inside `set_readme_data`, which the caller invokes only when a README
+    parsed. A run without one left the prohibited list **empty** and removed
+    nothing. They are seeded in the constructor now, so they survive the README
+    being absent - which is the whole point of a default.
+  - The inventory came from `wmic product get name` unconditionally, ignoring
+    the native uninstall-registry reader. On a current Windows 11 image, where
+    `wmic` is no longer present, the task failed before it started.
+
+- **Removals are verified against a fresh inventory** rather than trusting exit
+  codes, so software that reports removal but is still installed is reported as
+  a failure instead of a success.
+
+- Matching between Windows display names and package ids is no longer exact.
+  Real names carry version, bitness and locale suffixes - `Notepad++ (64-bit
+  x64)`, `Mozilla Firefox (x64 en-US)` - and an exact lookup matched almost
+  nothing.
+
+### Added
+
+- **Diagnostics in the run log.** Every external command is recorded with its
+  arguments, exit code and elapsed time, and on failure the first 600 characters
+  of stderr and stdout. The software task additionally records what it matched,
+  which mechanism it chose, and what survived removal.
+
+  This is what a failure investigation needs and did not have: the console said
+  `✗ Failed to remove: CCleaner ()` - with an empty reason, because the tool
+  reported failure only through an exit code - and there was nothing else to go
+  on. Diagnostics go to the log only, never the console.
+
+  Passwords interpolated into `ConvertTo-SecureString` are redacted from the
+  command echo. The log still records each generated password once where the
+  task announces it; that is a considered disclosure in one place, not a reason
+  to scatter it through every command line.
+
+## 1.12.0
+
+### Added
+
+- **An interactive menu** (`--tui`, `-i`). It asks which README to use, which
+  tasks to run and whether to preview or apply, then shows a summary and waits
+  for an explicit yes. It also opens on a bare launch at a real terminal - which
+  is what double-clicking the executable does - so that case is useful again
+  rather than merely safe. The confirmation defaults to *no* for a run that
+  applies changes and *yes* for a preview, so pressing enter without reading is
+  always the harmless choice.
+
+  It builds a command line and hands it to the normal run pipeline rather than
+  driving tasks itself: the pipeline holds every ordering guarantee the run
+  depends on, and a second copy of that logic would be free to drift. It also
+  means the log's `Command:` line records exactly what a menu-driven run did.
+
+- Flags for the five tasks that previously ran only under `--all`:
+  `--software-management`, `--shared-folders`, `--hosts-file`, `--dns-settings`
+  and `--scheduled-tasks`. Without them the menu could not offer those tasks
+  individually. The independent audits still run concurrently when selected.
+
+- `native::registry::can_write_machine_policy`, the elevation check behind the
+  menu's "not running as Administrator" warning. It asks whether this process can
+  write machine policy - the question that actually matters - rather than
+  inspecting the token for Administrators membership, which is true for an
+  unelevated member of the group whose every write will still be refused. The key
+  is opened, never written, and closed immediately.
+
+### Changed
+
+- **Renamed to PinnacleCyPat.** The crate is `pinnacle-cypat`, the binary is
+  `pinnacle-cypat`, the library is `pinnacle_cypat`, and the run log is
+  `PinnacleCyPat_RunLog_v<version>_<timestamp>.txt`. References to *CyberPatriot*
+  the competition are unchanged - the competition is not the tool.
+
+- **The licence is now proprietary** (see `../LICENSE`); `publish = false` stops
+  `cargo publish` from uploading a crate whose licence forbids redistribution.
+  Releases before 2026-08-22 remain under Apache-2.0 for copies already
+  distributed under it.
+
+- The help text no longer claims that every task runs when none is named. That
+  stopped being true when a bare invocation was made safe, and the line had not
+  caught up.
 
 ## 1.11.0
 
@@ -232,7 +330,7 @@ arise.
   absent (it does not ship with the LTSC images CyberPatriot uses) rather than
   claiming everything is current.
 - **New: run log.** Everything attempted, queued and completed is written to
-  `Desktop\CyberPatriot_RunLog_*.txt` at the end of execution, including table
+  `Desktop\PinnacleCyPat_RunLog_*.txt` at the end of execution, including table
   contents and a structured per-task outcome block. Override with `--log`.
 - Added `command::execute_with_timeout`; the fixed two-minute ceiling would have
   killed package downloads mid-install.

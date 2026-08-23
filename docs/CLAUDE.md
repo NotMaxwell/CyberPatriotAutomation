@@ -1,17 +1,29 @@
-﻿# AI Assistant Instructions for CyberPatriot Automation
+﻿# AI Assistant Instructions for PinnacleCyPat
 
 This file provides guidance for AI assistants (Claude, GitHub Copilot, ChatGPT, etc.) when working with this codebase.
 
 ## Project Overview
 
-This is a **CyberPatriot competition automation tool** written in C# (.NET 10.0). It automates security hardening tasks for Windows systems based on competition README files.
+**PinnacleCyPat** automates Windows security hardening for CyberPatriot
+competition images, driven by the round's own README.
+
+There are **two complete implementations**: C# (.NET 10) under `src/` and Rust
+under `rust/`. A behavioural change generally belongs in both.
+
+**The project is proprietary — see [LICENSE](../LICENSE).** It is not open
+source. Both projects are deliberately marked unpublishable (`IsPackable=false`,
+`publish = false`); do not suggest publishing them.
+
+The full reference — every task, why it exists, what it changes and how — is
+[ARCHITECTURE.md](ARCHITECTURE.md). Read it before changing a task.
 
 ## Architecture
 
 ```
-CyberPatriotAutomation/
-├── Program.cs              # Entry point, CLI argument parsing
-├── AppConfig.cs            # Configuration constants and defaults
+PinnacleCyPat/
+├── Program.cs              # Entry point, CLI parsing, run pipeline
+├── Tui.cs                  # Interactive menu (--tui)
+├── AppConfig.cs            # README discovery, defaults, version
 ├── Models/                 # Data transfer objects
 │   ├── SystemInfo.cs       # System state information
 │   ├── TaskResult.cs       # Task execution results
@@ -126,13 +138,15 @@ dotnet test --filter "ClassName"      # Run specific test class
 
 ## Adding New Tasks
 
-1. Create task file in `Tasks/` directory
-2. Inherit from `BaseTask`
-3. Add command line flag in `Program.cs`
-4. Add to task list in `Program.cs`
-5. Create unit tests in `Tests/`
-6. Update README.md with new flag
-7. Update TASK_ANALYSIS.md
+1. Create the task file in `Tasks/` (C#) or `src/tasks/` (Rust)
+2. Inherit `BaseTask` / implement the `Task` trait
+3. Add the flag to the `Flags` / `FLAGS` table - it is the single source of truth
+   for both the help text and the unknown-argument check, so a flag cannot be
+   accepted without also being documented
+4. Register the task in the task-list builder
+5. Add it to the menu's task list in `Core/Tui.cs` and `rust/src/tui.rs`
+6. Create unit tests
+7. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
 
 ## Important Considerations
 
@@ -149,10 +163,23 @@ dotnet test --filter "ClassName"      # Run specific test class
 - Log all changes made
 
 ### Windows-Specific
-- Use PowerShell or cmd for system commands
-- Registry changes via `reg add`
-- Service management via `sc` or `net`
-- User management via `net user`
+
+Prefer the **native Win32 path** over parsing command output, and keep the
+shell-out path as the fallback. The command-line tools print localised tables: a
+parser written against English output returns nothing on a non-English image, and
+"nothing" reads as *"already compliant"* rather than as a failure.
+
+| Instead of | Use | Via |
+|---|---|---|
+| `reg add` | `RegistryOps` | `NativeRegistry` (64-bit view explicitly) |
+| `sc` / `net start` / `net stop` | `ServiceOps` | `NativeServices` (stops dependents, never prompts) |
+| `net user` / `net localgroup` | `LocalAccounts` | `NativeAccounts` + `*-LocalUser` cmdlets |
+| `auditpol.exe` | - | `NativeAuditPolicy` (category GUIDs) |
+| `netsh advfirewall` | - | `NativeFirewall` (`INetFwPolicy2`) |
+| `wmic product` | - | `NativeInstalledSoftware` (uninstall keys) |
+
+Never use `net user` to set a password: it interactively confirms anything over
+14 characters, and with no console to answer it the command aborts.
 
 ## Common Patterns
 
@@ -196,13 +223,19 @@ catch (Exception ex)
 
 ## Files to Update When Adding Features
 
-1. `Program.cs` - Add CLI flags and task registration
-2. `README.md` - Document new features and usage
-3. `TASK_ANALYSIS.md` - Add to implemented tasks list
-4. `Tests/*.cs` - Add unit tests
+1. `Program.cs` / `main.rs` - CLI flags and task registration
+2. `Core/Tui.cs` / `src/tui.rs` - the menu's task list, if it is a task
+3. `README.md` - the flag table and the task table
+4. `docs/ARCHITECTURE.md` - the detailed entry
+5. `docs/TASK_ANALYSIS.md` - the implemented-tasks list
+6. Tests
 
 ## Do NOT
 
+- Add a task to the CLI without also adding it to the menu, or vice versa
+- Compute a task's success from the *pre*-remediation state - "found nothing to
+  fix" and "fixed everything" are both successes; "failed to fix" is not
+- Return a bare boolean from an operation that can fail for different reasons
 - Modify files in `bin/` or `obj/` directories
 - Disable Windows Update or Windows Defender (unless explicitly required)
 - Make changes without dry-run support

@@ -1,12 +1,12 @@
 // =============================================================================
-// CyberPatriot Automation Tool - README discovery tests
+// PinnacleCyPat - README discovery tests
 // =============================================================================
 
-using CyberPatriotAutomation.Core;
+using PinnacleCyPat.Core;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// A standard competition image ships C:\CyberPatriot\README.url - an Internet

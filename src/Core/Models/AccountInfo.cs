@@ -1,4 +1,4 @@
-namespace CyberPatriotAutomation.Core.Models;
+namespace PinnacleCyPat.Core.Models;
 
 /// <summary>
 /// Represents user account information and permissions

@@ -1,6 +1,6 @@
-using CyberPatriotAutomation.Core.Models;
+using PinnacleCyPat.Core.Models;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Base class for remediation tasks

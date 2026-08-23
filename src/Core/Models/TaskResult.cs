@@ -1,4 +1,4 @@
-namespace CyberPatriotAutomation.Core.Models;
+namespace PinnacleCyPat.Core.Models;
 
 /// <summary>
 /// Represents the result of executing a remediation task

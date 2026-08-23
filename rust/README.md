@@ -1,6 +1,6 @@
-# CyberPatriot Automation Tool — Rust port
+# PinnacleCyPat — Rust port
 
-A Rust port of the C# `CyberPatriotAutomation` tool. It automates CyberPatriot
+A Rust port of the C# `PinnacleCyPat` tool. It automates CyberPatriot
 Windows security-hardening tasks and preserves the original CLI flags, task
 pipeline, and console UI.
 
@@ -19,7 +19,7 @@ logic bugs found during the port were fixed rather than reproduced. See
 
 ```bash
 cd rust
-cargo test                 # 102 tests
+cargo test                 # 139 tests
 cargo clippy --all-targets # clean
 ```
 
@@ -34,12 +34,12 @@ are not available on Linux:
 rustup target add x86_64-pc-windows-gnu
 sudo apt install -y mingw-w64                        # Debian/Ubuntu
 cargo build --release --target x86_64-pc-windows-gnu
-# -> target/x86_64-pc-windows-gnu/release/cyberpatriot-automation.exe
+# -> target/x86_64-pc-windows-gnu/release/pinnacle-cypat.exe
 ```
 
 Building natively on Windows instead (rustup plus VS Build Tools with "Desktop
 development with C++") yields an MSVC binary at
-`target\release\cyberpatriot-automation.exe`.
+`target\release\pinnacle-cypat.exe`.
 
 Two things to know when cross-compiling:
 
@@ -91,13 +91,13 @@ and `auditpol`.
 
 ```powershell
 # 1. Read-only: show what the parser extracted from the README
-.\cyberpatriot-automation.exe --auto-readme --parse-readme
+.\pinnacle-cypat.exe --auto-readme --parse-readme
 
 # 2. Preview every task; changes nothing
-.\cyberpatriot-automation.exe --auto-readme --all --dry-run
+.\pinnacle-cypat.exe --auto-readme --all --dry-run
 
 # 3. Apply
-.\cyberpatriot-automation.exe --auto-readme --all
+.\pinnacle-cypat.exe --auto-readme --all
 ```
 
 Steps 2 and 3 display the parsed README first and then act on it, so the run
@@ -137,6 +137,7 @@ wrong file — pass `--readme` explicitly.
 
 | Flag | Effect |
 |------|--------|
+| `-i`, `--tui` | Open the interactive menu |
 | `-r`, `--readme <file>` | Parse this README |
 | `-R`, `--auto-readme` | Locate the README automatically (desktop shortcut first) |
 | `--parse-readme` | Parse and display the README, then exit — makes no changes |
@@ -151,14 +152,20 @@ wrong file — pass `--readme` explicitly.
 | `-H`, `--security-hardening` | Registry hardening and Windows features |
 | `-m`, `--media-scan` | Prohibited media and hacking-tool scan |
 | `--software-updates` | Check installed apps against latest versions and update |
+| `--software-management` | Remove prohibited and install required software |
+| `--shared-folders` | Remove shares beyond `ADMIN$`, `C$`, `IPC$` |
+| `--hosts-file` | Remove unauthorised hosts file entries |
+| `--dns-settings` | Report public DNS resolvers |
+| `--scheduled-tasks` | Disable suspicious scheduled tasks |
 | `--log <path>` | Write the run log here instead of the default desktop path |
 | `-V`, `--version` | Print version and build date, then exit |
 
 Add `-h`, `--help`, `-?` or `/?` to print this table and exit.
 
 > [!IMPORTANT]
-> **Running everything must be asked for: pass `--all`.** A bare invocation now
-> prints this help and changes nothing. It used to mean "run every task", so
+> **Running everything must be asked for: pass `--all`.** A bare invocation opens
+> the interactive menu at a real terminal, and prints this help otherwise. Either
+> way it changes nothing on its own. It used to mean "run every task", so
 > double-clicking the executable — or running it to see what it did — began a
 > full destructive run against the machine.
 >
@@ -174,9 +181,47 @@ Add `-h`, `--help`, `-?` or `/?` to print this table and exit.
 > added; `--security-hardening` is unchanged.
 
 > [!NOTE]
-> Five tasks have no individual flag and run **only** under `--all`: software
-> management, shared-folders audit, hosts-file audit, DNS settings audit, and
-> suspicious scheduled-tasks audit.
+> Every task now has its own flag. The five that once ran only under `--all` -
+> software management and the four audits - were given flags so the interactive
+> menu could offer them individually. The independent audits still run
+> concurrently with each other when selected.
+
+### The interactive menu
+
+`--tui`, or just running the executable with no arguments at a terminal — which
+is what double-clicking it does.
+
+```
+What would you like to do?
+  1  Inspect the README only  (read-only, changes nothing)
+  2  Preview every task  (dry run, changes nothing)
+  3  Run every task  (applies changes)
+  4  Choose individual tasks
+  5  Quit
+```
+
+It asks which README to use, which tasks to run and whether to preview or apply,
+then shows a summary and waits for an explicit yes. The default answer is **no**
+for a run that applies changes and **yes** for a preview, so pressing enter
+without reading is always the harmless choice. Declining exits without changing
+anything.
+
+Prompts are numbered rather than arrow-driven, so this needs no raw terminal mode
+and no extra dependency. The C# port uses Spectre.Console's selection prompts for
+the same flow; the questions and their order match.
+
+The menu **builds a command line** and hands it to the normal run pipeline rather
+than driving tasks itself. The pipeline holds every ordering guarantee the run
+depends on — the README parsed before user management, critical services
+protected before insecure ones are disabled, the independent audits concurrent
+and the rest not — and a second copy of that logic would be free to drift. It
+also means the log's `Command:` line records exactly what a menu-driven run did,
+so it can be repeated non-interactively.
+
+Choosing "continue without a README" names the tasks that will then decline to
+act *before* the run starts, rather than reporting it part-way through once other
+tasks have already made changes. Not being Administrator is reported up front for
+the same reason.
 
 ### Software updates
 
@@ -220,7 +265,7 @@ by the audit-policy task.
 Every run writes a log recording what was attempted, queued and completed:
 
 ```
-C:\Users\<you>\Desktop\CyberPatriot_RunLog_20260813_144949.txt
+C:\Users\<you>\Desktop\PinnacleCyPat_RunLog_20260813_144949.txt
 ```
 
 Override the location with `--log <path>`. Every line the tool prints is
@@ -236,7 +281,7 @@ The version in `Cargo.toml` is stamped into the log's header **and** its file
 name, so a log always identifies the build that produced it:
 
 ```
-CyberPatriot_RunLog_v1.4.0_20260813_195543.txt
+PinnacleCyPat_RunLog_v1.4.0_20260813_195543.txt
 
 Version:   v1.4.0 (build 2026-08-13)
 ```
@@ -258,6 +303,7 @@ behavioural change and record it in [CHANGELOG.md](CHANGELOG.md).
 | `src/ui.rs` | Spectre.Console replacement |
 | `src/run_log.rs` | *(new)* run log written at end of execution |
 | `src/tasks/software_update.rs` | *(new)* version checking and updating |
+| `src/tui.rs` | `Core/Tui.cs` — interactive menu |
 
 ## Notable porting decisions
 
@@ -350,5 +396,5 @@ These are fixed here and still present in `../src`. Grouped by what went wrong.
   Windows 11 image warning against "going back to Windows 10" is not
   misidentified, and recognises Server 2012–2025, Windows 7/8.1 and Fedora.
 
-Author: Maxwell McCormick · Apache-2.0 · "CyberPatriot Automation Tool" is an
-unregistered trademark of Maxwell McCormick (see `../NOTICE`).
+Author: Maxwell McCormick · Proprietary, see `../LICENSE` · "PinnacleCyPat" is
+an unregistered trademark of Maxwell McCormick (see `../NOTICE`).

@@ -1,8 +1,8 @@
 // =============================================================================
-// CyberPatriot Automation Tool - ReadmeParser Tests
+// PinnacleCyPat - ReadmeParser Tests
 // =============================================================================
 
-use cyberpatriot_automation::readme_parser;
+use pinnacle_cypat::readme_parser;
 
 const SAMPLE_README_PATH: &str = "../SampleData/sampleReadme.html";
 
@@ -55,7 +55,7 @@ dave
 <h2>Competition Guidelines</h2><ul><li>Do not disable the CCS Client service.</li><li>Do not stop the CCS Client service.</li><li>Read the README carefully.</li></ul>
 </body></html>"#;
 
-async fn parse_inline() -> cyberpatriot_automation::models::ReadmeData {
+async fn parse_inline() -> pinnacle_cypat::models::ReadmeData {
     let dir = std::env::temp_dir();
     let path = dir.join(format!("cpa_inline_{}.html", uuid_like()));
     std::fs::write(&path, INLINE_README).unwrap();
@@ -173,7 +173,7 @@ const NEGATED_DISABLE_README: &str = r#"<html><body>
 </ul>
 </body></html>"#;
 
-async fn parse_str(html: &str, tag: &str) -> cyberpatriot_automation::models::ReadmeData {
+async fn parse_str(html: &str, tag: &str) -> pinnacle_cypat::models::ReadmeData {
     let path = std::env::temp_dir().join(format!("cpa_{tag}_{}.html", uuid_like()));
     std::fs::write(&path, html).unwrap();
     let data = readme_parser::parse_html_readme_async(&path.to_string_lossy()).await;

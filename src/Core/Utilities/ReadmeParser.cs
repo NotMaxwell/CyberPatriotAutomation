@@ -1,9 +1,9 @@
 using System.Text.RegularExpressions;
 using System.Web;
-using CyberPatriotAutomation.Core.Models;
+using PinnacleCyPat.Core.Models;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Parses CyberPatriot README HTML files to extract task requirements

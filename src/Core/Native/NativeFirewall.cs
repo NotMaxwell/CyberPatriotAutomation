@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Windows.Win32.NetworkManagement.WindowsFirewall;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>State of one Windows Firewall profile.</summary>
 public readonly record struct FirewallProfileState(

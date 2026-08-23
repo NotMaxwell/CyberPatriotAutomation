@@ -1,7 +1,7 @@
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>
 /// Registry reads and writes, replacing <c>reg.exe</c> and PowerShell's

@@ -1,6 +1,6 @@
 ﻿@echo off
 :: ============================================================
-::  CyberPatriot Automation Tool - Code Formatter
+::  PinnacleCyPat - Code Formatter
 ::  Author: Maxwell McCormick
 ::
 ::  Formats all C# code using CSharpier (similar to Spotless)
@@ -8,7 +8,7 @@
 
 echo.
 echo  ========================================================
-echo   Code Formatter - CyberPatriot Automation Tool
+echo   Code Formatter - PinnacleCyPat
 echo  ========================================================
 echo.
 

@@ -1,14 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Local account helper tests
+// PinnacleCyPat - Local account helper tests
 // =============================================================================
 
-using CyberPatriotAutomation.Core;
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 public class LocalAccountsTests
 {

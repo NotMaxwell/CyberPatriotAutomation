@@ -1,14 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - AppConfig Tests
+// PinnacleCyPat - AppConfig Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 
-using CyberPatriotAutomation.Core;
+using PinnacleCyPat.Core;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// Unit tests for AppConfig

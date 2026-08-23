@@ -1,13 +1,13 @@
 // =============================================================================
-// CyberPatriot Automation Tool - ReadmeParser correctness tests
+// PinnacleCyPat - ReadmeParser correctness tests
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// Each case here pins a defect that shipped in the original parser.

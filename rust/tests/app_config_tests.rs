@@ -1,8 +1,8 @@
 // =============================================================================
-// CyberPatriot Automation Tool - AppConfig Tests
+// PinnacleCyPat - AppConfig Tests
 // =============================================================================
 
-use cyberpatriot_automation::app_config;
+use pinnacle_cypat::app_config;
 
 #[test]
 fn version_should_be_defined() {

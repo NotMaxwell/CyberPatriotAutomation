@@ -141,7 +141,7 @@ impl FirewallConfigurationTask {
             .columns(&["[bold]Port[/]", "[bold]Protocol[/]", "[bold]Description[/]", "[bold]Status[/]"]);
 
         for (port, protocol, description) in PORTS_TO_BLOCK {
-            let rule_name = format!("CyberPatriot_Block_{}_{}_{}", description.replace(' ', ""), protocol, port);
+            let rule_name = format!("PinnacleCyPat_Block_{}_{}_{}", description.replace(' ', ""), protocol, port);
             let quoted = command::ps_quote(&rule_name);
             let (success, _o, _e) = command::powershell(&format!(
                 "New-NetFirewallRule -DisplayName {quoted} -Direction Inbound -LocalPort {port} -Protocol {protocol} -Action Block"

@@ -1,5 +1,5 @@
 // =============================================================================
-// CyberPatriot Automation Tool (Rust port) - Entry point
+// PinnacleCyPat (Rust port) - Entry point
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
@@ -7,12 +7,13 @@
 use std::future::Future;
 use std::time::Duration;
 
-use cyberpatriot_automation::app_config;
-use cyberpatriot_automation::models::{ReadmeData, TaskResult};
-use cyberpatriot_automation::readme_parser;
-use cyberpatriot_automation::run_log;
-use cyberpatriot_automation::tasks::*;
-use cyberpatriot_automation::ui::{self, BarColor};
+use pinnacle_cypat::app_config;
+use pinnacle_cypat::models::{ReadmeData, TaskResult};
+use pinnacle_cypat::readme_parser;
+use pinnacle_cypat::run_log;
+use pinnacle_cypat::tasks::*;
+use pinnacle_cypat::tui;
+use pinnacle_cypat::ui::{self, BarColor};
 use indicatif::{ProgressBar, ProgressStyle};
 
 #[tokio::main]
@@ -44,12 +45,13 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
 /// being documented.
 const FLAGS: &[(&str, &str, &str)] = &[
     ("--help", "-h", "Show this help and exit"),
+    ("--tui", "-i", "Open the interactive menu"),
     ("--version", "-V", "Print the version and build date, then exit"),
     ("--readme <path>", "-r", "Read the competition README at <path>"),
     ("--auto-readme", "-R", "Find the README automatically"),
     ("--parse-readme", "", "Show what the parser extracted, then exit (read-only)"),
     ("--dry-run", "-d", "Report what would change without changing it"),
-    ("--all", "", "Run every task (the default when no task is named)"),
+    ("--all", "", "Run every task"),
     ("--password-policy", "-p", "Password and lockout policy"),
     ("--account-permissions", "-a", "Account permissions and group membership"),
     ("--user-management", "-u", "Create, remove and correct user accounts"),
@@ -59,6 +61,11 @@ const FLAGS: &[(&str, &str, &str)] = &[
     ("--security-hardening", "-H", "General security hardening"),
     ("--media-scan", "-m", "Find and remove prohibited media"),
     ("--software-updates", "", "Update installed software"),
+    ("--software-management", "", "Remove prohibited and install required software"),
+    ("--shared-folders", "", "Remove shares beyond ADMIN$, C$ and IPC$"),
+    ("--hosts-file", "", "Remove unauthorised hosts file entries"),
+    ("--dns-settings", "", "Report public DNS resolvers"),
+    ("--scheduled-tasks", "", "Disable suspicious scheduled tasks"),
     ("--log <path>", "", "Write the run log to <path>"),
 ];
 
@@ -98,13 +105,14 @@ fn first_unknown_argument(args: &[String]) -> Option<String> {
 
 fn print_help() {
     println!(
-        "CyberPatriot Automation Tool {}\n",
+        "PinnacleCyPat {}\n",
         app_config::version_string()
     );
     println!("USAGE:");
-    println!("    cyberpatriot-automation [OPTIONS]\n");
-    println!("Run as Administrator. With no task named, every task runs.");
-    println!("Pass --dry-run first to see what would change.\n");
+    println!("    pinnacle-cypat [OPTIONS]\n");
+    println!("Run as Administrator. Name a task, or pass --all to run every task.");
+    println!("Pass --dry-run first to see what would change.");
+    println!("Not sure? Run --tui for a guided menu.\n");
     println!("OPTIONS:");
     for (long, short, description) in FLAGS {
         let flag = if short.is_empty() {
@@ -115,9 +123,10 @@ fn print_help() {
         println!("{flag:<34}{description}");
     }
     println!("\nEXAMPLES:");
-    println!("    cyberpatriot-automation --auto-readme --parse-readme   # read-only");
-    println!("    cyberpatriot-automation --auto-readme --dry-run        # preview");
-    println!("    cyberpatriot-automation --auto-readme --all            # apply");
+    println!("    pinnacle-cypat --tui                          # guided menu");
+    println!("    pinnacle-cypat --auto-readme --parse-readme   # read-only");
+    println!("    pinnacle-cypat --auto-readme --all --dry-run  # preview");
+    println!("    pinnacle-cypat --auto-readme --all            # apply");
 }
 
 async fn with_spinner<T, F: Future<Output = T>>(message: &str, fut: F) -> T {
@@ -139,6 +148,23 @@ async fn run_automation() {
         return;
     }
 
+    // The interactive menu, either asked for or offered.
+    //
+    // A bare launch - which is what double-clicking the executable does - has
+    // nothing to act on, and printing help at someone who cannot see a command
+    // line does not help them. The menu is offered instead, but only with a
+    // human at a terminal: redirected streams mean a script or a pipe, where a
+    // prompt would wait forever for an answer that never comes. Whatever the
+    // menu returns is a command line, so everything below is unchanged by it.
+    let mut cli_args = cli_args;
+    if has_flag(&cli_args, &["--tui", "-i"]) || (cli_args.is_empty() && tui::is_interactive_console())
+    {
+        match tui::build_arguments() {
+            Some(chosen) => cli_args = chosen,
+            None => return,
+        }
+    }
+
     // Reject anything unrecognised rather than letting it fall through.
     //
     // Every flag used to be matched by name and anything else ignored, while
@@ -156,7 +182,7 @@ async fn run_automation() {
     // Answer "which build is this?" without needing a log or a file listing.
     if has_flag(&cli_args, &["--version", "-V"]) {
         println!(
-            "CyberPatriot Automation Tool {}",
+            "PinnacleCyPat {}",
             app_config::version_string()
         );
         return;
@@ -178,6 +204,16 @@ async fn run_automation() {
     let run_security_hardening = has_flag(&cli_args, &["--security-hardening", "-H"]);
     let run_media_scan = has_flag(&cli_args, &["--media-scan", "-m"]);
     let run_software_updates = has_flag(&cli_args, &["--software-updates"]);
+
+    // These five used to run only under --all, so there was no way to run one on
+    // its own - or to offer them individually in the menu, which is what
+    // prompted giving them flags.
+    let run_software_management = has_flag(&cli_args, &["--software-management"]);
+    let run_shared_folders = has_flag(&cli_args, &["--shared-folders"]);
+    let run_hosts_file = has_flag(&cli_args, &["--hosts-file"]);
+    let run_dns_settings = has_flag(&cli_args, &["--dns-settings"]);
+    let run_scheduled_tasks = has_flag(&cli_args, &["--scheduled-tasks"]);
+
     let parse_readme_only = has_flag(&cli_args, &["--parse-readme"]);
 
     // Where to write the run log; `--log <path>` overrides the default.
@@ -194,6 +230,11 @@ async fn run_automation() {
         || run_security_hardening
         || run_media_scan
         || run_software_updates
+        || run_software_management
+        || run_shared_folders
+        || run_hosts_file
+        || run_dns_settings
+        || run_scheduled_tasks
         || parse_readme_only;
 
     // Running everything has to be asked for.
@@ -302,6 +343,11 @@ async fn run_automation() {
             || run_security_hardening
             || run_media_scan
             || run_software_updates
+            || run_software_management
+            || run_shared_folders
+            || run_hosts_file
+            || run_dns_settings
+            || run_scheduled_tasks
         {
             ui::write_line();
             ui::markup_line(
@@ -375,12 +421,22 @@ async fn run_automation() {
     // race - user management and account permissions both rewrite accounts, and
     // service management and security hardening both rewrite services.
     let mut concurrent: Vec<Box<dyn Task>> = Vec::new();
-    if run_all {
+    if run_shared_folders || run_all {
         concurrent.push(Box::new(SharedFoldersAuditTask::new()));
+    }
+    if run_hosts_file || run_all {
         concurrent.push(Box::new(HostsFileAuditTask::new()));
+    }
+    if run_dns_settings || run_all {
         concurrent.push(Box::new(DnsSettingsAuditTask::new()));
+    }
+    if run_scheduled_tasks || run_all {
         concurrent.push(Box::new(SuspiciousScheduledTasksAuditTask::new()));
-
+    }
+    if run_software_management || run_all {
+        // Sequential, not concurrent: it uninstalls, installs and runs a
+        // Defender scan, all of which contend with the service and software
+        // work above.
         let mut task = SoftwareManagementTask::new();
         if let Some(rd) = &readme_data {
             task.set_readme_data(rd);

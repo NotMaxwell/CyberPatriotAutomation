@@ -107,11 +107,28 @@ pub async fn execute_for_exit_code(
     arguments: Option<&str>,
     limit: Duration,
 ) -> (Option<i32>, String, Option<String>) {
+    // Every command is recorded, with its exit code and - when it fails - what
+    // it printed. Without this a task that reports "Failed to remove X" with an
+    // empty reason leaves nothing at all to investigate, which is precisely the
+    // case where someone goes looking at the log.
+    let started = std::time::Instant::now();
     let mut cmd = build_command(command, arguments);
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return (None, String::new(), Some(e.to_string())),
+        Err(e) => {
+            // A missing executable lands here - `wmic` on a current Windows 11
+            // image, for one - and this message is the only clue.
+            crate::run_log::record_command(
+                command,
+                arguments,
+                None,
+                "",
+                Some(&e.to_string()),
+                started.elapsed(),
+            );
+            return (None, String::new(), Some(e.to_string()));
+        }
     };
 
     let stdout = child.stdout.take();
@@ -133,17 +150,40 @@ pub async fn execute_for_exit_code(
             let output = String::from_utf8_lossy(&out).into_owned();
             let error = String::from_utf8_lossy(&err).into_owned();
             let error = if error.is_empty() { None } else { Some(error) };
+            crate::run_log::record_command(
+                command,
+                arguments,
+                status.code(),
+                &output,
+                error.as_deref(),
+                started.elapsed(),
+            );
             (status.code(), output, error)
         }
-        Ok(Err(e)) => (None, String::new(), Some(e.to_string())),
+        Ok(Err(e)) => {
+            crate::run_log::record_command(
+                command,
+                arguments,
+                None,
+                "",
+                Some(&e.to_string()),
+                started.elapsed(),
+            );
+            (None, String::new(), Some(e.to_string()))
+        }
         Err(_) => {
             let _ = child.start_kill();
             let (out, _err) = reader.await.unwrap_or_default();
-            (
+            let output = String::from_utf8_lossy(&out).into_owned();
+            crate::run_log::record_command(
+                command,
+                arguments,
                 None,
-                String::from_utf8_lossy(&out).into_owned(),
-                Some("Process timed out".to_string()),
-            )
+                &output,
+                Some(&format!("Process timed out after {:.0}s", limit.as_secs_f64())),
+                started.elapsed(),
+            );
+            (None, output, Some("Process timed out".to_string()))
         }
     }
 }

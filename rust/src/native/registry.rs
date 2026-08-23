@@ -79,6 +79,37 @@ fn open_write(path: &str) -> Result<HKEY, String> {
     }
 }
 
+/// Can this process write machine-wide policy?
+///
+/// Used as the elevation check. It asks the question that actually matters -
+/// "can this process change the machine" - rather than inspecting the token for
+/// Administrators membership, which is true for an unelevated member of the
+/// group whose every write will still be refused.
+///
+/// The key is opened, never written, and closed immediately, so the probe leaves
+/// nothing behind. `Policies\System` is chosen because it is a key the hardening
+/// tasks really do write and it always exists.
+pub fn can_write_machine_policy() -> bool {
+    let path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
+    let wide = to_wide(path);
+    let mut key = HKEY::default();
+
+    unsafe {
+        let opened = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            PCWSTR(wide.as_ptr()),
+            Some(0),
+            KEY_WRITE | KEY_WOW64_64KEY,
+            &mut key,
+        )
+        .is_ok();
+        if opened {
+            let _ = RegCloseKey(key);
+        }
+        opened
+    }
+}
+
 fn set_raw(path: &str, name: &str, kind: REG_VALUE_TYPE, data: &[u8]) -> Result<(), String> {
     let key = open_write(path)?;
     let name_wide = to_wide(name);

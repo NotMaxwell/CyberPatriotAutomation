@@ -1,13 +1,14 @@
 using System.Runtime.Versioning;
 using Microsoft.Win32;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>One entry from the Windows uninstall registry.</summary>
 public readonly record struct InstalledProgram(
     string Name,
     string? Version,
-    string? UninstallCommand
+    string? UninstallCommand,
+    bool UninstallIsQuiet
 );
 
 /// <summary>
@@ -108,10 +109,18 @@ public static class NativeInstalledSoftware
         if (entry.GetValue("ParentKeyName") is string parent && parent.Length > 0)
             return null;
 
+        // QuietUninstallString is the publisher's own unattended form; when it
+        // exists it needs no silent switch added, and adding one can break it.
+        // UninstallString is the interactive uninstaller, which has to be made
+        // silent before it can be run without a human at the screen.
+        var quiet = entry.GetValue("QuietUninstallString") as string;
+        var interactive = entry.GetValue("UninstallString") as string;
+
         return new InstalledProgram(
             name.Trim(),
             entry.GetValue("DisplayVersion") as string,
-            (entry.GetValue("QuietUninstallString") ?? entry.GetValue("UninstallString")) as string
+            string.IsNullOrWhiteSpace(quiet) ? interactive : quiet,
+            !string.IsNullOrWhiteSpace(quiet)
         );
     }
 }

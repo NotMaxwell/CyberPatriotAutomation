@@ -1,9 +1,9 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Model Tests
+// PinnacleCyPat - Model Tests
 // =============================================================================
 
 use chrono::Local;
-use cyberpatriot_automation::models::*;
+use pinnacle_cypat::models::*;
 
 #[test]
 fn task_result_should_set_executed_at_on_creation() {

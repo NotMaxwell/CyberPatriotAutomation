@@ -1,6 +1,6 @@
-// CyberPatriot Automation Tool - GroupPolicyTask Tests
+// PinnacleCyPat - GroupPolicyTask Tests
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Tasks;
+using PinnacleCyPat.Core.Tasks;
 using FluentAssertions;
 using Xunit;
 

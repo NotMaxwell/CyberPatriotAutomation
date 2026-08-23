@@ -1,14 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Reporting integrity tests
+// PinnacleCyPat - Reporting integrity tests
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Tasks;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Tasks;
+using PinnacleCyPat.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// The tool's summary is only useful if it reflects what actually happened.

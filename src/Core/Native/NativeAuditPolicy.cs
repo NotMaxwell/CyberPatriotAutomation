@@ -6,7 +6,7 @@ using Windows.Win32.Foundation;
 using Windows.Win32.Security;
 using Windows.Win32.Security.Authentication.Identity;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>How a subcategory is currently audited.</summary>
 public readonly record struct AuditSubcategoryState(string Name, bool Success, bool Failure)

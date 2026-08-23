@@ -1,5 +1,5 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Security task implementations
+// PinnacleCyPat - Security task implementations
 // =============================================================================
 
 mod base;

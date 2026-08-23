@@ -37,7 +37,7 @@
                      AND '$(_IsPublishing)' != 'true'
                      AND '$(TargetFramework)' == ''">
     <Message Text="Running unit tests..." Importance="High" />
-    <Exec Command="dotnet test &quot;$(MSBuildThisFileDirectory)tests/CyberPatriotAutomation.Tests.csproj&quot; --configuration $(Configuration) --nologo -v minimal"
+    <Exec Command="dotnet test &quot;$(MSBuildThisFileDirectory)tests/PinnacleCyPat.Tests.csproj&quot; --configuration $(Configuration) --nologo -v minimal"
           ContinueOnError="true" />
   </Target>
 </Project>

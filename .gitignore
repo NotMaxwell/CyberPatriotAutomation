@@ -4,7 +4,7 @@
 # instead, so the staging directories themselves stay out of the repo.
 publish/
 publish-*/
-!/CyberPatriotAutomation.exe
+!/PinnacleCyPat.exe
 
 # Build results
 bin/

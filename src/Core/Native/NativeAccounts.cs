@@ -2,7 +2,7 @@ using System.Runtime.Versioning;
 using Windows.Win32;
 using Windows.Win32.NetworkManagement.NetManagement;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>
 /// Local account and policy reads that go straight to netapi32 instead of

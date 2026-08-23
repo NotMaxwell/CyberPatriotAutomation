@@ -1,6 +1,6 @@
-using CyberPatriotAutomation.Core.Models;
+using PinnacleCyPat.Core.Models;
 
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Records everything a run attempts, schedules and completes, and writes it to
@@ -40,6 +40,102 @@ public static class RunLog
     /// <summary>Append a line with no timestamp, for structured blocks.</summary>
     public static void RecordRaw(string text) => Push(text);
 
+    /// <summary>
+    /// Record a diagnostic: something the operator does not need to see while the
+    /// run is happening, but needs afterwards to work out why it did what it did.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The console narrative reports outcomes - "Failed to remove: CCleaner" -
+    /// but not the evidence. When the reason string comes back empty, which is
+    /// what happens whenever a tool reports failure only through an exit code,
+    /// that line degrades to "Failed to remove: CCleaner ()" and there is
+    /// nothing left to investigate with. Diagnostics carry the evidence: the
+    /// exact command, its exit code, and what it printed.
+    /// </para>
+    /// <para>
+    /// These go to the log only, never to the console. They exist to be read
+    /// after the fact, and putting them on screen would bury the narrative that
+    /// the operator does have to follow live.
+    /// </para>
+    /// </remarks>
+    public static void Diagnostic(string category, string detail)
+    {
+        detail = detail.TrimEnd();
+        if (detail.Length == 0)
+            return;
+
+        // Indented continuation lines keep a multi-line payload - a captured
+        // stderr, say - visibly attached to its own entry rather than reading as
+        // separate events.
+        var lines = detail.Split('\n');
+        Push($"[{DateTime.Now:HH:mm:ss}] [{category}] {lines[0].TrimEnd()}");
+        foreach (var line in lines.Skip(1))
+            Push($"                      {line.TrimEnd()}");
+    }
+
+    /// <summary>
+    /// Record the outcome of an external command, with enough to reproduce it.
+    /// </summary>
+    /// <remarks>
+    /// Output is captured only on failure, and truncated. A successful command's
+    /// output is usually large and never interesting; a failure's first few lines
+    /// are almost always the whole story, and an untruncated capture of, say, a
+    /// Chocolatey log would bury every other entry in the file.
+    /// </remarks>
+    public static void RecordCommand(
+        string program,
+        string? arguments,
+        int? exitCode,
+        string output,
+        string? error,
+        TimeSpan elapsed
+    )
+    {
+        var status = exitCode is null
+            ? "no exit code (timed out or never ran)"
+            : $"exit {exitCode}";
+        Diagnostic("cmd", $"{program} {Redact(arguments ?? string.Empty)}".TrimEnd());
+        Diagnostic("cmd", $"  -> {status} in {elapsed.TotalSeconds:F1}s");
+
+        if (exitCode == 0)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(error))
+            Diagnostic("cmd", $"  stderr: {Truncate(error)}");
+        if (!string.IsNullOrWhiteSpace(output))
+            Diagnostic("cmd", $"  stdout: {Truncate(output)}");
+    }
+
+    /// <summary>Longest captured output kept per failed command.</summary>
+    private const int MaxCapturedOutput = 600;
+
+    private static string Truncate(string text)
+    {
+        text = text.Trim();
+        return text.Length <= MaxCapturedOutput
+            ? text
+            : text[..MaxCapturedOutput] + $"... [{text.Length - MaxCapturedOutput} more chars]";
+    }
+
+    /// <summary>
+    /// Blank out plaintext passwords before a command line reaches the log.
+    /// </summary>
+    /// <remarks>
+    /// Account passwords are interpolated into <c>ConvertTo-SecureString</c>
+    /// calls. The run log does deliberately record each generated password once,
+    /// where the task announces it - but that is a considered disclosure in one
+    /// place, not a reason to scatter the same secret through every command
+    /// echo, where it would also survive into any log a competitor shares.
+    /// </remarks>
+    public static string Redact(string commandLine) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            commandLine,
+            @"(ConvertTo-SecureString\s+)'(?:[^']|'')*'",
+            "$1'***'",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+        );
+
     private static void Push(string line)
     {
         lock (Gate)
@@ -76,7 +172,7 @@ public static class RunLog
     public static string DefaultLogPath() =>
         Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            $"CyberPatriot_RunLog_v{AppConfig.Version}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
+            $"PinnacleCyPat_RunLog_v{AppConfig.Version}_{DateTime.Now:yyyyMMdd_HHmmss}.txt"
         );
 
     /// <summary>Build the header written at the top of every log.</summary>
@@ -84,7 +180,7 @@ public static class RunLog
         new[]
         {
             new string('=', 79),
-            "CyberPatriot Automation Tool - Run Log",
+            "PinnacleCyPat - Run Log",
             $"Version:   {AppConfig.VersionString}",
             $"Started:   {DateTime.Now:yyyy-MM-dd HH:mm:ss}",
             $"Command:   {commandLine}",

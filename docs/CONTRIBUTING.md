@@ -1,21 +1,20 @@
-﻿# Contributing to CyberPatriot Automation
+﻿# Contributing to PinnacleCyPat
 
-Thank you for your interest in contributing to the CyberPatriot Automation tool! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to the PinnacleCyPat tool! This document provides guidelines and instructions for contributing.
 
 ## 📜 Canonical Source & Attribution
 
-> **This repository is the canonical and official source of the CyberPatriot Automation Tool, authored and maintained by Maxwell McCormick.**
+> **This repository is the canonical and official source of the PinnacleCyPat, authored and maintained by Maxwell McCormick.**
 >
-> All contributions to this repository will be licensed under the [Apache License 2.0](../LICENSE) and must comply with the [NOTICE](../NOTICE) file requirements.
+> PinnacleCyPat is **proprietary software** — see [LICENSE](../LICENSE). It is not open source, and unsolicited contributions are not accepted. This document is retained as the coding standard for work done **with the copyright holder's written permission**; forking, modifying and redistributing the project are prohibited regardless of how well the result follows it.
 
 ## Contributor License Agreement
 
-By submitting a contribution to this project, you agree that:
+If you submit any suggestion, patch, code or other material relating to this project, you agree that:
 
-1. Your contribution is your original work
-2. You grant Maxwell McCormick a perpetual, worldwide, non-exclusive, royalty-free license to use, modify, and distribute your contribution
-3. Your contribution will be licensed under the Apache License 2.0
-4. You will be credited in the project's contributor list (if you wish)
+1. Your contribution is your original work, and you have the right to submit it
+2. You **assign to Maxwell McCormick all right, title and interest** in that material, as required by Section 5 of the [LICENSE](../LICENSE)
+3. You will be credited in the project's contributor list (if you wish)
 
 ## Table of Contents
 
@@ -40,12 +39,12 @@ By submitting a contribution to this project, you agree that:
 1. **Fork** the repository on GitHub
 2. **Clone** your fork locally:
    ```powershell
-   git clone https://github.com/YOUR_USERNAME/CyberPatriotAutomation.git
-   cd CyberPatriotAutomation
+   git clone https://github.com/YOUR_USERNAME/PinnacleCyPat.git
+   cd PinnacleCyPat
    ```
 3. **Add upstream** remote:
    ```powershell
-   git remote add upstream https://github.com/ORIGINAL_OWNER/CyberPatriotAutomation.git
+   git remote add upstream https://github.com/ORIGINAL_OWNER/PinnacleCyPat.git
    ```
 
 ## Development Setup
@@ -193,10 +192,10 @@ public class MyFeatureTests
 // 1. Using statements (sorted alphabetically)
 using System;
 using System.Collections.Generic;
-using CyberPatriotAutomation.Models;
+using PinnacleCyPat.Models;
 
 // 2. Namespace
-namespace CyberPatriotAutomation.Tasks;
+namespace PinnacleCyPat.Tasks;
 
 // 3. Class declaration
 public class MyTask : BaseTask
@@ -265,11 +264,11 @@ AnsiConsole.MarkupLine("[cyan]ℹ Information[/]");
 Create a new file in `Tasks/` directory:
 
 ```csharp
-using CyberPatriotAutomation.Models;
-using CyberPatriotAutomation.Utilities;
+using PinnacleCyPat.Models;
+using PinnacleCyPat.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Tasks;
+namespace PinnacleCyPat.Tasks;
 
 public class MyNewTask : BaseTask
 {
@@ -380,23 +379,22 @@ If you have questions, feel free to:
 
 ### Your Contributions
 
-All contributions are made under the [Apache License 2.0](../LICENSE). By contributing, you:
-- Retain copyright of your contributions
-- Grant the project a license to use your work
+Contributions are governed by the [LICENSE](../LICENSE). By contributing, you:
+- Assign copyright in the contribution to Maxwell McCormick (Section 5)
+- Confirm you have the right to do so
 - Agree to the Contributor License Agreement above
 
-### Trademark Notice
+### Trademark and Forking
 
-"CyberPatriot Automation Tool" is an unregistered trademark of Maxwell McCormick. If you fork this project:
-- You **must rename** your fork
-- You **may not** use the "CyberPatriot Automation Tool" name
-- You **must retain** all copyright notices and the NOTICE file
+"PinnacleCyPat" is an unregistered trademark of Maxwell McCormick.
+
+**Forking, modifying and redistributing this project are prohibited** by the LICENSE, with or without renaming. No right to use the name or any associated branding is granted for any purpose.
 
 ### Reporting Attribution Violations
 
 If you discover a fork or derivative that:
 - Has removed copyright notices
-- Is using the "CyberPatriot Automation Tool" name without permission
+- Is using the "PinnacleCyPat" name without permission
 - Has stripped the NOTICE file
 
 Please report it by opening an issue titled "Attribution Violation Report" with:

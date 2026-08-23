@@ -1,4 +1,4 @@
-//! Stamps the build date into the binary as `CPA_BUILD_DATE`.
+//! Stamps the build date into the binary as `PCP_BUILD_DATE`.
 //!
 //! The run log records the version it was produced by, but two builds of the
 //! same version are common while iterating between releases. The compile date
@@ -16,7 +16,7 @@ fn main() {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    println!("cargo:rustc-env=CPA_BUILD_DATE={}", format_date(secs));
+    println!("cargo:rustc-env=PCP_BUILD_DATE={}", format_date(secs));
 }
 
 /// Format a Unix timestamp as `YYYY-MM-DD` (UTC).

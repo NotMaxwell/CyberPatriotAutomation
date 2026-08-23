@@ -1,14 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - ReadmeParser Tests
+// PinnacleCyPat - ReadmeParser Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Utilities;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 /// <summary>
 /// Unit tests for ReadmeParser

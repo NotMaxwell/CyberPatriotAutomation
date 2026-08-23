@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Utilities;
+namespace PinnacleCyPat.Core.Utilities;
 
 /// <summary>
 /// Handles execution of system commands and processes
@@ -55,6 +55,11 @@ public class CommandExecutor
         TimeSpan timeout
     )
     {
+        // Every command is recorded, with its exit code and - when it fails -
+        // what it printed. Without this a task that reports "Failed to remove X"
+        // with an empty reason leaves nothing at all to investigate, which is
+        // precisely the case where someone goes looking at the log.
+        var started = DateTime.UtcNow;
         try
         {
             var processInfo = new ProcessStartInfo
@@ -78,7 +83,17 @@ public class CommandExecutor
 
             using var process = Process.Start(processInfo);
             if (process == null)
+            {
+                RunLog.RecordCommand(
+                    command,
+                    arguments,
+                    null,
+                    string.Empty,
+                    "Failed to start process",
+                    DateTime.UtcNow - started
+                );
                 return (null, string.Empty, "Failed to start process");
+            }
 
             // Signal end-of-input at once; nothing here ever feeds a child.
             try
@@ -119,20 +134,44 @@ public class CommandExecutor
                 // Killing closes the pipes, so the readers finish - but a
                 // grandchild that inherited the handle can still hold them, so
                 // this is bounded too rather than trading one hang for another.
-                return (
+                var partial = await SafeGetTaskResultAsync(outputTask, TimeSpan.FromSeconds(5));
+                RunLog.RecordCommand(
+                    command,
+                    arguments,
                     null,
-                    await SafeGetTaskResultAsync(outputTask, TimeSpan.FromSeconds(5)),
-                    "Process timed out"
+                    partial,
+                    $"Process timed out after {timeout.TotalSeconds:F0}s",
+                    DateTime.UtcNow - started
                 );
+                return (null, partial, "Process timed out");
             }
 
             var output = await SafeGetTaskResultAsync(outputTask, TimeSpan.FromSeconds(5));
             var error = await SafeGetTaskResultAsync(errorTask, TimeSpan.FromSeconds(5));
 
+            RunLog.RecordCommand(
+                command,
+                arguments,
+                process.ExitCode,
+                output,
+                error,
+                DateTime.UtcNow - started
+            );
+
             return (process.ExitCode, output, string.IsNullOrEmpty(error) ? null : error);
         }
         catch (Exception ex)
         {
+            // A missing executable lands here - `wmic` on a current Windows 11
+            // image, for one - and the exception message is the only clue.
+            RunLog.RecordCommand(
+                command,
+                arguments,
+                null,
+                string.Empty,
+                ex.Message,
+                DateTime.UtcNow - started
+            );
             AnsiConsole.WriteException(ex);
             return (null, string.Empty, ex.Message);
         }

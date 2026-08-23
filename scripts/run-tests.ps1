@@ -1,4 +1,4 @@
-﻿# CyberPatriot Automation - Test Runner
+﻿# PinnacleCyPat - Test Runner
 # This script runs all unit tests with detailed output showing each test name
 
 $ErrorActionPreference = "Continue"
@@ -10,7 +10,7 @@ chcp 65001 > $null
 
 Write-Host ""
 Write-Host "======================================" -ForegroundColor Cyan
-Write-Host "  CyberPatriot Automation - Tests    " -ForegroundColor Cyan  
+Write-Host "  PinnacleCyPat - Tests    " -ForegroundColor Cyan  
 Write-Host "======================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -22,7 +22,7 @@ try {
     Write-Host ""
     
     # Run tests with normal verbosity which shows all test names
-    dotnet test Tests/CyberPatriotAutomation.Tests.csproj -v n
+    dotnet test Tests/PinnacleCyPat.Tests.csproj -v n
     
     $testExitCode = $LASTEXITCODE
     

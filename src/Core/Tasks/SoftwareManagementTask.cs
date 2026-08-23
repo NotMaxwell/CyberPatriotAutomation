@@ -1,5 +1,5 @@
 // =============================================================================
-// CyberPatriot Automation Tool - Software Management Task
+// PinnacleCyPat - Software Management Task
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
@@ -8,11 +8,11 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Models;
-using CyberPatriotAutomation.Core.Utilities;
+using PinnacleCyPat.Core.Models;
+using PinnacleCyPat.Core.Utilities;
 using Spectre.Console;
 
-namespace CyberPatriotAutomation.Core.Tasks;
+namespace PinnacleCyPat.Core.Tasks;
 
 /// <summary>
 /// Removes prohibited software, installs required software as specified in the README,
@@ -49,7 +49,7 @@ public class SoftwareManagementTask : BaseTask
     /// not listed fall through to a normalised form of the display name, which is
     /// right often enough to be worth trying before reporting a failure.
     /// </remarks>
-    private static readonly Dictionary<string, string> PackageIds = new(
+    public static readonly Dictionary<string, string> PackageIds = new(
         StringComparer.OrdinalIgnoreCase
     )
     {
@@ -107,6 +107,11 @@ public class SoftwareManagementTask : BaseTask
         Name = "Software Management";
         Description =
             "Removes prohibited software and installs required software as specified in the README.";
+
+        // With no README the default prohibitions are the whole list, so they
+        // are seeded here rather than waiting for SetReadmeData that may never
+        // be called.
+        ApplyDefaultProhibitions();
     }
 
     /// <summary>
@@ -124,43 +129,69 @@ public class SoftwareManagementTask : BaseTask
 
     public void SetReadmeData(ReadmeData? readme)
     {
-        if (readme == null)
-            return;
-        RequiredSoftware = readme.RequiredSoftware?.ToList() ?? new List<SoftwareRequirement>();
+        RequiredSoftware = readme?.RequiredSoftware?.ToList() ?? new List<SoftwareRequirement>();
+        ProhibitedSoftware = readme?.ProhibitedSoftware?.ToList() ?? new List<string>();
+        ApplyDefaultProhibitions();
+    }
 
-        var prohibited = readme.ProhibitedSoftware?.ToList() ?? new List<string>();
-
-        // A README that requires something wins over the default list: an image
-        // that legitimately needs Python must not have it uninstalled.
+    /// <summary>
+    /// Add <see cref="AlwaysProhibited"/> to the prohibited list, unless the
+    /// README requires that software.
+    /// </summary>
+    /// <remarks>
+    /// Called from the constructor as well as from <see cref="SetReadmeData"/>.
+    /// It used to live only inside SetReadmeData, behind an early return on a
+    /// null README - so a run without one, or with one that failed to parse,
+    /// left the prohibited list <b>empty</b> and removed nothing at all. Python,
+    /// CCleaner and Jellyfin are prohibited by default precisely because no
+    /// README names them, so the default list has to survive the README being
+    /// absent.
+    /// </remarks>
+    private void ApplyDefaultProhibitions()
+    {
         foreach (var candidate in AlwaysProhibited)
         {
-            var required = RequiredSoftware.Any(r =>
-                r.Name.Contains(candidate, StringComparison.OrdinalIgnoreCase)
-            );
-            var alreadyListed = prohibited.Any(p =>
+            // A README that requires something wins over the default list: an
+            // image that legitimately needs Python must not have it uninstalled.
+            var required = RequiredSoftware.Any(r => PackageMatching.Matches(r.Name, candidate));
+            var alreadyListed = ProhibitedSoftware.Any(p =>
                 p.Equals(candidate, StringComparison.OrdinalIgnoreCase)
             );
             if (!required && !alreadyListed)
-                prohibited.Add(candidate);
+                ProhibitedSoftware.Add(candidate);
         }
-
-        ProhibitedSoftware = prohibited;
     }
 
     /// <summary>
     /// The installed-software list, from the uninstall registry where possible.
     /// Returns null when the inventory could not be read at all.
     /// </summary>
-    private static async Task<List<string>?> ReadInstalledSoftwareAsync()
+    private static async Task<List<InstalledSoftware>?> ReadInstalledSoftwareAsync()
     {
 #if WINDOWS
-        var fromRegistry = Native.NativeInstalledSoftware.EnumerateNames();
+        // The uninstall keys carry the uninstall command as well as the name,
+        // and that command is what actually removes the software. The previous
+        // reader called EnumerateNames() and discarded it, leaving nothing to
+        // uninstall with but `wmic`.
+        var fromRegistry = Native.NativeInstalledSoftware.Enumerate();
         if (fromRegistry is not null)
-            return fromRegistry;
+        {
+            return fromRegistry
+                .Select(p => new InstalledSoftware(
+                    p.Name,
+                    p.Version,
+                    p.UninstallCommand,
+                    p.UninstallIsQuiet
+                ))
+                .ToList();
+        }
 #endif
 
-        // Fallback only. `wmic product` is deprecated, misses non-MSI installs,
-        // and reconfigures every installed product just to list them.
+        // Fallback only, and a poor one: `wmic product` is deprecated, absent on
+        // current Windows 11 images, misses every non-MSI install, and
+        // reconfigures every installed product just to list them. It yields
+        // names with no uninstall command, so removal falls back to msiexec by
+        // product name.
         var (success, output, _) = await CommandExecutor.ExecuteAsync(
             "wmic",
             "product get name",
@@ -173,6 +204,7 @@ public class SoftwareManagementTask : BaseTask
             .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
             .Select(l => l.Trim())
             .Where(l => !string.IsNullOrWhiteSpace(l) && l != "Name")
+            .Select(name => new InstalledSoftware(name))
             .ToList();
     }
 
@@ -183,7 +215,10 @@ public class SoftwareManagementTask : BaseTask
         {
             RawOutput = installed is null
                 ? string.Empty
-                : string.Join(Environment.NewLine, installed),
+                : string.Join(
+                    Environment.NewLine,
+                    installed.Select(p => p.Version is null ? p.Name : $"{p.Name} [{p.Version}]")
+                ),
             ErrorOutput = installed is null ? "Could not read installed software" : string.Empty,
         };
     }
@@ -215,17 +250,32 @@ public class SoftwareManagementTask : BaseTask
             };
         }
         var toRemove = installed
-            .Where(i =>
-                ProhibitedSoftware.Any(p => i.Contains(p, StringComparison.OrdinalIgnoreCase))
-            )
+            .Where(i => ProhibitedSoftware.Any(p => PackageMatching.Matches(i.Name, p)))
             .ToList();
         var toInstall = RequiredSoftware
-            .Where(r => !installed.Any(i => i.Contains(r.Name, StringComparison.OrdinalIgnoreCase)))
+            .Where(r => !installed.Any(i => PackageMatching.Matches(i.Name, r.Name)))
             .ToList();
+
+        // What matched what, and why. Reconstructing this after a run used to be
+        // impossible: the console said "Failed to remove: X" and nothing said
+        // whether X was even matched, which mechanism was tried, or what it
+        // returned.
+        RunLog.Diagnostic("software", $"inventory: {installed.Count} programs");
+        RunLog.Diagnostic("software", $"prohibited terms: {string.Join(", ", ProhibitedSoftware)}");
+        foreach (var item in toRemove)
+        {
+            RunLog.Diagnostic(
+                "software",
+                $"matched for removal: {item.Name} "
+                    + $"(uninstall string: {item.UninstallString ?? "none registered"})"
+            );
+        }
 
         var details = new List<string>();
         // List all installed software checked
-        details.Add($"Installed software checked: {string.Join(", ", installed)}");
+        details.Add(
+            $"Installed software checked: {string.Join(", ", installed.Select(i => i.Name))}"
+        );
         // List all prohibited software checked
         details.Add($"Prohibited software list: {string.Join(", ", ProhibitedSoftware)}");
         // List all required software checked
@@ -234,7 +284,7 @@ public class SoftwareManagementTask : BaseTask
         );
 
         if (toRemove.Count > 0)
-            details.Add($"To remove: {string.Join(", ", toRemove)}");
+            details.Add($"To remove: {string.Join(", ", toRemove.Select(i => i.Name))}");
         else
             details.Add("No prohibited software found to remove.");
 
@@ -245,47 +295,51 @@ public class SoftwareManagementTask : BaseTask
         else
             details.Add("All required software is installed.");
 
-        // Remove prohibited software
+        // Remove prohibited software.
         var removalFailures = new List<string>();
         var chocoPackages = await Chocolatey.ListInstalledAsync();
         foreach (var sw in toRemove)
         {
-            // Prefer Chocolatey when it owns the package: it uninstalls silently
-            // and reports a real reason. `wmic product call uninstall` stays as
-            // the fallback for software Chocolatey did not install.
-            string? remError = null;
-            var remSuccess = false;
-
-            if (
-                chocoPackages is not null
-                && chocoPackages.Any(p => p.Contains(sw, StringComparison.OrdinalIgnoreCase))
-            )
+            var failure = await UninstallAsync(sw, chocoPackages);
+            if (failure is null)
             {
-                var package = chocoPackages.First(p =>
-                    p.Contains(sw, StringComparison.OrdinalIgnoreCase)
-                );
-                remError = await Chocolatey.UninstallAsync(package);
-                remSuccess = remError is null;
-            }
-
-            if (!remSuccess)
-            {
-                (remSuccess, _, remError) = await CommandExecutor.ExecuteAsync(
-                    "wmic",
-                    $"product where name=\"{sw}\" call uninstall /nointeractive"
-                );
-            }
-
-            if (remSuccess)
-            {
-                AnsiConsole.MarkupLine($"[green]✓ Removed: {Markup.Escape(sw)}[/]");
+                AnsiConsole.MarkupLine($"[green]✓ Removed: {Markup.Escape(sw.Name)}[/]");
             }
             else
             {
-                removalFailures.Add($"{sw}: {remError}");
+                removalFailures.Add($"{sw.Name}: {failure}");
                 AnsiConsole.MarkupLine(
-                    $"[red]✗ Failed to remove: {Markup.Escape(sw)} ({Markup.Escape(remError ?? "")})[/]"
+                    $"[red]✗ Failed to remove: {Markup.Escape(sw.Name)} "
+                        + $"({Markup.Escape(failure)})[/]"
                 );
+            }
+        }
+
+        // Confirm removals against a fresh inventory rather than trusting exit
+        // codes. An uninstaller that exits 0 having shown a dialog nobody
+        // answered, or that needs a reboot to finish, both report success.
+        if (toRemove.Count > 0)
+        {
+            var after = await ReadInstalledSoftwareAsync();
+            if (after is not null)
+            {
+                var survivors = after
+                    .Where(i => ProhibitedSoftware.Any(p => PackageMatching.Matches(i.Name, p)))
+                    .Select(i => i.Name)
+                    .ToList();
+                foreach (var name in survivors)
+                {
+                    RunLog.Diagnostic("software", $"still present after removal: {name}");
+                    if (!removalFailures.Any(f => f.StartsWith(name, StringComparison.Ordinal)))
+                    {
+                        removalFailures.Add($"{name}: reported removed but still installed");
+                        AnsiConsole.MarkupLine(
+                            $"[red]✗ {Markup.Escape(name)} is still installed after removal[/]"
+                        );
+                    }
+                }
+                if (survivors.Count > 0)
+                    details.Add($"Still installed after removal: {string.Join(", ", survivors)}");
             }
         }
         // Install required software through Chocolatey, bootstrapping it if absent.
@@ -348,18 +402,47 @@ public class SoftwareManagementTask : BaseTask
         // pre-installed.
         var updateFailures = new List<string>();
         var updatedNow = new List<string>();
-        if (UpdateInstalledSoftware && await Chocolatey.IsAvailableAsync())
+        // Chocolatey is *ensured*, not merely detected.
+        //
+        // This used to call IsAvailableAsync, while the bootstrap lived inside
+        // the install branch above - which only runs when something is missing.
+        // On the common image, where the required software is already present
+        // and merely out of date, nothing was missing, so Chocolatey was never
+        // installed and the entire update step was skipped in silence. That is
+        // the reported symptom: Chrome and Notepad++ never being updated.
+        var updateBlocker = UpdateInstalledSoftware
+            ? await Chocolatey.EnsureAvailableAsync()
+            : null;
+        if (UpdateInstalledSoftware && updateBlocker is not null)
+        {
+            details.Add($"Could not update installed software: {updateBlocker}");
+            RunLog.Diagnostic("software", $"updates skipped: {updateBlocker}");
+            AnsiConsole.MarkupLine(
+                $"[red]✗ Cannot update installed software: {Markup.Escape(updateBlocker)}[/]"
+            );
+        }
+        else if (UpdateInstalledSoftware)
         {
             // Anything the README requires, plus whatever is installed and has a
             // package id we recognise: an image can ship outdated software the
             // README never mentions.
+            //
+            // Resolution is fuzzy because display names carry version, bitness
+            // and locale suffixes - "Notepad++ (64-bit x64)", "Mozilla Firefox
+            // (x64 en-US)". The previous exact dictionary lookup matched only
+            // names with no suffix at all, which is why Notepad++ was never
+            // updated.
+            var recognised = installed
+                .Select(i => (i.Name, Id: PackageMatching.ResolvePackageId(i.Name, PackageIds)))
+                .Where(x => x.Id is not null)
+                .ToList();
+
+            foreach (var (name, id) in recognised)
+                RunLog.Diagnostic("software", $"update candidate: {name} -> {id}");
+
             var toUpdate = RequiredSoftware
                 .Select(PackageIdFor)
-                .Concat(
-                    installed
-                        .Where(name => PackageIds.ContainsKey(name.Trim()))
-                        .Select(name => PackageIds[name.Trim()])
-                )
+                .Concat(recognised.Select(x => x.Id!))
                 .Where(id => id.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
@@ -427,15 +510,142 @@ public class SoftwareManagementTask : BaseTask
 
     public override async Task<bool> VerifyAsync()
     {
-        var installed = await ReadInstalledSoftwareAsync() ?? new List<string>();
-        var stillPresent = installed.Any(i =>
-            ProhibitedSoftware.Any(p => i.Contains(p, StringComparison.OrdinalIgnoreCase))
-        );
-        var stillMissing = RequiredSoftware.Any(r =>
-            !installed.Any(i => i.Contains(r.Name, StringComparison.OrdinalIgnoreCase))
-        );
-        return !stillPresent && !stillMissing;
+        var installed = await ReadInstalledSoftwareAsync() ?? new List<InstalledSoftware>();
+
+        var stillPresent = installed
+            .Where(i => ProhibitedSoftware.Any(p => PackageMatching.Matches(i.Name, p)))
+            .Select(i => i.Name)
+            .ToList();
+        var stillMissing = RequiredSoftware
+            .Where(r => !installed.Any(i => PackageMatching.Matches(i.Name, r.Name)))
+            .Select(r => r.Name)
+            .ToList();
+
+        // Say which, rather than just failing. A bare false sends the reader
+        // back to the console scrollback to work out what verification objected
+        // to.
+        foreach (var name in stillPresent)
+            RunLog.Diagnostic("software", $"verify: prohibited software still installed: {name}");
+        foreach (var name in stillMissing)
+            RunLog.Diagnostic("software", $"verify: required software still missing: {name}");
+
+        return stillPresent.Count == 0 && stillMissing.Count == 0;
     }
+
+    /// <summary>
+    /// Uninstall one program. Returns null on success, or the reason.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three mechanisms, tried in order of reliability:
+    /// </para>
+    /// <list type="number">
+    /// <item><b>Chocolatey</b>, when it owns the package. It uninstalls silently
+    /// and reports a real reason.</item>
+    /// <item><b>The registered uninstall command</b>, made unattended by
+    /// <see cref="UninstallCommandBuilder"/>. This is what removes NSIS and Inno
+    /// software - CCleaner, Notepad++, Jellyfin Media Player - none of which the
+    /// previous <c>wmic</c> path could touch.</item>
+    /// <item><b>msiexec by product name</b>, only for an inventory that came
+    /// from the <c>wmic</c> fallback and so carries no uninstall string.</item>
+    /// </list>
+    /// <para>
+    /// <c>wmic product call uninstall</c> is gone. It reads Win32_Product, which
+    /// knows only MSI installs, and it exits 0 when its where-clause matches
+    /// nothing - so it reported success for every non-MSI program while removing
+    /// none of them.
+    /// </para>
+    /// </remarks>
+    private static async Task<string?> UninstallAsync(
+        InstalledSoftware software,
+        List<string>? chocoPackages
+    )
+    {
+        // 1. Chocolatey, if it owns it.
+        //
+        // The test used to be `package.Contains(displayName)` - backwards, since
+        // the package id is the short name and the display name the long one, so
+        // it never matched and this path never ran.
+        var owned = chocoPackages?.FirstOrDefault(p =>
+            PackageMatching.Matches(software.Name, p)
+            || PackageMatching.ResolvePackageId(software.Name, PackageIds) is { } id
+                && id.Equals(p, StringComparison.OrdinalIgnoreCase)
+        );
+
+        if (owned is not null)
+        {
+            RunLog.Diagnostic(
+                "software",
+                $"{software.Name}: uninstalling via Chocolatey ({owned})"
+            );
+            var chocoFailure = await Chocolatey.UninstallAsync(owned);
+            if (chocoFailure is null)
+                return null;
+            RunLog.Diagnostic(
+                "software",
+                $"{software.Name}: Chocolatey uninstall failed ({chocoFailure}); trying the registered uninstaller"
+            );
+        }
+
+        // 2. The registered uninstall command.
+        var command = UninstallCommandBuilder.Build(
+            software.UninstallString,
+            software.UninstallIsQuiet
+        );
+
+        if (command is { } cmd)
+        {
+            RunLog.Diagnostic("software", $"{software.Name}: running {cmd}");
+            var (exitCode, output, error) = await CommandExecutor.ExecuteForExitCodeAsync(
+                cmd.Program,
+                cmd.Arguments,
+                UninstallTimeout
+            );
+
+            if (exitCode is null)
+                return "the uninstaller did not finish within the time limit";
+
+            // 3010 and 1641 are "done, reboot pending" - the software is gone.
+            if (UninstallSuccessExitCodes.Contains(exitCode.Value))
+                return null;
+
+            var reason = !string.IsNullOrWhiteSpace(error)
+                ? error.Trim()
+                : LastMeaningfulLine(output) ?? $"the uninstaller exited with code {exitCode}";
+            return reason;
+        }
+
+        // 3. No uninstall string: the inventory came from the wmic fallback.
+        if (software.UninstallString is null)
+        {
+            RunLog.Diagnostic(
+                "software",
+                $"{software.Name}: no uninstall command registered; trying msiexec by name"
+            );
+            var (ok, _, msiError) = await CommandExecutor.ExecuteAsync(
+                "msiexec.exe",
+                $"/x \"{software.Name}\" /qn /norestart",
+                UninstallTimeout
+            );
+            return ok ? null : msiError ?? "no uninstall command is registered for this program";
+        }
+
+        return $"the registered uninstall command could not be used: {software.UninstallString}";
+    }
+
+    /// <summary>An uninstaller can legitimately run for several minutes.</summary>
+    private static readonly TimeSpan UninstallTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>Exit codes that mean the program was removed.</summary>
+    /// <remarks>3010 and 1641 both mean "succeeded, reboot pending".</remarks>
+    private static readonly int[] UninstallSuccessExitCodes = [0, 1605, 1641, 3010];
+
+    /// <summary>The last non-empty line of output, used when stderr is silent.</summary>
+    private static string? LastMeaningfulLine(string output) =>
+        output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(l => l.Trim())
+            .LastOrDefault(l => l.Length > 0);
 
     /// <summary>
     /// Runs a Windows Defender malware scan and returns the results

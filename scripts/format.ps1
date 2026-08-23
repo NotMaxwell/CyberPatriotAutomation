@@ -1,5 +1,5 @@
 ﻿# ============================================================
-#  CyberPatriot Automation Tool - Code Formatter
+#  PinnacleCyPat - Code Formatter
 #  Author: Maxwell McCormick
 #
 #  Formats all C# code using CSharpier (similar to Spotless)
@@ -14,7 +14,7 @@ $ErrorActionPreference = "Continue"
 
 Write-Host ""
 Write-Host "  ========================================================" -ForegroundColor Cyan
-Write-Host "   Code Formatter - CyberPatriot Automation Tool" -ForegroundColor Cyan
+Write-Host "   Code Formatter - PinnacleCyPat" -ForegroundColor Cyan
 Write-Host "   By Maxwell McCormick" -ForegroundColor Gray
 Write-Host "  ========================================================" -ForegroundColor Cyan
 Write-Host ""

@@ -3,7 +3,7 @@ using System.Runtime.Versioning;
 using Windows.Win32;
 using Windows.Win32.System.Services;
 
-namespace CyberPatriotAutomation.Core.Native;
+namespace PinnacleCyPat.Core.Native;
 
 /// <summary>What a service is currently doing.</summary>
 public enum NativeServiceState

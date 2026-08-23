@@ -1,14 +1,14 @@
 // =============================================================================
-// CyberPatriot Automation Tool - SharedFoldersAuditTask Tests
+// PinnacleCyPat - SharedFoldersAuditTask Tests
 // Author: Maxwell McCormick
 // Copyright (c) 2026 Maxwell McCormick. All Rights Reserved.
 // =============================================================================
 using System.Threading.Tasks;
-using CyberPatriotAutomation.Core.Tasks;
+using PinnacleCyPat.Core.Tasks;
 using FluentAssertions;
 using Xunit;
 
-namespace CyberPatriotAutomation.Tests;
+namespace PinnacleCyPat.Tests;
 
 public class SharedFoldersAuditTaskTests
 {
