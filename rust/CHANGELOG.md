@@ -10,6 +10,112 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.19.0
+
+Linux brought to parity with Windows: fifteen tasks, and tables the same size.
+
+### Added
+
+- **Two tasks, taking Linux from thirteen to fifteen - the same count as
+  Windows.**
+
+  **File Permissions Audit (`--file-permissions`).** Windows hides its access
+  control behind ACLs that nothing prints by default; Linux puts it in twelve
+  bits per file, which makes it both easy to get wrong and easy to check. The
+  one that matters most is `/etc/shadow`: at `0644` every user on the machine
+  can read the password hashes and take them away to crack offline, and nothing
+  about the system behaves differently - no error, no warning, no failed login.
+
+  Sixteen scored file modes are corrected. World-writable files, unowned files,
+  unexpected setuid binaries, `.rhosts`/`.netrc`/`.forward` in home directories,
+  and a missing sticky bit on `/tmp` are **reported and not touched**: a
+  world-writable file under `/opt` may be a vendor's installer doing something
+  ugly but necessary, and breaking working software to score nothing is the
+  worse trade.
+
+  Corrections accept a *stricter* mode than the benchmark asks for. An image
+  whose `/etc/shadow` is `0600` rather than `0640` is more locked down than CIS
+  requires, and loosening it to match would be a downgrade dressed up as a fix.
+
+  **Shared Folders Audit (`--shared-folders`).** The counterpart of the Windows
+  share audit, and a harder problem: Windows has three default shares and
+  anything else is a finding, while a stock Linux image exports nothing at all,
+  so every share is something somebody configured. `smb.conf` and `/etc/exports`
+  are both read and their options graded - `no_root_squash` lets a client's root
+  write as root here, `guest ok = yes` needs no credential. Nothing is removed,
+  because a share may be exactly what the round requires.
+
+- **Kernel module blocking.** Fourteen unused filesystem drivers and network
+  protocols, written to `/etc/modprobe.d/99-pinnacle.conf` with both `install
+  ... /bin/false` and `blacklist`: the second alone only stops *automatic*
+  loading and is bypassed by an explicit `modprobe`.
+
+  `vfat` is deliberately absent, as it is from CIS. A UEFI machine mounts
+  `/boot/efi` as vfat, and blocking the module there stops the image booting.
+  "Unused filesystem" has to mean unused, not merely unfamiliar.
+
+- **Login banners.** `/etc/issue`, `/etc/issue.net` and `/etc/motd` are replaced
+  with a legal notice containing no escapes. Ubuntu's stock `/etc/issue` is
+  `Ubuntu 22.04 LTS \n \l`, which prints the distribution and kernel version
+  *before* anyone has authenticated - which is what a scored check looks for the
+  absence of.
+
+### Changed
+
+- **The tables now match the Windows ones in size**, and in several places
+  exceed them:
+
+  | Table | Was | Now | Windows |
+  |---|--:|--:|--:|
+  | Hardening settings | 37 | **72** | 42 |
+  | Prohibited services | 28 | **58** | 55 |
+  | Audit rules | 13 | **34** | 9 categories |
+  | Kernel modules blocked | - | **14** | n/a |
+  | Scored file modes | - | **16** | n/a |
+
+  The additions are the CIS Ubuntu 22.04 benchmark's: strong SSH crypto
+  (dropping CBC, arcfour, MD5 and the SHA-1 key exchanges), `ptrace_scope`,
+  `kptr_restrict`, `perf_event_paranoid`, unprivileged BPF, IPv6 router
+  advertisements, `protected_fifos` and `protected_regular`, and the
+  `login.defs` retry and timeout limits.
+
+- **`auditd` is configured, not just started.** The defaults quietly discard the
+  oldest records; `keep_logs` keeps the history, which is the part of an
+  incident worth having.
+
+  CIS asks for `admin_space_left_action = halt`. That is right for a server with
+  an administrator watching and **wrong** for a competition image: a disk that
+  fills mid-round would power the machine off and end the round with whatever
+  score it had. `single` is loud, recoverable, and does not stop the scoring
+  engine reporting. A test pins that.
+
+- **The firewall configures loopback explicitly and turns on logging.** A
+  default-deny policy without an explicit loopback allow breaks every service
+  that talks to itself over `127.0.0.1`, which on a desktop image includes the
+  display manager and the resolver. Traffic claiming to come *from* loopback but
+  arriving on a real interface is spoofed and is denied.
+
+### Fixed
+
+- **The setuid baseline matched full paths, and so reported twenty-one
+  legitimate binaries** the first time it ran on a machine that was not Ubuntu.
+  `unix_chkpwd` is in `/usr/sbin` on Debian and `/usr/bin` on Arch;
+  `ssh-keysign` is under `/usr/lib/openssh` on one and `/usr/lib/ssh` on the
+  other. This is the same mistake as matching `nologin` by path, found the same
+  way - by running it.
+
+  Now matched by file **name**, plus a requirement that the path be under a
+  system directory. The name alone would excuse a planted `/home/alice/sudo`,
+  which is exactly what the task exists to find.
+
+- **The permissions scan made three full traversals of `/usr`**, which took long
+  enough to look like a hang with four tasks still to go. One pass with tagged
+  output now costs what a single check used to, and it is bounded by an explicit
+  timeout.
+
+- **The `find` expressions were backslash-escaped as they would be at a shell
+  prompt.** No shell is involved, so every one of them failed.
+
 ## 1.18.0
 
 `--directives`: what this round does differently.

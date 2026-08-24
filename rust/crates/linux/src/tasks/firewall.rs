@@ -193,18 +193,58 @@ impl Task for FirewallTask {
             return result;
         }
 
-        for (direction, policy) in [("incoming", "deny"), ("outgoing", "allow")] {
+        // Loopback before the default policy, for the same reason the allow
+        // rules come first: a default-deny policy without an explicit loopback
+        // allow breaks every service that talks to itself over 127.0.0.1, which
+        // on a desktop image includes the display manager and the resolver.
+        for rule in [
+            "allow in on lo",
+            "allow out on lo",
+            // Traffic claiming to be from loopback but arriving on a real
+            // interface is spoofed, whatever it says.
+            "deny in from 127.0.0.0/8",
+            "deny in from ::1",
+        ] {
+            let (ok, _o, _e) = command::execute("ufw", Some(rule)).await;
+            if ok {
+                result.items_succeeded += 1;
+            } else {
+                failures.push(format!("{rule}: ufw refused the rule"));
+            }
+        }
+        result.items_attempted += 4;
+
+        for (direction, policy) in [
+            ("incoming", "deny"),
+            ("outgoing", "allow"),
+            // Routed traffic is what a router does; a workstation forwarding
+            // packets is a bridge into whatever it can reach.
+            ("routed", "deny"),
+        ] {
             let (ok, _o, e) =
                 command::execute("ufw", Some(&format!("default {policy} {direction}"))).await;
             if ok {
                 result.items_succeeded += 1;
             } else {
-                failures.push(format!(
-                    "default {policy} {direction}: {}",
-                    e.unwrap_or_default()
-                ));
+                // `default deny routed` is rejected by older ufw builds, where
+                // it is simply not a thing. Not a failure worth reporting.
+                if direction != "routed" {
+                    failures.push(format!(
+                        "default {policy} {direction}: {}",
+                        e.unwrap_or_default()
+                    ));
+                }
             }
         }
+
+        // Logging, so a blocked connection leaves a record. Without it the
+        // firewall is silent about everything it stops, and the audit trail has
+        // a hole exactly where the interesting traffic is.
+        let (logging_ok, _o, _e) = command::execute("ufw", Some("logging on")).await;
+        if logging_ok {
+            result.items_succeeded += 1;
+        }
+        result.items_attempted += 1;
 
         match remediation::apply(
             "ufw",

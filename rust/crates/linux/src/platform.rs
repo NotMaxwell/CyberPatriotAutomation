@@ -184,8 +184,29 @@ const TASKS: &[TaskSpec] = &[
             Box::new(task)
         },
     },
+    TaskSpec {
+        flag: "--file-permissions",
+        short: "",
+        help: "Fix the modes on scored files; report world-writable, setuid and unowned",
+        label: "File Permissions Audit",
+        detail: "/etc/shadow and friends; reports the rest",
+        needs_readme: false,
+        // Sequential: it corrects modes on files other tasks are also writing.
+        concurrency: Sequential,
+        build: plain!(FilePermissionsAuditTask),
+    },
     // The independent audits. These read disjoint parts of the machine and
     // share no state, so they are the only tasks it is safe to overlap.
+    TaskSpec {
+        flag: "--shared-folders",
+        short: "",
+        help: "Report Samba shares and NFS exports",
+        label: "Shared Folders Audit",
+        detail: "reports; removes nothing",
+        needs_readme: false,
+        concurrency: Concurrent,
+        build: plain!(SharedFoldersAuditTask),
+    },
     TaskSpec {
         flag: "--hosts-file",
         short: "",
@@ -260,6 +281,7 @@ mod tests {
             ("--software-updates", "Software Updates"),
             ("--software-management", "Software Management"),
             ("--dns-settings", "DNS Settings Audit"),
+            ("--shared-folders", "Shared Folders Audit"),
             ("--scheduled-tasks", "Scheduled Tasks Audit"),
         ] {
             let spec = TASKS
@@ -307,7 +329,12 @@ mod tests {
             .collect();
         assert_eq!(
             concurrent,
-            ["--hosts-file", "--dns-settings", "--scheduled-tasks"]
+            [
+                "--shared-folders",
+                "--hosts-file",
+                "--dns-settings",
+                "--scheduled-tasks"
+            ]
         );
     }
 }

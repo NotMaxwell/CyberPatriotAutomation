@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-354-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-381-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -119,28 +119,34 @@ so `--help` and a run log read the same way on either.
 | DNS Settings Audit | `--dns-settings` | Reports public resolvers (report only — never changes DNS) |
 | Scheduled Tasks Audit | `--scheduled-tasks` | Disables tasks matching suspicious keywords |
 
-### Linux — thirteen tasks
+### Linux — fifteen tasks
 
 | Task | Flag | What it does |
 |---|---|---|
 | Password Policy | `-p` | `pam_pwquality` complexity, `faillock` lockout, reports missing password history |
 | Account Permissions | `-a` | Locks passwordless accounts, applies ageing, reports duplicate uid 0 and service accounts with shells |
 | User Management | `-u` | Deletes unauthorised accounts (keeping home directories), fixes `sudo` membership, creates required users |
-| Service Management | `-s` | Masks 28 insecure units, protects the README's critical ones and the scoring engine |
-| Audit Policy | `-t` | Installs and enables `auditd` and `rsyslog`, writes 13 audit rules |
+| Service Management | `-s` | Masks 58 insecure units, protects the README's critical ones and the scoring engine |
+| Audit Policy | `-t` | Installs and enables `auditd` and `rsyslog`, writes 34 audit rules and tunes retention |
 | Firewall | `-f` | Enables `ufw` with default-deny inbound, opening only what the README needs |
-| Security Hardening | `-H` | 36 settings across `sysctl.d`, `sshd_config.d` and `login.defs` |
+| Security Hardening | `-H` | 72 settings across `sysctl.d`, `sshd_config.d` and `login.defs`, 14 kernel modules blocked, login banners |
 | Prohibited Media | `-m` | Finds media under `/home` and `/root`; deletes only if the README prohibits it |
+| File Permissions Audit | `--file-permissions` | Corrects 16 scored file modes; reports world-writable, unowned, setuid and `.rhosts` findings |
+| Shared Folders Audit | `--shared-folders` | Reports Samba shares and NFS exports, grading their options |
 | Software Updates | `--software-updates` | `apt upgrade`, then enables `unattended-upgrades` |
 | Software Management | `--software-management` | Purges prohibited packages, installs required ones |
 | Hosts File Audit | `--hosts-file` | Removes unauthorised `/etc/hosts` entries |
 | DNS Settings Audit | `--dns-settings` | Reports the resolvers in use, via `resolv.conf` and `resolvectl` |
 | Scheduled Tasks Audit | `--scheduled-tasks` | Reports suspicious jobs across all six cron locations |
 
-Three Linux findings are deliberately **reported and not fixed** — a second uid 0
-account, suspicious cron jobs, and the resolvers in use — because acting
-automatically on any of them is more likely to break the image than help it.
-Group Policy has no Linux equivalent, so there is no such task there.
+Several Linux findings are deliberately **reported and not fixed** — a second
+uid 0 account, suspicious cron jobs, the resolvers in use, world-writable and
+setuid files, and every share — because acting automatically on any of them is
+more likely to break the image than help it. Group Policy has no Linux
+equivalent, so there is no such task there.
+
+The tables are CIS Ubuntu 22.04 derived and now match the Windows ones in size:
+72 hardening settings against Windows' 42, 58 prohibited services against 55.
 
 **Full detail on every one — why it exists, what it changes, how, and what it
 refuses to touch — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
@@ -263,8 +269,9 @@ exists on both, the spelling matches:
 | `--hosts-file` | | ✓ | ✓ |
 | `--dns-settings` | | ✓ | ✓ |
 | `--scheduled-tasks` | | ✓ | ✓ |
+| `--file-permissions` | | — | ✓ |
 | `--group-policy` | `-g` | ✓ | — no equivalent |
-| `--shared-folders` | | ✓ | — |
+| `--shared-folders` | | ✓ | ✓ |
 
 > [!NOTE]
 > `-h` is **help**. Security hardening is `-H`; `--security-hardening` is
@@ -334,7 +341,7 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 354 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 381 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
 

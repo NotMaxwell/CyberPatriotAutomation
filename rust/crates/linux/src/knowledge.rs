@@ -131,6 +131,97 @@ pub const HARDENING_SETTINGS: &[Setting] = &[
         value: "2",
         why: "SSHv1 is broken; harmless on builds that no longer read this",
     },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "LogLevel",
+        value: "VERBOSE",
+        why: "records the key fingerprint used, so a stolen key can be traced",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "AllowTcpForwarding",
+        value: "no",
+        why: "a forwarded port turns one SSH session into a route into the network",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "AllowAgentForwarding",
+        value: "no",
+        why: "root on the server can use the forwarded agent to log in elsewhere as the client",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "PermitTunnel",
+        value: "no",
+        why: "builds a layer-3 tunnel out of an SSH session",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "MaxSessions",
+        value: "4",
+        why: "limits how much one connection can multiplex",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "MaxStartups",
+        value: "10:30:60",
+        why: "throttles unauthenticated connections so they cannot fill the slots",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "UsePAM",
+        value: "yes",
+        why: "without it the account lockout and password policy do not apply to SSH",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "KerberosAuthentication",
+        value: "no",
+        why: "an authentication path nothing on this image uses",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "GSSAPIAuthentication",
+        value: "no",
+        why: "an authentication path nothing on this image uses",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "Banner",
+        value: "/etc/issue.net",
+        why: "the legal notice shown before login, which is separately scored",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "Ciphers",
+        value: "chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr",
+        why: "drops CBC and arcfour, which are broken",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "MACs",
+        value: "hmac-sha2-512-etm@openssh.com,hmac-sha2-256-etm@openssh.com,umac-128-etm@openssh.com",
+        why: "encrypt-then-MAC only; drops MD5 and the 96-bit truncations",
+    },
+    Setting {
+        path: SSHD_DROPIN,
+        style: Style::Space,
+        key: "KexAlgorithms",
+        value: "curve25519-sha256,curve25519-sha256@libssh.org,diffie-hellman-group-exchange-sha256",
+        why: "drops the SHA-1 and 1024-bit group exchanges",
+    },
     // --- Kernel networking ---------------------------------------------------
     Setting {
         path: SYSCTL_DROPIN,
@@ -280,6 +371,139 @@ pub const HARDENING_SETTINGS: &[Setting] = &[
         value: "0",
         why: "a core dump from a setuid program can contain credentials",
     },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "fs.protected_fifos",
+        value: "2",
+        why: "closes the same race as protected_symlinks, for named pipes",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "fs.protected_regular",
+        value: "2",
+        why: "stops a world-writable directory being used to hijack a file another user writes",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "kernel.kptr_restrict",
+        value: "2",
+        why: "hides kernel addresses from /proc, which an exploit needs to aim",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "kernel.yama.ptrace_scope",
+        value: "1",
+        why: "stops one process attaching a debugger to another and reading its memory",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "kernel.perf_event_paranoid",
+        value: "3",
+        why: "the performance subsystem has been a reliable source of privilege escalation",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "kernel.unprivileged_bpf_disabled",
+        value: "1",
+        why: "unprivileged BPF loads attacker bytecode into the kernel",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.core.bpf_jit_harden",
+        value: "2",
+        why: "hardens whatever BPF does get loaded against JIT spraying",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "kernel.core_uses_pid",
+        value: "1",
+        why: "core dumps do not overwrite each other, so evidence survives",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "vm.mmap_min_addr",
+        value: "65536",
+        why: "stops a null-pointer dereference in the kernel being turned into code execution",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.conf.default.rp_filter",
+        value: "1",
+        why: "as for all interfaces, applied to any added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.conf.default.log_martians",
+        value: "1",
+        why: "as for all interfaces, applied to any added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.conf.default.secure_redirects",
+        value: "0",
+        why: "as for all interfaces, applied to any added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.icmp_echo_ignore_all",
+        value: "0",
+        why: "left responding on purpose - a scored check often pings the machine",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.tcp_rfc1337",
+        value: "1",
+        why: "drops packets that arrive for a connection already in TIME_WAIT",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv6.conf.default.accept_redirects",
+        value: "0",
+        why: "as for IPv4, applied to any interface added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv6.conf.default.accept_source_route",
+        value: "0",
+        why: "as for IPv4, applied to any interface added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv6.conf.all.accept_ra",
+        value: "0",
+        why: "a router advertisement can move the default route without authentication",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv6.conf.default.accept_ra",
+        value: "0",
+        why: "as above, for interfaces added later",
+    },
+    Setting {
+        path: SYSCTL_DROPIN,
+        style: Style::Equals,
+        key: "net.ipv4.conf.all.forwarding",
+        value: "0",
+        why: "the modern spelling of ip_forward; both are written so either check passes",
+    },
     // --- Account ageing defaults --------------------------------------------
     Setting {
         path: LOGIN_DEFS,
@@ -316,6 +540,27 @@ pub const HARDENING_SETTINGS: &[Setting] = &[
         value: "SHA512",
         why: "the hash new passwords are stored with",
     },
+    Setting {
+        path: LOGIN_DEFS,
+        style: Style::Space,
+        key: "LOGIN_RETRIES",
+        value: "5",
+        why: "attempts allowed at a console login prompt",
+    },
+    Setting {
+        path: LOGIN_DEFS,
+        style: Style::Space,
+        key: "LOGIN_TIMEOUT",
+        value: "60",
+        why: "an abandoned login prompt does not hold the terminal open",
+    },
+    Setting {
+        path: LOGIN_DEFS,
+        style: Style::Space,
+        key: "SHA_CRYPT_MIN_ROUNDS",
+        value: "640000",
+        why: "makes each offline guess of a stolen hash cost more",
+    },
 ];
 
 /// Services that should not be running on a competition image.
@@ -325,6 +570,7 @@ pub const HARDENING_SETTINGS: &[Setting] = &[
 /// connections, or exists only to serve files off a machine that is not
 /// supposed to be a server.
 pub const PROHIBITED_SERVICES: &[(&str, &str)] = &[
+    // --- clear-text remote access -------------------------------------------
     ("telnet.socket", "sends the password in clear text"),
     ("telnetd.service", "sends the password in clear text"),
     (
@@ -334,42 +580,77 @@ pub const PROHIBITED_SERVICES: &[(&str, &str)] = &[
     ("rsh.socket", "sends the password in clear text"),
     ("rlogin.socket", "sends the password in clear text"),
     ("rexec.socket", "sends the password in clear text"),
+    ("rsh-server.service", "sends the password in clear text"),
+    // --- file transfer with weak or no authentication -----------------------
     ("vsftpd.service", "FTP sends the password in clear text"),
     ("proftpd.service", "FTP sends the password in clear text"),
     ("pure-ftpd.service", "FTP sends the password in clear text"),
     ("tftpd-hpa.service", "TFTP has no authentication at all"),
+    ("atftpd.service", "TFTP has no authentication at all"),
+    (
+        "rsync.service",
+        "rsync as a daemon serves files with no authentication by default",
+    ),
     ("nfs-server.service", "exports a filesystem to the network"),
+    (
+        "nfs-kernel-server.service",
+        "exports a filesystem to the network",
+    ),
     (
         "rpcbind.service",
         "reachable RPC surface with no authentication",
     ),
     (
+        "rpcbind.socket",
+        "reachable RPC surface with no authentication",
+    ),
+    // --- directory and name services ----------------------------------------
+    (
         "ypserv.service",
         "NIS distributes the password database over the network",
     ),
     (
-        "snmpd.service",
-        "the default community string is a password everyone knows",
+        "ypbind.service",
+        "NIS client; binds to whichever server answers first",
+    ),
+    (
+        "nis.service",
+        "NIS distributes the password database over the network",
+    ),
+    (
+        "slapd.service",
+        "an LDAP directory server on a machine that is not one",
+    ),
+    (
+        "bind9.service",
+        "an open resolver is an amplification vector",
+    ),
+    (
+        "named.service",
+        "an open resolver is an amplification vector",
+    ),
+    ("dnsmasq.service", "a DNS and DHCP server on a workstation"),
+    (
+        "isc-dhcp-server.service",
+        "a rogue DHCP server can redirect the whole subnet",
     ),
     (
         "avahi-daemon.service",
         "advertises the machine and its services on the LAN",
     ),
     (
-        "cups.service",
-        "a network print server on a machine that is not one",
+        "avahi-daemon.socket",
+        "advertises the machine and its services on the LAN",
     ),
-    (
-        "cups-browsed.service",
-        "discovers and trusts printers advertised on the LAN",
-    ),
-    (
-        "bind9.service",
-        "an open resolver is an amplification vector",
-    ),
+    // --- servers a workstation is not --------------------------------------
     ("nginx.service", "a web server on a machine that is not one"),
     (
         "apache2.service",
+        "a web server on a machine that is not one",
+    ),
+    ("httpd.service", "a web server on a machine that is not one"),
+    (
+        "lighttpd.service",
         "a web server on a machine that is not one",
     ),
     (
@@ -383,14 +664,87 @@ pub const PROHIBITED_SERVICES: &[(&str, &str)] = &[
     ("dovecot.service", "an IMAP/POP server"),
     ("postfix.service", "an MTA that will relay if misconfigured"),
     ("exim4.service", "an MTA that will relay if misconfigured"),
+    (
+        "sendmail.service",
+        "an MTA that will relay if misconfigured",
+    ),
     ("squid.service", "an open proxy"),
     (
-        "nis.service",
-        "NIS distributes the password database over the network",
+        "snmpd.service",
+        "the default community string is a password everyone knows",
     ),
+    (
+        "cups.service",
+        "a network print server on a machine that is not one",
+    ),
+    (
+        "cups-browsed.service",
+        "discovers and trusts printers advertised on the LAN",
+    ),
+    (
+        "cups.socket",
+        "a network print server on a machine that is not one",
+    ),
+    // --- remote desktop, which is rarely wanted and always noisy ------------
+    (
+        "vncserver.service",
+        "VNC has no transport encryption of its own",
+    ),
+    (
+        "x11vnc.service",
+        "VNC has no transport encryption of its own",
+    ),
+    ("vino-server.service", "screen sharing left on by default"),
+    (
+        "xrdp.service",
+        "remote desktop; keep only if the README asks for it",
+    ),
+    // --- superservers, which start whichever of the above are configured ----
     (
         "xinetd.service",
         "starts whichever of the above are configured under it",
+    ),
+    (
+        "openbsd-inetd.service",
+        "starts whichever of the above are configured under it",
+    ),
+    (
+        "inetd.service",
+        "starts whichever of the above are configured under it",
+    ),
+    // --- local surface that is scored, and unused on a competition image ----
+    (
+        "bluetooth.service",
+        "a wireless attack surface on a virtual machine",
+    ),
+    (
+        "atd.service",
+        "a second scheduler, less visible than cron and just as capable",
+    ),
+    (
+        "apport.service",
+        "crash reports can carry memory contents off the machine",
+    ),
+    ("whoopsie.service", "sends crash reports to Canonical"),
+    (
+        "kerneloops.service",
+        "sends kernel oops reports off the machine",
+    ),
+    (
+        "speech-dispatcher.service",
+        "unused on a server, and runs as a daemon",
+    ),
+    (
+        "ModemManager.service",
+        "manages hardware a virtual machine does not have",
+    ),
+    (
+        "autofs.service",
+        "mounts filesystems automatically, including removable media",
+    ),
+    (
+        "zeitgeist-fts.service",
+        "activity logger frequently repurposed as a keylogger",
     ),
 ];
 
@@ -419,6 +773,177 @@ pub const NEVER_DISABLE: &[&str] = &[
     "ufw",
     "apparmor",
     "sudo",
+];
+
+/// Where the module blacklist is written.
+///
+/// `install <module> /bin/false` is what actually prevents loading; `blacklist`
+/// alone only stops *automatic* loading and is bypassed by an explicit
+/// `modprobe`. Both are written, because a scored check may look for either.
+pub const MODPROBE_DROPIN: &str = "/etc/modprobe.d/99-pinnacle.conf";
+
+/// Kernel modules to prevent loading, and why.
+///
+/// The filesystem drivers are the CIS list: none of them is used by a
+/// competition image, each is a parser reachable from a mountable device, and
+/// several have had memory-corruption bugs. The network protocols are the same
+/// argument - a workstation speaks TCP and UDP.
+///
+/// `usb-storage` is the one to think about before applying: on a physical
+/// machine it stops USB drives working, which is the point, but it would also
+/// stop a legitimate one. On the virtual machine a round runs on there is no
+/// USB device to lose.
+pub const MODULES_TO_BLOCK: &[(&str, &str)] = &[
+    // Unused filesystem drivers, each reachable by mounting a crafted image.
+    ("cramfs", "unused filesystem driver"),
+    ("freevxfs", "unused filesystem driver"),
+    ("jffs2", "unused filesystem driver"),
+    ("hfs", "unused filesystem driver"),
+    ("hfsplus", "unused filesystem driver"),
+    ("squashfs", "unused filesystem driver"),
+    ("udf", "unused filesystem driver"),
+    // vfat is deliberately absent. CIS leaves it out too: a UEFI machine mounts
+    // /boot/efi as vfat, and blocking the module there stops the image booting.
+    // "Unused filesystem" has to mean unused, not merely unfamiliar.
+    // Unused network protocols, each a kernel-level parser on the wire.
+    ("dccp", "unused network protocol"),
+    ("sctp", "unused network protocol"),
+    ("rds", "unused network protocol"),
+    ("tipc", "unused network protocol"),
+    // Hardware a virtual machine does not have, or should not use.
+    (
+        "usb-storage",
+        "removable storage is a route in and a route out",
+    ),
+    ("firewire-core", "DMA over FireWire can read all of memory"),
+    (
+        "bluetooth",
+        "a wireless attack surface on a virtual machine",
+    ),
+];
+
+/// Files whose permissions are scored, as `(path, octal mode, owner:group, why)`.
+///
+/// These are the ones a competition image ships wrong often enough to be worth
+/// checking every run. `/etc/shadow` is the one that matters most: at 0644 every
+/// user on the machine can read the password hashes and take them away to crack
+/// offline, and nothing about the system behaves differently, so it is
+/// invisible until someone looks.
+pub const CRITICAL_FILE_MODES: &[(&str, u32, &str, &str)] = &[
+    (
+        "/etc/passwd",
+        0o644,
+        "root:root",
+        "world-readable by design; must not be writable",
+    ),
+    (
+        "/etc/passwd-",
+        0o644,
+        "root:root",
+        "the backup is as sensitive as the file",
+    ),
+    (
+        "/etc/group",
+        0o644,
+        "root:root",
+        "world-readable by design; must not be writable",
+    ),
+    (
+        "/etc/group-",
+        0o644,
+        "root:root",
+        "the backup is as sensitive as the file",
+    ),
+    (
+        "/etc/shadow",
+        0o640,
+        "root:shadow",
+        "holds the password hashes",
+    ),
+    (
+        "/etc/shadow-",
+        0o640,
+        "root:shadow",
+        "the backup holds them too",
+    ),
+    (
+        "/etc/gshadow",
+        0o640,
+        "root:shadow",
+        "holds the group password hashes",
+    ),
+    (
+        "/etc/gshadow-",
+        0o640,
+        "root:shadow",
+        "the backup holds them too",
+    ),
+    (
+        "/etc/ssh/sshd_config",
+        0o600,
+        "root:root",
+        "readable config tells an attacker what is allowed",
+    ),
+    (
+        "/etc/crontab",
+        0o600,
+        "root:root",
+        "a writable crontab is root access",
+    ),
+    (
+        "/etc/cron.hourly",
+        0o700,
+        "root:root",
+        "a writable cron directory is root access",
+    ),
+    (
+        "/etc/cron.daily",
+        0o700,
+        "root:root",
+        "a writable cron directory is root access",
+    ),
+    (
+        "/etc/cron.weekly",
+        0o700,
+        "root:root",
+        "a writable cron directory is root access",
+    ),
+    (
+        "/etc/cron.monthly",
+        0o700,
+        "root:root",
+        "a writable cron directory is root access",
+    ),
+    (
+        "/etc/cron.d",
+        0o700,
+        "root:root",
+        "a writable cron directory is root access",
+    ),
+    (
+        "/boot/grub/grub.cfg",
+        0o600,
+        "root:root",
+        "the boot configuration can add kernel arguments",
+    ),
+];
+
+/// Files in a home directory that grant access without a password.
+///
+/// `.rhosts` and `.shosts` name hosts whose users may log in as this account
+/// with no credential at all. `.netrc` stores a password in clear text. None of
+/// them is legitimate on a competition image.
+pub const DANGEROUS_DOTFILES: &[(&str, &str)] = &[
+    (
+        ".rhosts",
+        "lets named hosts log in as this user with no password",
+    ),
+    (".shosts", "the SSH equivalent of .rhosts"),
+    (".netrc", "stores a password in clear text"),
+    (
+        ".forward",
+        "silently forwards this account's mail off the machine",
+    ),
 ];
 
 /// Display names a README might use, mapped to the systemd unit.

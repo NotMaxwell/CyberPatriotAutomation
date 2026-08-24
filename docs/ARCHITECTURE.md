@@ -127,12 +127,12 @@ alongside it until 2026-08-23 and is now frozen under
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
 | Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.18.0 | 1.8.0, frozen |
+| Version | 1.19.0 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |
-| Tests | 354 | 202, frozen |
+| Tests | 381 | 202, frozen |
 | Published size | ~2.7 MB | ~42 MB self-contained |
 | Startup | immediate, no runtime | JIT + runtime |
 
@@ -251,7 +251,7 @@ unrepresentable, and two tests pin it (`every_platform_task_is_accepted_by_the_v
 
 ## 3.2 Linux
 
-The Linux platform ships **thirteen tasks**, built on the same contract as the
+The Linux platform ships **fifteen tasks**, built on the same contract as the
 Windows ones: read the state, skip if it is already right, write, read it back
 as proof.
 
@@ -269,12 +269,14 @@ is no row for it — and a test asserts that.
 | `--service-management`, `-s` | Service Management | `systemctl` mask/enable |
 | `--audit-policy`, `-t` | Audit Policy | `auditd`, `rsyslog`, `rules.d` |
 | `--firewall`, `-f` | Firewall | `ufw` |
-| `--security-hardening`, `-H` | Security Hardening | `sysctl.d`, `sshd_config.d`, `login.defs` |
+| `--security-hardening`, `-H` | Security Hardening | `sysctl.d`, `sshd_config.d`, `login.defs`, `modprobe.d`, banners |
 | `--media-scan`, `-m` | Prohibited Media | filesystem scan of `/home`, `/root` |
 | `--software-updates` | Software Updates | `apt upgrade`, `unattended-upgrades` |
 | `--software-management` | Software Management | `apt purge` / `apt install` |
 | `--hosts-file` | Hosts File Audit | `/etc/hosts` |
 | `--dns-settings` | DNS Settings Audit | `resolv.conf`, `resolvectl` |
+| `--file-permissions` | File Permissions Audit | 16 scored modes; `find` for the rest |
+| `--shared-folders` | Shared Folders Audit | `smb.conf`, `/etc/exports` |
 | `--scheduled-tasks` | Scheduled Tasks Audit | six cron locations, systemd timers |
 
 The flags and short flags match the Windows ones wherever the concept exists, so
@@ -288,8 +290,29 @@ project needed no work at all: CyberPatriot's Ubuntu READMEs are the same HTML
 in the same shape, and the parser already recognised `ubuntu`, `debian`,
 `fedora` and `linux` as operating systems.
 
-**What is deliberately reported rather than fixed.** Three findings are surfaced
-and left alone, each because acting automatically would be worse than not:
+**The tables are CIS Ubuntu 22.04 derived, and now match the Windows ones:**
+
+| Table | Linux | Windows |
+|---|--:|--:|
+| Hardening settings | 72 | 42 |
+| Prohibited services | 58 | 55 |
+| Audit rules | 34 | 9 categories |
+| Kernel modules blocked | 14 | n/a |
+| Scored file modes | 16 | n/a |
+
+Two of those are worth calling out, because both were nearly got wrong:
+
+- **`vfat` is deliberately not blocked**, as it is not in CIS either. A UEFI
+  machine mounts `/boot/efi` as vfat, and blocking the module there stops the
+  image booting. "Unused filesystem" has to mean unused, not merely unfamiliar.
+- **`auditd`'s full-disk action is `single`, not the `halt` CIS asks for.**
+  Halting is right for a server with an administrator watching and wrong for a
+  competition image: a disk that fills mid-round would power the machine off and
+  end the round with whatever score it had.
+
+**What is deliberately reported rather than fixed.** Several findings are
+surfaced and left alone, each because acting automatically would be worse than
+not:
 
 - **A second uid 0 account.** It may be the only account anyone can log in as.
 - **Suspicious cron jobs.** A cron line's meaning depends entirely on context —
@@ -298,6 +321,13 @@ and left alone, each because acting automatically would be worse than not:
 - **The resolvers in use.** What the *correct* resolver is depends on the
   network the image is on; rewriting it to a public one breaks a corporate
   scenario that scores internal name resolution.
+- **World-writable, unowned and unexpected setuid files.** A world-writable file
+  under `/opt` may be a vendor's installer doing something ugly but necessary,
+  and a setuid binary may be the one the round requires. Breaking working
+  software to score nothing is the worse trade.
+- **Every Samba share and NFS export.** A share may be exactly what the round
+  requires — a README naming Samba as critical means the machine is a file
+  server — so the options are graded and the definitions left alone.
 
 Media files are also reported rather than deleted unless the README's scenario
 text actually prohibits them — a round set at a media production company does
@@ -1852,7 +1882,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 354 tests
+cargo test --workspace                  # 381 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat

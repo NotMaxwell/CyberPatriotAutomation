@@ -22,6 +22,7 @@ use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::task::Task;
 use pinnacle_core::{command, impl_task_meta, remediation, ui};
 
+use crate::file_ops::Style;
 use crate::{apt, file_ops, systemd_ops};
 use async_trait::async_trait;
 
@@ -70,6 +71,121 @@ const AUDIT_RULES: &[(&str, &str)] = &[
     ),
     ("-w /sbin/insmod -p x -k modules", "kernel module loading"),
     ("-w /sbin/modprobe -p x -k modules", "kernel module loading"),
+    ("-w /sbin/rmmod -p x -k modules", "kernel module unloading"),
+    (
+        "-w /etc/pam.d/ -p wa -k pam",
+        "changes to how authentication works",
+    ),
+    (
+        "-w /etc/security/ -p wa -k pam",
+        "changes to the password and lockout policy",
+    ),
+    (
+        "-w /etc/login.defs -p wa -k logins",
+        "changes to the account ageing defaults",
+    ),
+    (
+        "-w /etc/sysctl.conf -p wa -k sysctl",
+        "changes to the kernel hardening",
+    ),
+    (
+        "-w /etc/sysctl.d/ -p wa -k sysctl",
+        "changes to the kernel hardening",
+    ),
+    (
+        "-w /etc/modprobe.d/ -p wa -k modules",
+        "changes to the module blacklist",
+    ),
+    (
+        "-w /var/log/faillog -p wa -k logins",
+        "tampering with the failed-login record",
+    ),
+    (
+        "-w /var/log/lastlog -p wa -k logins",
+        "tampering with the last-login record",
+    ),
+    (
+        "-w /var/run/utmp -p wa -k session",
+        "tampering with the who-is-logged-in record",
+    ),
+    (
+        "-w /var/log/wtmp -p wa -k session",
+        "tampering with the login history",
+    ),
+    (
+        "-w /var/log/btmp -p wa -k session",
+        "tampering with the failed-login history",
+    ),
+    (
+        "-w /etc/systemd/ -p wa -k persistence",
+        "a unit file is persistence",
+    ),
+    (
+        "-w /etc/fstab -p wa -k mounts",
+        "an added mount can shadow a system directory",
+    ),
+    (
+        "-w /etc/hosts.allow -p wa -k network",
+        "host-based access control",
+    ),
+    (
+        "-w /etc/hosts.deny -p wa -k network",
+        "host-based access control",
+    ),
+    ("-w /usr/bin/sudo -p x -k privilege", "every use of sudo"),
+    (
+        "-w /var/log/sudo.log -p wa -k privilege",
+        "tampering with the sudo log",
+    ),
+    (
+        "-w /etc/ufw/ -p wa -k network",
+        "changes to the firewall rules",
+    ),
+    (
+        "-w /etc/apt/sources.list -p wa -k software",
+        "a added repository can install anything",
+    ),
+    (
+        "-w /etc/apt/sources.list.d/ -p wa -k software",
+        "a added repository can install anything",
+    ),
+];
+
+/// `auditd`'s own configuration.
+///
+/// The defaults are the problem: `max_log_file_action = ROTATE` with eight
+/// files silently discards the oldest records, and `space_left_action = SYSLOG`
+/// means a full disk stops the audit trail without stopping anything else. On a
+/// competition image the sensible answer is to keep more history and to make
+/// running out of space loud rather than silent - but *not* to halt the machine,
+/// which is what the strictest CIS setting does and which would end the round.
+const AUDITD_SETTINGS: &[(&str, &str, &str)] = &[
+    (
+        "max_log_file",
+        "32",
+        "megabytes per log file before it rotates",
+    ),
+    (
+        "max_log_file_action",
+        "keep_logs",
+        "keep the history rather than overwriting the oldest",
+    ),
+    (
+        "space_left_action",
+        "email",
+        "warn while there is still room, rather than only at the end",
+    ),
+    (
+        // CIS asks for `halt` here. That is right for a server with an
+        // administrator watching and wrong for a competition image: a disk that
+        // fills mid-round would power the machine off and end the round with
+        // whatever score it had. `single` drops to single-user mode, which is
+        // loud, recoverable, and does not stop the scoring engine reporting.
+        "admin_space_left_action",
+        "single",
+        "loud and recoverable, rather than halting the machine mid-round",
+    ),
+    ("num_logs", "5", "how many rotated files to keep"),
 ];
 
 /// Services that must be running for anything to be recorded at all.
@@ -222,6 +338,19 @@ impl Task for AuditPolicyTask {
             }
         }
 
+        // auditd's own configuration. Written after the service is installed,
+        // since the file does not exist before that.
+        if systemd_ops::exists("auditd.service").await {
+            for (key, value, why) in AUDITD_SETTINGS {
+                match file_ops::set("/etc/audit/auditd.conf", Style::Equals, key, value, why).await
+                {
+                    Ok(()) => result.items_succeeded += 1,
+                    Err(e) => failures.push(format!("auditd.conf {key}: {e}")),
+                }
+            }
+            result.items_attempted += AUDITD_SETTINGS.len() as i32;
+        }
+
         result.success = failures.is_empty();
         result.message = format!(
             "{} logging services running, {} audit rules written.",
@@ -275,6 +404,30 @@ mod tests {
             text.lines().filter(|l| file_ops::is_active(l)).count(),
             AUDIT_RULES.len()
         );
+    }
+
+    /// The CIS setting here is `halt`, and it is wrong for this image: a disk
+    /// that fills mid-round would power the machine off and end the round with
+    /// whatever score it had at the time.
+    #[test]
+    fn a_full_disk_does_not_halt_the_machine() {
+        let action = AUDITD_SETTINGS
+            .iter()
+            .find(|(key, _, _)| *key == "admin_space_left_action")
+            .expect("the full-disk action must be set");
+        assert_ne!(action.1, "halt", "halting mid-round ends the round");
+        assert_eq!(action.1, "single");
+    }
+
+    /// Rotating over the oldest records means the audit trail quietly loses the
+    /// beginning of an incident, which is the part worth having.
+    #[test]
+    fn the_audit_history_is_kept_rather_than_overwritten() {
+        let action = AUDITD_SETTINGS
+            .iter()
+            .find(|(key, _, _)| *key == "max_log_file_action")
+            .unwrap();
+        assert_eq!(action.1, "keep_logs");
     }
 
     /// The files an attacker has to touch to persist. Missing any of these

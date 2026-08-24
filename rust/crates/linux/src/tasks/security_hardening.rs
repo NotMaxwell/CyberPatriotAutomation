@@ -33,9 +33,12 @@ use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::task::Task;
 use pinnacle_core::{impl_task_meta, models::ReadmeData, ui};
 
-use crate::knowledge::{HARDENING_SETTINGS, SSHD_DROPIN, SYSCTL_DROPIN};
+use crate::knowledge::{
+    HARDENING_SETTINGS, MODPROBE_DROPIN, MODULES_TO_BLOCK, SSHD_DROPIN, SYSCTL_DROPIN,
+};
 use crate::{file_ops, readme_services, systemd_ops};
 use async_trait::async_trait;
+use pinnacle_core::remediation;
 
 pub struct SecurityHardeningTask {
     name: String,
@@ -142,6 +145,31 @@ impl Task for SecurityHardeningTask {
             }
         }
 
+        // --- kernel modules ----------------------------------------------
+        //
+        // Written as a whole file rather than through `file_ops::set`: a
+        // modprobe drop-in is a list of directives, not a set of key/value
+        // pairs, and two lines per module both name the module rather than
+        // being keyed by it.
+        match write_module_blacklist().await {
+            Ok(()) => result.items_succeeded += 1,
+            Err(e) => failures.push(format!("{MODPROBE_DROPIN} ({e})")),
+        }
+        result.items_attempted += 1;
+
+        // --- login banners --------------------------------------------------
+        //
+        // Scored, and trivially missed: the stock `/etc/issue` on Ubuntu prints
+        // the distribution and kernel version, which tells an attacker exactly
+        // which exploits to try before they have authenticated.
+        for path in BANNER_FILES {
+            match write_banner(path).await {
+                Ok(()) => result.items_succeeded += 1,
+                Err(e) => failures.push(format!("{path} ({e})")),
+            }
+        }
+        result.items_attempted += BANNER_FILES.len() as i32;
+
         // A written sysctl file changes nothing until it is loaded. Without
         // this the settings are correct on the next boot and wrong right now,
         // and a scored check that reads the live value sees the old one.
@@ -211,6 +239,104 @@ impl Task for SecurityHardeningTask {
     }
 }
 
+/// The banner files a login shows, in order of when they are seen.
+const BANNER_FILES: &[&str] = &["/etc/issue", "/etc/issue.net", "/etc/motd"];
+
+/// What the banner says.
+///
+/// Deliberately free of `\\n`, `\\s`, `\\m`, `\\r` and `\\v` - the escapes the
+/// stock Ubuntu `/etc/issue` uses, which print the hostname, distribution and
+/// kernel version *before* anyone has authenticated. That tells an attacker
+/// which exploits to try, and it is what the scored check is looking for the
+/// absence of.
+const BANNER_TEXT: &str = "\
+Authorized users only. All activity may be monitored and reported.
+Unauthorized access to this system is prohibited and will be prosecuted.
+";
+
+/// Write one banner file, and prove it.
+async fn write_banner(path: &str) -> Result<(), String> {
+    remediation::apply(
+        path,
+        "a legal notice with no system information in it",
+        || async {
+            Some(match tokio::fs::read_to_string(path).await {
+                Ok(text) => {
+                    // The escapes are what matters, not the wording: a banner
+                    // that leaks the kernel version fails the check however
+                    // sternly it is worded.
+                    if text.contains('\\') {
+                        "leaks system information".to_string()
+                    } else if text.trim().is_empty() {
+                        "empty".to_string()
+                    } else {
+                        "a plain notice".to_string()
+                    }
+                }
+                Err(_) => "absent".to_string(),
+            })
+        },
+        |state| state == "a plain notice",
+        "wrote a legal notice with no escapes in it",
+        || async {
+            tokio::fs::write(path, BANNER_TEXT)
+                .await
+                .map_err(|e| format!("could not write {path}: {e}"))
+        },
+    )
+    .await
+}
+
+/// The modprobe drop-in, as text.
+pub fn module_blacklist_text() -> String {
+    let mut out = String::from("# Written by PinnacleCyPat.\n");
+    out.push_str(
+        "# `install ... /bin/false` is what prevents loading; `blacklist` alone only\n\
+         # stops automatic loading and is bypassed by an explicit modprobe.\n\n",
+    );
+    for (module, why) in MODULES_TO_BLOCK {
+        out.push_str(&format!(
+            "# {why}\ninstall {module} /bin/false\nblacklist {module}\n\n"
+        ));
+    }
+    out
+}
+
+/// Write the modprobe drop-in, and prove it.
+async fn write_module_blacklist() -> Result<(), String> {
+    let wanted = module_blacklist_text();
+    remediation::apply(
+        MODPROBE_DROPIN,
+        &format!(
+            "{} unused kernel modules cannot be loaded",
+            MODULES_TO_BLOCK.len()
+        ),
+        || async {
+            Some(match tokio::fs::read_to_string(MODPROBE_DROPIN).await {
+                Ok(text) => {
+                    let blocked = MODULES_TO_BLOCK
+                        .iter()
+                        .filter(|(m, _)| text.contains(&format!("install {m} /bin/false")))
+                        .count();
+                    format!("{blocked} blocked")
+                }
+                Err(_) => "absent".to_string(),
+            })
+        },
+        |state| state == format!("{} blocked", MODULES_TO_BLOCK.len()),
+        &format!("wrote {MODPROBE_DROPIN}"),
+        || async {
+            if let Some(parent) = std::path::Path::new(MODPROBE_DROPIN).parent() {
+                let _ = tokio::fs::create_dir_all(parent).await;
+            }
+            tokio::fs::write(MODPROBE_DROPIN, &wanted)
+                .await
+                .map_err(|e| format!("could not write {MODPROBE_DROPIN}: {e}"))
+        },
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,6 +378,48 @@ mod tests {
             ..Default::default()
         });
         assert!(task.ssh_is_required());
+    }
+
+    /// Both directives are needed. `blacklist` alone only stops *automatic*
+    /// loading, so `modprobe cramfs` still works and the check still fails.
+    #[test]
+    fn every_blocked_module_gets_both_directives() {
+        let text = module_blacklist_text();
+        for (module, why) in MODULES_TO_BLOCK {
+            assert!(
+                text.contains(&format!("install {module} /bin/false")),
+                "{module} has no install directive"
+            );
+            assert!(
+                text.contains(&format!("blacklist {module}")),
+                "{module} has no blacklist directive"
+            );
+            assert!(text.contains(why), "{module} has no reason recorded");
+        }
+    }
+
+    /// Blocking vfat would stop a UEFI machine mounting /boot/efi, and
+    /// therefore booting. "Unused filesystem" has to mean unused.
+    #[test]
+    fn the_filesystem_a_uefi_machine_boots_from_is_not_blocked() {
+        assert!(
+            !MODULES_TO_BLOCK.iter().any(|(m, _)| *m == "vfat"),
+            "blocking vfat can make the image unbootable"
+        );
+        assert!(!MODULES_TO_BLOCK.iter().any(|(m, _)| *m == "ext4"));
+    }
+
+    /// The escapes are the finding, not the wording. Ubuntu's stock /etc/issue
+    /// is `Ubuntu 22.04 LTS \\n \\l`, which prints the distribution and the
+    /// terminal before anyone has authenticated.
+    #[test]
+    fn the_banner_carries_no_system_information() {
+        assert!(
+            !BANNER_TEXT.contains('\\'),
+            "an escape in the banner leaks system information: {BANNER_TEXT}"
+        );
+        assert!(BANNER_TEXT.to_lowercase().contains("authorized"));
+        assert!(BANNER_TEXT.ends_with('\n'));
     }
 
     /// Hardening SSH is pointless if the settings land somewhere sshd does not
