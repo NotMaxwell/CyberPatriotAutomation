@@ -63,19 +63,110 @@ pub fn desktop_dir() -> PathBuf {
     PathBuf::from("Desktop")
 }
 
+/// Where a competition image installs its own resources.
+///
+/// The case matters: the directory on an Ubuntu image is `/opt/CyberPatriot`,
+/// and Linux filesystems are case-sensitive, so the lower-case spelling that
+/// looks natural in code finds nothing. Both are listed rather than picking
+/// one, since a fixture or a hand-made image may use either.
+#[cfg(not(windows))]
+const CYBERPATRIOT_DIRS: &[&str] = &[
+    "/opt/CyberPatriot",
+    "/opt/cyberpatriot",
+    "/usr/share/CyberPatriot",
+    "/usr/share/cyberpatriot",
+    "/etc/CyberPatriot",
+];
+
+#[cfg(windows)]
+const CYBERPATRIOT_DIRS: &[&str] = &[r"C:\CyberPatriot"];
+
+/// Every directory worth scanning for a README shortcut, in priority order.
+///
+/// On Linux this matters more than it looks. The tool has to run as root, and
+/// `sudo` rewrites `HOME` to `/root` - so `desktop_dir()` points at
+/// `/root/Desktop` while the launcher the competitor can see is on
+/// `/home/perry/Desktop`. Looking only where `HOME` says finds nothing on the
+/// one image this is written for.
+///
+/// `SUDO_USER` names the account that invoked sudo and is checked first,
+/// because it is the person whose desktop the README is on. Every other home
+/// directory is scanned after that, since an image may auto-login as one
+/// account and store the README under another.
+pub fn readme_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let push = |dir: PathBuf, dirs: &mut Vec<PathBuf>| {
+        if dir.is_dir() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    };
+
+    // The canonical location first, on both platforms. `C:\CyberPatriot` on
+    // Windows; `/opt/CyberPatriot` on Ubuntu, where the round's resources -
+    // including the README launcher - are installed.
+    //
+    // Scanned as a directory rather than probed by file name, because the
+    // launcher is not called `README.desktop`. It is called whatever the round
+    // named it: "Exhibition Round Ubuntu 22.04 README". A fixed-name lookup
+    // finds nothing.
+    for dir in CYBERPATRIOT_DIRS {
+        push(PathBuf::from(dir), &mut dirs);
+    }
+
+    #[cfg(not(windows))]
+    if let Ok(user) = std::env::var("SUDO_USER") {
+        push(PathBuf::from(format!("/home/{user}/Desktop")), &mut dirs);
+    }
+
+    push(desktop_dir(), &mut dirs);
+    push(common_desktop_dir(), &mut dirs);
+
+    #[cfg(not(windows))]
+    {
+        // Every other human's desktop, sorted so the answer does not depend on
+        // the order the filesystem happens to return.
+        let mut homes: Vec<PathBuf> = std::fs::read_dir("/home")
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path().join("Desktop"))
+            .collect();
+        homes.sort();
+        for home in homes {
+            push(home, &mut dirs);
+        }
+        push(PathBuf::from("/root/Desktop"), &mut dirs);
+    }
+
+    dirs
+}
+
 /// The machine-wide (common) desktop directory.
 pub fn common_desktop_dir() -> PathBuf {
     PathBuf::from(r"C:\Users\Public\Desktop")
 }
 
-/// Default CyberPatriot competition README paths on Windows images.
+/// Default CyberPatriot competition README paths.
 ///
-/// A standard image ships `C:\CyberPatriot\README.url` - an *Internet
-/// Shortcut*, not the document itself. It is listed first because it is the
-/// canonical location; [`resolve_readme_candidate`] follows it to the HTML file
-/// it names. The literal `.html` paths remain for images that place the
-/// document directly.
+/// A standard image does not ship the README as a file. Windows puts an
+/// *Internet Shortcut* at `C:\CyberPatriot\README.url`; Ubuntu puts a
+/// freedesktop launcher on the Desktop. Both name an https:// address, and
+/// [`resolve_readme_candidate`] follows either to the document. The literal
+/// `.html` paths remain for images that place the document directly.
 pub fn default_readme_paths() -> Vec<String> {
+    #[cfg(windows)]
+    {
+        windows_readme_paths()
+    }
+    #[cfg(not(windows))]
+    {
+        linux_readme_paths()
+    }
+}
+
+/// The Windows candidates, in the order they are worth trying.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_readme_paths() -> Vec<String> {
     vec![
         r"C:\CyberPatriot\README.url".to_string(),
         r"C:\CyberPatriot\README.html".to_string(),
@@ -104,6 +195,48 @@ pub fn default_readme_paths() -> Vec<String> {
     ]
 }
 
+/// The Linux candidates.
+///
+/// The `.desktop` launcher is listed first because it is what an Ubuntu image
+/// actually ships - and its file name is not `README.desktop`. It is whatever
+/// the round called it, which on the Ubuntu 22.04 Exhibition Round is
+/// "Exhibition Round Ubuntu 22.04 README". So the named paths below are a
+/// convenience for images that do place a file, and the real discovery is the
+/// wildcard scan of every Desktop directory, which
+/// [`find_readme_shortcut`] does by matching the *name* rather than the path.
+#[cfg_attr(windows, allow(dead_code))]
+fn linux_readme_paths() -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut dirs: Vec<&str> = CYBERPATRIOT_DIRS.to_vec();
+    dirs.push("/root/Desktop");
+    for dir in dirs {
+        for name in ["README.desktop", "README.html", "README.htm", "readme.html"] {
+            paths.push(format!("{dir}/{name}"));
+        }
+    }
+    for name in ["README.desktop", "README.html", "README.htm", "readme.html"] {
+        paths.push(desktop_dir().join(name).to_string_lossy().into_owned());
+        paths.push(
+            home_dir()
+                .join("Documents")
+                .join(name)
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    // Fallback: any user's desktop, which is where the launcher actually is.
+    paths.push("/home/*/Desktop/README.desktop".to_string());
+    paths.push("/home/*/Desktop/README.html".to_string());
+    paths
+}
+
+/// The current user's home directory.
+fn home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/root"))
+}
+
 /// Try to find the README file automatically.
 ///
 /// On a real CyberPatriot image the README is rarely the HTML document itself:
@@ -124,7 +257,7 @@ pub async fn find_readme_file() -> Option<String> {
 /// human-readable line per candidate.
 pub async fn find_readme_file_reporting(attempts: &mut Vec<String>) -> Option<String> {
     // Desktop shortcuts first - that is what a competitor actually clicks.
-    for dir in [desktop_dir(), common_desktop_dir()] {
+    for dir in readme_search_dirs() {
         match find_readme_shortcut(&dir).await {
             Some(found) => {
                 attempts.push(format!("{} -> {found}", dir.to_string_lossy()));
@@ -215,6 +348,17 @@ pub async fn resolve_readme_candidate(path: &Path) -> Option<String> {
                 to_local_path(&target)?
             }
             "lnk" => resolve_shortcut_target(&current).await?,
+            // The Linux equivalent of a `.url`, and the form an Ubuntu
+            // competition image ships: a freedesktop launcher on the Desktop
+            // whose target is the README's address.
+            "desktop" => {
+                let contents = read_text_lenient(&current)?;
+                let target = parse_desktop_entry(&contents)?;
+                if is_remote_target(&target) {
+                    return download_readme(&target).await;
+                }
+                to_local_path(&target)?
+            }
             // Not a shortcut: this is the document itself.
             _ => {
                 return current
@@ -281,20 +425,29 @@ async fn download_readme(url: &str) -> Option<String> {
 /// address is a different problem from pointing at a file that is not there,
 /// and neither is visible from a bare "could not be resolved".
 fn describe_unresolvable(path: &Path) -> String {
-    let is_url = path
+    let extension = path
         .extension()
-        .map(|e| e.eq_ignore_ascii_case("url"))
-        .unwrap_or(false);
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
 
-    if !is_url {
+    if !matches!(extension.as_str(), "url" | "desktop") {
         return "exists but could not be resolved to a readable file".to_string();
     }
 
     let Some(contents) = read_text_lenient(path) else {
         return "shortcut could not be read".to_string();
     };
-    let Some(target) = parse_internet_shortcut(&contents) else {
-        return "shortcut has no URL= entry".to_string();
+    let parsed = if extension == "desktop" {
+        parse_desktop_entry(&contents)
+    } else {
+        parse_internet_shortcut(&contents)
+    };
+    let Some(target) = parsed else {
+        return if extension == "desktop" {
+            "launcher has no URL= entry and no address in its Exec= line".to_string()
+        } else {
+            "shortcut has no URL= entry".to_string()
+        };
     };
 
     if is_remote_target(&target) {
@@ -354,6 +507,65 @@ pub fn parse_internet_shortcut(contents: &str) -> Option<String> {
             .eq_ignore_ascii_case("URL")
             .then(|| value.trim().to_string())
     })
+}
+
+/// Read the target out of a freedesktop `.desktop` launcher.
+///
+/// This is how an Ubuntu competition image ships its README: not as a file, and
+/// not as a `.url`, but as a launcher on the Desktop. Two shapes appear, and
+/// both are handled because which one an image uses is not predictable:
+///
+/// ```text
+/// [Desktop Entry]          [Desktop Entry]
+/// Type=Link                Type=Application
+/// URL=https://...          Exec=firefox https://...
+/// ```
+///
+/// The `Exec=` form needs more care than it looks. The value is a command line,
+/// so the address is one token among several and may be quoted; and it can
+/// carry freedesktop *field codes* - `%u`, `%U`, `%f`, `%F` - which are
+/// placeholders the desktop environment substitutes, not part of the address.
+/// Passing `https://example.com/x.html %u` to a downloader fetches nothing.
+pub fn parse_desktop_entry(contents: &str) -> Option<String> {
+    let mut exec_line: Option<&str> = None;
+
+    for line in contents.lines() {
+        let line = line.trim();
+        // Comments, and the `[Desktop Entry]` group header.
+        if line.starts_with('#') || line.starts_with('[') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        // `URL=` is unambiguous, so it wins outright when present.
+        if key.eq_ignore_ascii_case("URL") && !value.is_empty() {
+            return Some(value.to_string());
+        }
+        if key.eq_ignore_ascii_case("Exec") && exec_line.is_none() {
+            exec_line = Some(value);
+        }
+    }
+
+    exec_line.and_then(url_in_command_line)
+}
+
+/// Pull the first http(s) address out of a command line.
+///
+/// Strips the quoting a launcher uses around an argument, and the trailing
+/// punctuation a hand-edited file picks up.
+fn url_in_command_line(command: &str) -> Option<String> {
+    command
+        .split_whitespace()
+        // A field code is a placeholder, not an argument - see
+        // [`parse_desktop_entry`].
+        .filter(|token| !matches!(*token, "%u" | "%U" | "%f" | "%F" | "%i" | "%c" | "%k"))
+        .map(|token| token.trim_matches(|c| matches!(c, '"' | '\'' | ',' | ';')))
+        .find(|token| is_remote_target(token))
+        .map(str::to_string)
 }
 
 /// Convert a shortcut target into a local Windows path, if it names one.
@@ -478,8 +690,14 @@ async fn find_readme_shortcut(dir: &Path) -> Option<String> {
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
-        // `.url` first, then `.lnk`, then by name for determinism.
-        (ext != "url", path.to_string_lossy().to_lowercase())
+        // `.url` first, then `.desktop`, then `.lnk`, then by name for
+        // determinism. Each platform's own form is tried before the others.
+        let rank = match ext.as_str() {
+            "url" => 0,
+            "desktop" => 1,
+            _ => 2,
+        };
+        (rank, path.to_string_lossy().to_lowercase())
     });
 
     for path in candidates {
@@ -493,7 +711,11 @@ async fn find_readme_shortcut(dir: &Path) -> Option<String> {
 /// Is this path a shortcut rather than a document?
 pub fn is_shortcut(path: &Path) -> bool {
     path.extension()
-        .map(|e| e.eq_ignore_ascii_case("url") || e.eq_ignore_ascii_case("lnk"))
+        .map(|e| {
+            e.eq_ignore_ascii_case("url")
+                || e.eq_ignore_ascii_case("lnk")
+                || e.eq_ignore_ascii_case("desktop")
+        })
         .unwrap_or(false)
 }
 
@@ -533,6 +755,155 @@ async fn resolve_shortcut_target(lnk_path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The form an Ubuntu competition image actually ships: a launcher on the
+    /// Desktop whose target is the README's address.
+    #[test]
+    fn a_link_launcher_yields_its_url() {
+        let entry = "\
+[Desktop Entry]
+Encoding=UTF-8
+Name=Exhibition Round Ubuntu 22.04 README
+Type=Link
+URL=https://cp19.s3.us-east-1.amazonaws.com/cp19_exrd/private/readme.html
+Icon=text-html
+";
+        assert_eq!(
+            parse_desktop_entry(entry).as_deref(),
+            Some("https://cp19.s3.us-east-1.amazonaws.com/cp19_exrd/private/readme.html")
+        );
+    }
+
+    /// The other shape: a launcher that opens the address in a browser. The
+    /// address is one token of a command line rather than the whole value.
+    #[test]
+    fn an_exec_launcher_yields_the_address_from_its_command_line() {
+        for exec in [
+            "Exec=firefox https://example.com/readme.html",
+            "Exec=xdg-open https://example.com/readme.html",
+            "Exec=/usr/bin/firefox --new-tab https://example.com/readme.html",
+            "Exec=firefox \"https://example.com/readme.html\"",
+        ] {
+            let entry = format!("[Desktop Entry]\nType=Application\n{exec}\n");
+            assert_eq!(
+                parse_desktop_entry(&entry).as_deref(),
+                Some("https://example.com/readme.html"),
+                "{exec}"
+            );
+        }
+    }
+
+    /// Field codes are placeholders the desktop environment substitutes, not
+    /// part of the address. Passing `%u` to a downloader fetches nothing.
+    #[test]
+    fn freedesktop_field_codes_are_not_mistaken_for_the_address() {
+        let entry =
+            "[Desktop Entry]\nType=Application\nExec=firefox %u https://example.com/r.html\n";
+        assert_eq!(
+            parse_desktop_entry(entry).as_deref(),
+            Some("https://example.com/r.html")
+        );
+    }
+
+    /// `URL=` is unambiguous, so it wins over an `Exec=` line that names
+    /// something else - a launcher can carry both.
+    #[test]
+    fn an_explicit_url_wins_over_the_exec_line() {
+        let entry = "\
+[Desktop Entry]
+Type=Link
+Exec=firefox https://wrong.example/other.html
+URL=https://right.example/readme.html
+";
+        assert_eq!(
+            parse_desktop_entry(entry).as_deref(),
+            Some("https://right.example/readme.html")
+        );
+    }
+
+    #[test]
+    fn a_launcher_with_no_address_yields_nothing() {
+        assert!(
+            parse_desktop_entry("[Desktop Entry]\nType=Application\nExec=gnome-terminal\n")
+                .is_none()
+        );
+        assert!(parse_desktop_entry("").is_none());
+        // The group header is not a key=value line.
+        assert!(parse_desktop_entry("[Desktop Entry]\n").is_none());
+    }
+
+    /// The competition resources live in `/opt/CyberPatriot` - capital C,
+    /// capital P. Linux filesystems are case-sensitive, so the lower-case
+    /// spelling that looks natural in code finds nothing on a real image.
+    #[test]
+    fn the_canonical_resource_directory_is_spelled_the_way_the_image_spells_it() {
+        if cfg!(windows) {
+            assert!(CYBERPATRIOT_DIRS.contains(&r"C:\CyberPatriot"));
+            return;
+        }
+        assert_eq!(
+            CYBERPATRIOT_DIRS.first(),
+            Some(&"/opt/CyberPatriot"),
+            "the canonical directory must be tried first, and with its real case"
+        );
+        assert!(
+            CYBERPATRIOT_DIRS.contains(&"/opt/cyberpatriot"),
+            "a hand-made image may use the lower-case spelling"
+        );
+    }
+
+    /// The launcher is not called `README.desktop` - it is called whatever the
+    /// round named it. So the resource directory has to be *scanned*, which is
+    /// what putting it in the search-dirs list does; probing fixed file names
+    /// there would find nothing.
+    #[tokio::test]
+    async fn the_resource_directory_is_scanned_by_name_not_probed_by_filename() {
+        let root = std::env::temp_dir().join(format!("cpa_optcp_{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let launcher = root.join("Exhibition Round Ubuntu 22.04 README.desktop");
+        std::fs::write(
+            &launcher,
+            "[Desktop Entry]\nType=Link\nURL=file:///nonexistent/readme.html\n",
+        )
+        .unwrap();
+
+        // The name is what identifies it, and the extension is what makes it a
+        // shortcut. Both hold for a launcher named after the round.
+        assert!(is_shortcut(&launcher));
+        assert!(shortcut_name_looks_like_readme(&launcher));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A commented-out entry is not in effect.
+    #[test]
+    fn commented_entries_are_ignored() {
+        let entry = "[Desktop Entry]\n#URL=https://commented.example/x.html\nType=Link\n";
+        assert!(parse_desktop_entry(entry).is_none());
+    }
+
+    /// The launcher on the Ubuntu image is not called `README.desktop` - it is
+    /// called whatever the round named it. Discovery matches on the name
+    /// containing "readme", so this has to hold.
+    #[test]
+    fn the_rounds_own_launcher_name_is_recognised() {
+        for name in [
+            "Exhibition Round Ubuntu 22.04 README.desktop",
+            "README.desktop",
+            "CyberPatriot README.desktop",
+            "Read Me.desktop",
+        ] {
+            let path = Path::new(name);
+            assert!(is_shortcut(path), "{name} should be treated as a shortcut");
+        }
+    }
+
+    #[test]
+    fn a_desktop_launcher_is_a_shortcut_and_a_html_file_is_not() {
+        assert!(is_shortcut(Path::new("/home/perry/Desktop/README.desktop")));
+        assert!(is_shortcut(Path::new("C:/CyberPatriot/README.url")));
+        assert!(!is_shortcut(Path::new("/home/perry/Desktop/README.html")));
+    }
 
     #[test]
     fn wildcard_expands_to_a_real_file_in_the_starred_position() {
@@ -745,8 +1116,15 @@ mod tests {
             !attempts.is_empty(),
             "failed discovery must explain where it looked"
         );
+        // The canonical location differs by platform: `C:\CyberPatriot` on
+        // Windows, somebody's Desktop on Linux.
+        let canonical = if cfg!(windows) {
+            "CyberPatriot"
+        } else {
+            "Desktop"
+        };
         assert!(
-            attempts.iter().any(|a| a.contains("CyberPatriot")),
+            attempts.iter().any(|a| a.contains(canonical)),
             "the canonical image location should appear: {attempts:?}"
         );
     }
@@ -833,8 +1211,32 @@ mod tests {
     #[test]
     fn default_paths_lead_with_the_standard_image_location() {
         let paths = default_readme_paths();
-        assert_eq!(paths[0], r"C:\CyberPatriot\README.url");
+        assert!(!paths.is_empty());
         assert!(paths.iter().any(|p| p.ends_with("README.html")));
+
+        // Each platform leads with the form its own image ships.
+        if cfg!(windows) {
+            assert_eq!(paths[0], r"C:\CyberPatriot\README.url");
+        } else {
+            assert!(
+                paths.iter().any(|p| p.ends_with(".desktop")),
+                "an Ubuntu image ships a launcher, not a file: {paths:?}"
+            );
+        }
+    }
+
+    /// Both platforms' path lists are built, not just the host's - a mistake in
+    /// the one that is not compiled here would not surface until it shipped.
+    #[test]
+    fn both_platforms_have_a_usable_path_list() {
+        for paths in [windows_readme_paths(), linux_readme_paths()] {
+            assert!(!paths.is_empty());
+            assert!(paths.iter().all(|p| !p.trim().is_empty()));
+        }
+        assert!(
+            linux_readme_paths().iter().any(|p| p.starts_with("/home/")),
+            "the launcher lives on somebody's desktop"
+        );
     }
 
     #[test]

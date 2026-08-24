@@ -231,6 +231,22 @@ from "exists but could not be resolved".
 `--readme <file>`. `--readme` also accepts a `.url`, a `.lnk`, or an `https://`
 address directly.
 
+**On Linux the resources live in `/opt/CyberPatriot`** — the counterpart of
+`C:\CyberPatriot` — and the README there is a `.desktop` launcher, not a file
+and not a `.url`. That directory is scanned rather than probed by file name,
+because the launcher is named after the round ("Exhibition Round Ubuntu 22.04
+README"), not `README.desktop`.
+Both launcher shapes are followed — `Type=Link` with a `URL=`, and
+`Type=Application` whose `Exec=` opens the address in a browser. Field codes
+(`%u`, `%U`, `%f`, `%F`) are placeholders the desktop environment substitutes
+and are not part of the address.
+
+> [!TIP]
+> `sudo` rewrites `HOME` to `/root`, so a search that trusts it looks in
+> `/root/Desktop` while the launcher sits on `/home/you/Desktop`. `SUDO_USER` is
+> checked first for exactly this reason, and every other home directory after
+> it.
+
 ---
 
 ## Flags

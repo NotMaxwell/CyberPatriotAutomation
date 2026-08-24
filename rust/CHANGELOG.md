@@ -10,6 +10,66 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.20.0
+
+`--auto-readme` now works on an Ubuntu image.
+
+### Added
+
+- **`.desktop` launchers are followed.** An Ubuntu competition image does not
+  ship the README as a file, and does not ship a `.url` either: it puts a
+  freedesktop launcher on the Desktop whose target is the README's address.
+  Nothing recognised that, so `--auto-readme` found nothing on the one image
+  this platform is written for.
+
+  Both shapes are handled, because which one an image uses is not predictable:
+
+  ```text
+  [Desktop Entry]          [Desktop Entry]
+  Type=Link                Type=Application
+  URL=https://...          Exec=firefox https://...
+  ```
+
+  The `Exec=` form needs more care than it looks. The value is a command line,
+  so the address is one token among several and may be quoted; and it can carry
+  freedesktop *field codes* - `%u`, `%U`, `%f`, `%F` - which are placeholders
+  the desktop environment substitutes, not part of the address. Passing
+  `https://example.com/x.html %u` to a downloader fetches nothing.
+
+- **`/opt/CyberPatriot` is searched, and is searched first.** That is where an
+  Ubuntu image installs the round's resources, including the README launcher -
+  the counterpart of `C:\CyberPatriot` on Windows.
+
+  It is *scanned as a directory* rather than probed by file name, because the
+  launcher is not called `README.desktop`. It is called whatever the round named
+  it: "Exhibition Round Ubuntu 22.04 README". A fixed-name lookup finds nothing.
+
+  The case matters too. Linux filesystems are case-sensitive and the directory
+  is `/opt/CyberPatriot`, so the lower-case spelling that looks natural in code
+  would have missed it; both are tried.
+
+- **Linux discovery paths.** `default_readme_paths()` returned Windows paths on
+  every platform, so the only thing that could ever match on Linux was the
+  desktop scan.
+
+### Fixed
+
+- **`sudo` rewrites `HOME`, and discovery followed it.** The tool has to run as
+  root, so `HOME` is `/root` and `desktop_dir()` pointed at `/root/Desktop`
+  while the launcher the competitor can see sits on `/home/perry/Desktop`.
+  Looking only where `HOME` says found nothing.
+
+  `SUDO_USER` names the account that invoked sudo and is now checked first,
+  because it is the person whose desktop the README is on. Every other home
+  directory is scanned after that, since an image may auto-login as one account
+  and store the README under another.
+
+- **The "could not be resolved" diagnostic only understood `.url`.** A
+  `.desktop` launcher that could not be read reported the generic "exists but
+  could not be resolved to a readable file", which says nothing about why. It
+  now distinguishes a launcher with no `URL=` and no address in its `Exec=`
+  line.
+
 ## 1.19.2
 
 Three bugs from the first real run on an Ubuntu 22.04 image.
