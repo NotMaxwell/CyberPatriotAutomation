@@ -10,6 +10,52 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.19.2
+
+Three bugs from the first real run on an Ubuntu 22.04 image.
+
+### Fixed
+
+- **The README could not be downloaded on Linux.** The download tried
+  PowerShell first, then `curl.exe`, then `curl`. PowerShell is never present on
+  Linux, and a **stock Ubuntu 22.04 desktop does not ship `curl` either** - it
+  ships `wget`. So all three failed on the exact image this tool is written for,
+  and the run continued with no README at all.
+
+  `wget` is now in the list, and the order is per-platform: PowerShell first on
+  Windows where it is guaranteed, `curl` then `wget` on Linux where PowerShell
+  is guaranteed absent.
+
+- **The failure named the wrong program.** Because PowerShell was tried first
+  and its spawn error was preferred when reporting, every Linux failure came
+  back as `No such file or directory (os error 2)` - which is PowerShell's
+  error, about PowerShell, and told the reader nothing.
+
+  A program that was never installed is now distinguished from one that ran and
+  failed. When nothing is installed the message says which programs were tried
+  and gives the command to fix it: *no downloader is installed (tried curl,
+  wget). Install one with `sudo apt install curl`, or open the README in a
+  browser, save it as HTML and pass it with --readme <file>*.
+
+- **`curl` was invoked without `-f`**, so an HTTP 404 was written to the
+  destination and exited 0. That error page was then parsed as HTML and yielded
+  a README with no title, no operating system and nothing in it - which reads as
+  a parser failure rather than as a download that fetched the wrong thing.
+
+- **The confirmation summary said `pinnacle-cypat.exe` on Linux.** Cosmetic, but
+  it makes the summary look like it belongs to a different machine.
+
+### Changed
+
+- **A run that could not get the README it was asked for now says so where it
+  cannot be missed.** The run still continues - the tasks that need a README
+  decline on their own, and the rest apply defaults that are correct on any
+  image - but the two red lines about the download scroll off the top of the
+  screen long before the run ends, and a competitor who asked for a README and
+  did not get one has lost every decision it would have driven.
+
+  The warning names the tasks that will decline.
+
 ## 1.19.1
 
 ### Fixed

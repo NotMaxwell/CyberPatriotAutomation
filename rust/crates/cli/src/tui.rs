@@ -154,6 +154,15 @@ fn show_banner() {
     }
 }
 
+/// What this program is called on the platform it was built for.
+const fn executable_name() -> &'static str {
+    if cfg!(windows) {
+        "pinnacle-cypat.exe"
+    } else {
+        "pinnacle-cypat"
+    }
+}
+
 /// Can this run actually change the machine?
 ///
 /// How that is decided is the platform's business - a machine-policy write
@@ -297,7 +306,10 @@ fn confirm(args: &[String], dry_run: bool) -> bool {
     ]);
     summary.add_row([
         "Command".to_string(),
-        format!("pinnacle-cypat.exe {}", args.join(" ")),
+        // The name the reader would type.  is not part of it on Linux,
+        // and printing it there makes the summary look like it belongs to a
+        // different machine.
+        format!("{} {}", executable_name(), args.join(" ")),
     ]);
     summary.print();
 

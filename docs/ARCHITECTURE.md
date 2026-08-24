@@ -127,7 +127,7 @@ alongside it until 2026-08-23 and is now frozen under
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
 | Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.19.1 | 1.8.0, frozen |
+| Version | 1.19.2 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |

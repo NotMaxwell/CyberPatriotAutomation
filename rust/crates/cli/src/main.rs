@@ -433,6 +433,47 @@ async fn run_automation() {
         ui::write_line();
     }
 
+    // A README was asked for and could not be obtained, yet tasks are about to
+    // run. Say so where it cannot be missed.
+    //
+    // The run continues deliberately - the tasks that need a README decline on
+    // their own, and the rest apply defaults that are correct on any image. But
+    // a competitor who asked for a README and did not get one has lost every
+    // decision it would have driven, and the two red lines about the download
+    // scroll off the top of the screen long before the run ends.
+    if readme_data.is_none() && (readme_file.is_some() || auto_find_readme) {
+        let declining: Vec<&str> = Host::tasks()
+            .iter()
+            .filter(|spec| spec.needs_readme)
+            .filter(|spec| run_all || named.iter().any(|s| s.flag == spec.flag))
+            .map(|spec| spec.label)
+            .collect();
+
+        ui::write_line();
+        ui::rule("[bold yellow]Running without a README[/]");
+        ui::markup_line(
+            "[yellow]The README could not be obtained, so nothing in it is driving this run.[/]",
+        );
+        if !declining.is_empty() {
+            ui::markup_line(
+                "[yellow]These tasks cannot tell authorised from unauthorised and will \
+                 decline to act:[/]",
+            );
+            for label in &declining {
+                ui::markup_line(&format!("[yellow]    {}[/]", ui::escape(label)));
+            }
+        }
+        ui::markup_line(
+            "[dim]The remaining tasks apply defaults, which are correct on any image - but \
+             anything this round does differently is lost.[/]",
+        );
+        ui::markup_line(
+            "[dim]To fix: open the README in a browser, save it as HTML, and re-run with \
+             --readme <file>.[/]",
+        );
+        ui::write_line();
+    }
+
     // Build the task list from the platform's own table.
     //
     // The task, its flag, its help line and its menu entry all come from one

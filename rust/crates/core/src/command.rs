@@ -303,37 +303,140 @@ pub async fn powershell_query(script: &str) -> CommandOutput {
 /// `curl` is the fallback; both follow redirects, so `aka.ms` short links work.
 pub async fn download_file(url: &str, dest: &std::path::Path) -> Result<(), String> {
     let dest_str = dest.to_string_lossy().into_owned();
+    let mut ran_and_failed: Vec<String> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
 
-    let script = format!(
-        "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
-         Invoke-WebRequest -Uri {} -OutFile {} -UseBasicParsing",
-        ps_quote(url),
-        ps_quote(&dest_str)
-    );
-    let (ok, _out, ps_error) = powershell(&script).await;
-    if ok && dest.is_file() {
-        return Ok(());
-    }
+    for candidate in DOWNLOADERS {
+        let (program, arguments) = candidate.invocation(url, &dest_str);
+        let (code, _out, error) =
+            execute_for_exit_code(&program, Some(&arguments), COMMAND_TIMEOUT).await;
 
-    let mut curl_error = None;
-    for program in ["curl.exe", "curl"] {
-        let (curl_ok, _out, err) = execute(
-            program,
-            Some(&format!("-L -s -S -o \"{dest_str}\" \"{url}\"")),
-        )
-        .await;
-        if curl_ok && dest.is_file() {
+        if code == Some(0) && dest.is_file() {
             return Ok(());
         }
-        curl_error = err;
+
+        // `None` with an io error means the program is not installed. That is
+        // not a download failure and must not be reported as one - on Linux
+        // `powershell` is always absent, and reporting its "No such file or
+        // directory (os error 2)" hid the real reason on every image.
+        match (code, error) {
+            (None, Some(e)) if e.contains("os error 2") || e.contains("cannot find") => {
+                missing.push(candidate.program);
+            }
+            (_, Some(e)) if !e.trim().is_empty() => {
+                ran_and_failed.push(format!("{}: {}", candidate.program, e.trim()));
+            }
+            _ => ran_and_failed.push(format!("{} produced no file", candidate.program)),
+        }
     }
 
-    Err(ps_error
-        .filter(|e| !e.trim().is_empty())
-        .or(curl_error)
-        .map(|e| e.trim().to_string())
-        .unwrap_or_else(|| "no error reported".to_string()))
+    if ran_and_failed.is_empty() {
+        // Nothing was installed to try with. This is the common case on a
+        // stock Ubuntu desktop, which ships neither curl nor PowerShell - and
+        // the answer is a command the reader can run, not a diagnosis.
+        return Err(format!(
+            "no downloader is installed (tried {}). Install one with \
+             `sudo apt install curl`, or open the README in a browser, save it as \
+             HTML and pass it with --readme <file>",
+            missing.join(", ")
+        ));
+    }
+    Err(ran_and_failed.join("; "))
 }
+
+/// A program that can fetch a URL to a file.
+struct Downloader {
+    program: &'static str,
+    kind: DownloaderKind,
+}
+
+/// Each variant exists only on the platform whose `DOWNLOADERS` list uses it.
+/// PowerShell is never present on Linux and `wget` is never present on a stock
+/// Windows image, so a variant compiled into the wrong binary would be dead
+/// code that the compiler is right to complain about.
+enum DownloaderKind {
+    /// `curl -L -f -s -S -o dest url`
+    Curl,
+    /// `wget -q -O dest url`
+    #[cfg(not(windows))]
+    Wget,
+    /// A PowerShell script.
+    #[cfg(windows)]
+    PowerShell,
+}
+
+impl Downloader {
+    fn invocation(&self, url: &str, dest: &str) -> (String, String) {
+        match self.kind {
+            DownloaderKind::Curl => (
+                self.program.to_string(),
+                // `-f` so an HTTP 404 is a non-zero exit rather than a file
+                // containing the error page, which would then be parsed as
+                // HTML and yield a README with nothing in it.
+                format!("-L -f -s -S -o \"{dest}\" \"{url}\""),
+            ),
+            #[cfg(not(windows))]
+            DownloaderKind::Wget => (
+                self.program.to_string(),
+                format!("-q -O \"{dest}\" \"{url}\""),
+            ),
+            #[cfg(windows)]
+            DownloaderKind::PowerShell => {
+                // TLS 1.2 is selected explicitly because Windows PowerShell 5.1
+                // still negotiates older protocols that most hosts now refuse,
+                // which otherwise fails with an unhelpful "underlying
+                // connection was closed".
+                let script = format!(
+                    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+                     Invoke-WebRequest -Uri {} -OutFile {} -UseBasicParsing",
+                    ps_quote(url),
+                    ps_quote(dest)
+                );
+                (self.program.to_string(), powershell_args(&script, true))
+            }
+        }
+    }
+}
+
+/// What to try, in order.
+///
+/// Ordered by what is most likely to be present on the platform being built
+/// for. PowerShell first on Windows, where it is guaranteed; `curl` and `wget`
+/// first on Linux, where PowerShell is guaranteed *absent* - trying it first
+/// there meant every failure was reported as PowerShell's "No such file or
+/// directory", which named the wrong program and gave the reader nothing to act
+/// on.
+///
+/// `wget` matters more than it looks: a stock Ubuntu 22.04 desktop ships it and
+/// does **not** ship `curl`, so a list without it fails on the exact image this
+/// tool is written for.
+#[cfg(windows)]
+const DOWNLOADERS: &[Downloader] = &[
+    Downloader {
+        program: "powershell",
+        kind: DownloaderKind::PowerShell,
+    },
+    Downloader {
+        program: "curl.exe",
+        kind: DownloaderKind::Curl,
+    },
+    Downloader {
+        program: "curl",
+        kind: DownloaderKind::Curl,
+    },
+];
+
+#[cfg(not(windows))]
+const DOWNLOADERS: &[Downloader] = &[
+    Downloader {
+        program: "curl",
+        kind: DownloaderKind::Curl,
+    },
+    Downloader {
+        program: "wget",
+        kind: DownloaderKind::Wget,
+    },
+];
 
 /// Execute a command with elevated privileges.
 ///
@@ -348,6 +451,57 @@ pub async fn execute_elevated(command: &str, arguments: Option<&str>) -> Command
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bug this list exists to prevent: a stock Ubuntu 22.04 desktop ships
+    /// `wget` and does **not** ship `curl`, so a list without wget fails on the
+    /// exact image this tool is written for.
+    #[test]
+    fn the_linux_downloaders_cover_what_ubuntu_actually_ships() {
+        if cfg!(windows) {
+            return;
+        }
+        let programs: Vec<&str> = DOWNLOADERS.iter().map(|d| d.program).collect();
+        assert!(programs.contains(&"curl"), "{programs:?}");
+        assert!(programs.contains(&"wget"), "{programs:?}");
+        // PowerShell is guaranteed absent here. Trying it first meant every
+        // failure was reported as its "No such file or directory", naming the
+        // wrong program and giving the reader nothing to act on.
+        assert!(
+            !programs.contains(&"powershell"),
+            "PowerShell is never present on Linux: {programs:?}"
+        );
+    }
+
+    #[test]
+    fn each_downloader_writes_to_the_destination_it_is_given() {
+        for downloader in DOWNLOADERS {
+            let (program, args) = downloader.invocation("http://example.com/a", "/tmp/out.html");
+            assert_eq!(program, downloader.program);
+            assert!(
+                args.contains("/tmp/out.html"),
+                "{program} does not name the destination: {args}"
+            );
+            assert!(
+                args.contains("http://example.com/a"),
+                "{program} does not name the URL: {args}"
+            );
+        }
+    }
+
+    /// Without `-f`, curl writes the server's 404 page to the destination and
+    /// exits 0. That file is then parsed as HTML and yields a README with no
+    /// title, no operating system and nothing in it - which reads as a parser
+    /// failure rather than as a download that fetched the wrong thing.
+    #[test]
+    fn curl_fails_on_an_http_error_rather_than_saving_the_error_page() {
+        let curl = DOWNLOADERS
+            .iter()
+            .find(|d| d.program.starts_with("curl"))
+            .expect("curl should be a candidate on every platform");
+        let (_program, args) = curl.invocation("http://x/y", "/tmp/o");
+        assert!(args.contains("-f"), "curl needs -f to fail on 404: {args}");
+        assert!(args.contains("-L"), "the README URL redirects: {args}");
+    }
 
     #[test]
     fn ps_quote_wraps_and_doubles_embedded_quotes() {
