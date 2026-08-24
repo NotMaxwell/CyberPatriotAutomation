@@ -4,19 +4,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
-mod account_permissions;
-mod audit_policy;
-mod dns_settings_audit;
-mod firewall;
-mod hosts_file_audit;
-mod password_policy;
-mod prohibited_media;
-mod scheduled_tasks_audit;
-mod security_hardening;
-mod service_management;
-mod software_management;
-mod software_update;
-mod user_management;
+//! The modules are public so the answer-key suite in `tests/answer_key.rs` can
+//! reach the functions that make the decisions - which accounts are
+//! unauthorised, which services are protected, which packages get purged. Those
+//! are what a CyberPatriot answer key actually scores, and testing them through
+//! `execute()` would mean running against a real image.
+
+pub mod account_permissions;
+pub mod audit_policy;
+pub mod dns_settings_audit;
+pub mod firewall;
+pub mod hosts_file_audit;
+pub mod password_policy;
+pub mod prohibited_media;
+pub mod scheduled_tasks_audit;
+pub mod security_hardening;
+pub mod service_management;
+pub mod software_management;
+pub mod software_update;
+pub mod user_management;
 
 pub use account_permissions::AccountPermissionsTask;
 pub use audit_policy::AuditPolicyTask;

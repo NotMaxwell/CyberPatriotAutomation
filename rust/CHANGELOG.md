@@ -10,6 +10,96 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.17.0
+
+The Ubuntu 22.04 Exhibition Round answer key, as a test suite - and the four
+bugs it found.
+
+### Added
+
+- **`crates/linux/tests/answer_key.rs`.** CyberPatriot publishes an answer key
+  for its Exhibition Rounds: every scored item, what it is worth, and how it was
+  meant to be solved. That document is the closest thing this project has to a
+  specification, and nothing connected it to the code.
+
+  All sixteen scored items and four penalties are now tests, each named after
+  its item and carrying its point value, so a failure says exactly what it would
+  have cost. They are written against the *decisions* the tool makes from the
+  parsed README - which accounts it counts as unauthorised, which services it
+  refuses to mask, which packages it purges - because that is the layer where
+  the bugs are.
+
+  84 of the 100 points are automatable; the remaining 16 are the two forensics
+  questions, which need a person to read a file and answer a question. A test
+  asserts that split, so it cannot quietly stop being true.
+
+- **The round's README is now a corpus fixture**
+  (`06-ubuntu-22-exhibition-round.html`), so the parser's output for a real
+  Ubuntu README is snapshotted alongside the Windows ones.
+
+- **Daily update checks.** `APT::Periodic::Update-Package-Lists "1"` and the
+  three settings around it, written to `/etc/apt/apt.conf.d/20auto-upgrades`.
+  This is what the Software & Updates dialog sets, and it is worth six points.
+  The task previously installed `unattended-upgrades` and stopped - which leaves
+  the machine exactly as unpatched as before, and reports success.
+
+  `file_ops` gained a `Style::AptConf` for it: the value is quoted and the line
+  ends in a semicolon, and apt rejects the whole file if either is missing,
+  which disables *all* automatic updating rather than just the setting being
+  written.
+
+- **Weak-password detection**, wired into user management. A README publishes
+  its administrators' passwords and CyberPatriot scores noticing that one of
+  them is bad.
+
+  The round's own password set calibrates the rule, and says the discriminator
+  is character classes rather than length: `grilledcheese` (scored as weak) and
+  `Go0glyMo0gly!` (accepted) are both thirteen characters. A length rule that
+  caught the first would have caught the second, and resetting a password the
+  README published as valid locks the competitor out of an account they were
+  told they could use - a worse outcome than the six points. The primary
+  auto-login user is excluded outright, because the README says so in as many
+  words.
+
+### Fixed
+
+Four items, worth 20 points between them, that reading the code had not found:
+
+- **Quoted names were dropped from group requirements (8 pts).**
+  `extract_group_members` trimmed commas and periods but not quotes, so
+  `"candace"` failed username validation, the member list came back empty, and
+  an empty list is discarded. Curly quotes are handled too - a README pasted out
+  of a word processor has them, and they are the harder case to spot by eye.
+
+- **The user-first group phrasing matched nothing (same 8 pts).** The parser
+  handled *make a group called X and add a, b*, but not *add the user "candace"
+  to the "firesidegirls" group*, which was the only group requirement in this
+  document.
+
+  The new pattern has an ambiguity Rust's regex crate cannot express away, since
+  it has no lookahead: in *add the users a, b into the group*, the optional
+  `the` can be skipped and `the` itself captured as the group name. The corpus
+  caught exactly that - a fixture that had parsed correctly for months grew a
+  second, bogus requirement named `the` - and connectives are now rejected as
+  group names.
+
+- **Only the first program in a sentence was extracted (-5 penalty).**
+  `latest version of X` captured one name, and the README said *the latest
+  stable version of Thunderbird and Perl*. Perl was silently lost, and removing
+  required software is a penalty. The pattern now captures a conjunction list,
+  anchored on the name shape so it stops at `Perl` rather than running on
+  through the rest of the sentence.
+
+- **`perl` was not in the Linux package table**, so even once extracted it
+  resolved to nothing. Added, along with the other scripting runtimes a README
+  is likely to name.
+
+### Changed
+
+- **The Linux task modules are public**, so the answer-key suite can reach the
+  functions that make the decisions. Testing those through `execute()` would
+  mean running against a real image.
+
 ## 1.16.0
 
 Linux support, and the restructure that made it possible.

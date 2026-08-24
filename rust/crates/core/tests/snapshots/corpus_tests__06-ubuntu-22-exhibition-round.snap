@@ -1,0 +1,74 @@
+---
+source: crates/core/tests/corpus_tests.rs
+expression: rendered
+---
+title:            CyberPatriot Exhibition Round Ubuntu 22.04 README
+operating system: Ubuntu Linux
+scenario:         You work for the secret spy agency O.W.C.A., otherwise known as the Organization Without a Cool Acro...
+administrators:
+  - perry (primary: true, password: M4mm@lOfAct!0n)
+  - carl (primary: false, password: No#1UnP@!dInt3rn)
+  - monogram (primary: false, password: Go0glyMo0gly!)
+  - pinky (primary: false, password: grilledcheese)
+  - wanda (primary: false, password: Adm!r@l4cr0nym)
+users:
+  - adyson
+  - albert
+  - baljeet
+  - buford
+  - candace
+  - doofenshmirtz
+  - ferb
+  - ginger
+  - gretchen
+  - holly
+  - irving
+  - isabella
+  - jenny
+  - jeremy
+  - katie
+  - lawrence
+  - linda
+  - milly
+  - norm
+  - phineas
+  - roger
+  - stacy
+  - suzy
+  - vanessa
+groups:
+  - firesidegirls: candace
+users to create:
+required software:
+  - Firefox (latest: true)
+  - Thunderbird (latest: true)
+  - Perl (latest: true)
+prohibited software:
+  - hacking tools
+  - hacking tool
+  - non-work related media
+critical services:
+  - sshd
+  - CCS Client
+prohibited services:
+guidelines:
+  - In order to provide a better competition experience, you are NOT required to change the password of the primary, auto-login, user account. Changing the password of a user that is set to automatically log in may lock you out of your computer.
+  - Authorized administrator passwords were correct the last time you did a password audit, but are not guaranteed to be currently accurate.
+  - Do not stop or disable the CCS Client service or process.
+  - Do not remove any authorized users or their home directories.
+  - The time zone of this image is set to UTC. Please do not change the time zone, date, or time on this image.
+  - You can view your current scoring report by double-clicking the "CyberPatriot Scoring Report" desktop icon.
+  - JavaScript is required for some error messages that appear on the "CyberPatriot Scoring Report." To ensure that you only receive correct error messages, please do not disable JavaScript.
+  - Some security settings may prevent the Stop Scoring application from running. If this happens, the safest way to stop scoring is to suspend the virtual machine. You should NOT power on the VM again before deleting.
+actionable items:
+  - [SecurityPolicy] Configure password expiration policy
+  - [SecurityPolicy] Configure Windows Firewall settings
+  - [AddUserToGroup] Add user to group (review text for details)
+sections:
+  - ANSWER KEY
+  - Authorized Administrators and Users
+  - Competition Guidelines
+  - Competition Scenario
+  - Forensics Questions
+  - Ubuntu 22.04
+  - Unique Identifier

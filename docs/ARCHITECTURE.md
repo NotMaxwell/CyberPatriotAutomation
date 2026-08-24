@@ -126,12 +126,12 @@ alongside it until 2026-08-23 and is now frozen under
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
 | Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.16.0 | 1.8.0, frozen |
+| Version | 1.17.0 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |
-| Tests | 303 | 202, frozen |
+| Tests | 333 | 202, frozen |
 | Published size | ~2.7 MB | ~42 MB self-contained |
 | Startup | immediate, no runtime | JIT + runtime |
 
@@ -1793,7 +1793,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 303 tests
+cargo test --workspace                  # 333 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat

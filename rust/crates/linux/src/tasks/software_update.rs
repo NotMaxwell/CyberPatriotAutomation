@@ -24,10 +24,49 @@ use pinnacle_core::task::Task;
 use pinnacle_core::{impl_task_meta, models::ReadmeData, remediation, ui};
 
 use crate::apt;
+use crate::file_ops::{self, Style};
 use async_trait::async_trait;
 
 /// Turning this on is what keeps the machine patched after the round starts.
 const UNATTENDED_UPGRADES: &str = "unattended-upgrades";
+
+/// Where apt keeps the periodic-task settings.
+///
+/// A drop-in named `20auto-upgrades` because that is the file
+/// `unattended-upgrades` itself installs and the one the Software & Updates
+/// dialog writes; using the same name means the dialog and this tool agree
+/// rather than leaving two files that disagree.
+const PERIODIC_CONF: &str = "/etc/apt/apt.conf.d/20auto-upgrades";
+
+/// The periodic settings, as `(key, value, why)`.
+///
+/// `APT::Periodic::Update-Package-Lists "1"` is what the Software & Updates
+/// dialog sets when its *Automatically check for updates* dropdown is set to
+/// **Daily**, and it is scored: the Ubuntu 22.04 Exhibition Round answer key
+/// gives six points for it. The value is a number of days, so `1` is daily and
+/// `0` is never - which is the stock setting on a competition image.
+pub const PERIODIC_SETTINGS: &[(&str, &str, &str)] = &[
+    (
+        "APT::Periodic::Update-Package-Lists",
+        "1",
+        "check for updates every day",
+    ),
+    (
+        "APT::Periodic::Unattended-Upgrade",
+        "1",
+        "install security updates every day",
+    ),
+    (
+        "APT::Periodic::Download-Upgradeable-Packages",
+        "1",
+        "download them ahead of installing, so a slow link does not delay the fix",
+    ),
+    (
+        "APT::Periodic::AutocleanInterval",
+        "7",
+        "clear the downloaded package cache weekly so the disk does not fill",
+    ),
+];
 
 pub struct SoftwareUpdateTask {
     name: String,
@@ -149,18 +188,47 @@ impl Task for SoftwareUpdateTask {
             )
             .await
             {
-                Ok(()) => ui::markup_line("[green]✓ Enabled automatic security updates[/]"),
+                Ok(()) => ui::markup_line("[green]✓ Installed unattended-upgrades[/]"),
                 Err(e) => ui::markup_line(&format!(
-                    "[yellow]⚠ Could not enable automatic security updates: {}[/]",
+                    "[yellow]⚠ Could not install unattended-upgrades: {}[/]",
                     ui::escape(&e)
                 )),
             }
         }
 
+        // ...and the periodic settings, which are what actually decide whether
+        // anything is checked. Installing the package without them leaves the
+        // machine exactly as unpatched as before, and reports success.
+        for (key, value, why) in PERIODIC_SETTINGS {
+            match file_ops::set(PERIODIC_CONF, Style::AptConf, key, value, why).await {
+                Ok(()) => result.items_succeeded += 1,
+                Err(e) => {
+                    result.success = false;
+                    ui::markup_line(&format!(
+                        "[red]✗ {}: {}[/]",
+                        ui::escape(key),
+                        ui::escape(&e)
+                    ));
+                }
+            }
+        }
+        result.items_attempted += PERIODIC_SETTINGS.len() as i32;
+
         result
     }
 
     async fn verify(&mut self) -> bool {
+        // The periodic settings are checked first because they are the part
+        // that has to be exactly right: a scored check reads that file.
+        for (key, value, _why) in PERIODIC_SETTINGS {
+            if file_ops::read(PERIODIC_CONF, Style::AptConf, key)
+                .await
+                .as_deref()
+                != Some(*value)
+            {
+                return false;
+            }
+        }
         // "Nothing left to upgrade" is the claim, so that is what is checked.
         // A package held back by a dependency legitimately fails this, which is
         // why verification failure is a warning rather than a task failure.
@@ -180,6 +248,26 @@ mod tests {
         let result = pinnacle_core::ui::capture(task.execute()).await.0;
         pinnacle_core::run_log::set_dry_run(false);
         assert!(result.success);
+    }
+
+    /// The answer key scores the *daily* check specifically. The value is a
+    /// number of days, so 1 is daily and 0 - the stock setting on a competition
+    /// image - is never.
+    #[test]
+    fn the_periodic_settings_ask_for_a_daily_check() {
+        let daily = PERIODIC_SETTINGS
+            .iter()
+            .find(|(key, _, _)| *key == "APT::Periodic::Update-Package-Lists")
+            .expect("the daily check must be configured");
+        assert_eq!(daily.1, "1");
+        for (key, value, why) in PERIODIC_SETTINGS {
+            assert!(
+                key.starts_with("APT::Periodic::"),
+                "{key} is not a periodic key"
+            );
+            assert!(value.parse::<u32>().is_ok(), "{key} takes a number of days");
+            assert!(!why.is_empty(), "{key} has no reason recorded");
+        }
     }
 
     #[test]

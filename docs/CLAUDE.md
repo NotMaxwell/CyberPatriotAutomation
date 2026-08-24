@@ -203,6 +203,34 @@ parser does; accepting a diff without reading it discards the only check there
 is. Adding a real competition README to `tests/corpus/` is the single most
 valuable contribution to the parser.
 
+### Answer keys are the specification
+
+CyberPatriot publishes an answer key for its Exhibition Rounds: every scored
+item, what it is worth, and how it was meant to be solved. That document is the
+closest thing this project has to a spec, and
+`crates/linux/tests/answer_key.rs` encodes one of them - sixteen scored items
+and four penalties, each a test named after its item and carrying its point
+value.
+
+**The workflow is: add the key, write the tests, watch them fail, fix the
+code.** The first run of that file failed on items worth 20 points between them,
+all of which reading the code had not found:
+
+| Item | Points | What was wrong |
+|---|--:|---|
+| Added candace to firesidegirls | 8 | `extract_group_members` trimmed commas and periods but not quotes, so `"candace"` failed username validation and the empty member list was discarded |
+| Perl removed | −5 | `latest version of X` captured one name; the README said *Thunderbird and Perl* |
+| Updates checked daily | 6 | `APT::Periodic` was not written at all |
+| Changed insecure password for pinky | 6 | there was no weak-password check |
+
+Write the tests against the **decisions** - which accounts the tool counts as
+unauthorised, which services it refuses to mask, which packages it purges - not
+against `execute()`. Whether `gpasswd` does what it is told is not in doubt;
+whether the tool asks it to is. That is why the task modules are `pub`.
+
+Add the round's README to `crates/core/tests/corpus/` at the same time, so the
+parser's output for it is snapshotted too.
+
 ### Table changes are tested too
 
 `knowledge.rs` holds the registry settings, package ids and service-name

@@ -77,7 +77,7 @@ impl ProhibitedMediaTask {
     /// production company does not, and deleting the company's files there
     /// loses points rather than winning them. Absent a README the task reports
     /// and does not delete.
-    fn media_is_prohibited(&self) -> bool {
+    pub fn media_is_prohibited(&self) -> bool {
         let Some(readme) = &self.readme_data else {
             return false;
         };

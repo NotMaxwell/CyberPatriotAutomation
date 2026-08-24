@@ -493,6 +493,16 @@ pub const PACKAGE_IDS: &[(&str, &str)] = &[
     ("vsftpd", "vsftpd"),
     ("Python", "python3"),
     ("Python3", "python3"),
+    // Scripting runtimes a README may require. Perl in particular: the Ubuntu
+    // 22.04 Exhibition Round names it as required software and scores -5 for
+    // removing it, and an unresolved name is an install this tool cannot make.
+    ("Perl", "perl"),
+    ("Ruby", "ruby"),
+    ("PHP", "php"),
+    ("OpenJDK", "default-jdk"),
+    ("Java", "default-jre"),
+    ("Node.js", "nodejs"),
+    ("NodeJS", "nodejs"),
     ("Git", "git"),
     ("Vim", "vim"),
     ("Emacs", "emacs"),

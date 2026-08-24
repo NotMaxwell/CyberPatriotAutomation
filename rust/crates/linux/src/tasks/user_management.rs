@@ -58,6 +58,74 @@ fn generate_password(index: usize) -> String {
     )
 }
 
+/// Is this password strong enough to leave alone?
+///
+/// A README publishes its administrators' passwords, and CyberPatriot scores
+/// noticing that one of them is weak - in the Ubuntu Exhibition Round it is
+/// `grilledcheese`, worth six points.
+///
+/// **The README's own password set calibrates this, and it says the
+/// discriminator is character classes rather than length.** From that round:
+///
+/// | Password | Length | Classes | Scored as weak? |
+/// |---|---|---|---|
+/// | `M4mm@lOfAct!0n` | 14 | 4 | no |
+/// | `No#1UnP@!dInt3rn` | 16 | 4 | no |
+/// | `Go0glyMo0gly!` | 13 | 4 | no |
+/// | `Adm!r@l4cr0nym` | 14 | 4 | no |
+/// | `grilledcheese` | 13 | 1 | **yes** |
+///
+/// `grilledcheese` and `Go0glyMo0gly!` are the same length. A length rule that
+/// caught the first would have caught the second too, and resetting a password
+/// the README published as valid locks the competitor out of an account they
+/// were told they could use - a worse outcome than the six points.
+///
+/// So the length floor is deliberately below the round's shortest accepted
+/// password, and all four character classes are required.
+///
+/// This is a *lower* bar than the `minlen = 14` the hardening task writes into
+/// `pwquality.conf`, and deliberately so: that policy governs passwords chosen
+/// from now on, while this answers the narrower question of whether an existing
+/// password is bad enough to be worth replacing.
+pub fn is_secure_password(password: &str) -> bool {
+    // Counted in characters, not bytes: a password with an accented letter is
+    // shorter than `len()` suggests, and rejecting it for being too short when
+    // it is not is exactly the false positive described above.
+    if password.chars().count() < MIN_PASSWORD_LENGTH {
+        return false;
+    }
+    password.chars().any(|c| c.is_uppercase())
+        && password.chars().any(|c| c.is_lowercase())
+        && password.chars().any(|c| c.is_numeric())
+        && password.chars().any(|c| !c.is_alphanumeric())
+}
+
+/// One below the shortest password the Exhibition Round answer key accepts, so
+/// that a README-published password is judged on its character classes.
+const MIN_PASSWORD_LENGTH: usize = 12;
+
+/// The administrators whose README-published password is too weak to keep.
+///
+/// The primary user is deliberately excluded. The README says so in as many
+/// words — *you are NOT required to change the password of the primary,
+/// auto-login, user account* — and changing it can lock the competitor out of
+/// the machine mid-round.
+pub fn accounts_with_weak_passwords(readme: &ReadmeData) -> Vec<String> {
+    readme
+        .administrators
+        .iter()
+        .chain(readme.users.iter())
+        .filter(|account| !account.is_primary_user)
+        .filter(|account| {
+            account
+                .password
+                .as_deref()
+                .is_some_and(|password| !is_secure_password(password))
+        })
+        .map(|account| account.username.clone())
+        .collect()
+}
+
 /// The group that grants administrative rights on *this* image.
 ///
 /// Debian and Ubuntu use `sudo`, Red Hat uses `wheel`. Picking the one the
@@ -223,7 +291,15 @@ impl Task for UserManagementTask {
             .filter(|u| !present.iter().any(|a| a.name.eq_ignore_ascii_case(u)))
             .collect();
 
-        result.items_attempted = (surplus.len() + missing.len() + plan.admins.len()) as i32;
+        // Accounts whose README-published password is too weak to keep, and
+        // that actually exist on this machine.
+        let weak: Vec<String> = accounts_with_weak_passwords(&readme)
+            .into_iter()
+            .filter(|name| present.iter().any(|a| a.name.eq_ignore_ascii_case(name)))
+            .collect();
+
+        result.items_attempted =
+            (surplus.len() + missing.len() + plan.admins.len() + weak.len()) as i32;
 
         if self.dry_run {
             for user in &missing {
@@ -235,10 +311,18 @@ impl Task for UserManagementTask {
                     ui::escape(user)
                 ));
             }
+            for user in &weak {
+                ui::markup_line(&format!(
+                    "[cyan]Would reset the password of: {} [dim](the README's own password \
+                     is too weak)[/][/]",
+                    ui::escape(user)
+                ));
+            }
             result.message = format!(
-                "DRY RUN: would create {} and remove {} accounts.",
+                "DRY RUN: would create {}, remove {} and reset {} passwords.",
                 missing.len(),
-                surplus.len()
+                surplus.len(),
+                weak.len()
             );
             return result;
         }
@@ -297,6 +381,30 @@ impl Task for UserManagementTask {
             }
         }
 
+        // Replace the weak published passwords. The README says in as many words
+        // not to touch the primary user's, which `accounts_with_weak_passwords`
+        // already excludes - changing an auto-login account's password can lock
+        // the competitor out of the machine mid-round.
+        for (index, user) in weak.iter().enumerate() {
+            // Offset so a reset password never collides with one just issued to
+            // a newly created account.
+            let password = generate_password(missing.len() + index);
+            match user_ops::set_password(user, &password).await {
+                Ok(()) => {
+                    result.items_succeeded += 1;
+                    // The password itself is never printed. It reaches the
+                    // ledger as "set to a generated value", so a run log that
+                    // gets committed does not carry it.
+                    ui::markup_line(&format!(
+                        "[green]✓ Reset the password of: {} [dim](the README's own was too \
+                         weak)[/][/]",
+                        ui::escape(user)
+                    ));
+                }
+                Err(e) => failures.push(format!("{user}: could not reset the password ({e})")),
+            }
+        }
+
         for user in &surplus {
             match user_ops::delete(user, "the README does not list this account").await {
                 Ok(()) => {
@@ -312,9 +420,10 @@ impl Task for UserManagementTask {
 
         result.success = failures.is_empty();
         result.message = format!(
-            "Created {}, removed {}, corrected administrative rights.",
+            "Created {}, removed {}, reset {} passwords, corrected administrative rights.",
             missing.len(),
-            surplus.len()
+            surplus.len(),
+            weak.len()
         );
         if !failures.is_empty() {
             result.error_details = Some(failures.join("; "));
@@ -450,6 +559,77 @@ mod tests {
         let present = vec![account("Alice", 1000)];
         let authorised: HashSet<String> = ["alice".to_string()].into_iter().collect();
         assert!(unauthorised(&present, &authorised).is_empty());
+    }
+
+    /// Calibrated against the Ubuntu Exhibition Round answer key, which scores
+    /// exactly one of these five as weak. The pair that matters is
+    /// `grilledcheese` and `Go0glyMo0gly!`: both thirteen characters, and only
+    /// the first is a finding.
+    #[test]
+    fn readme_published_passwords_are_judged_on_character_classes() {
+        assert!(
+            !is_secure_password("grilledcheese"),
+            "one class, scored weak"
+        );
+        for strong in [
+            "M4mm@lOfAct!0n",
+            "No#1UnP@!dInt3rn",
+            "Go0glyMo0gly!",
+            "Adm!r@l4cr0nym",
+        ] {
+            assert!(
+                is_secure_password(strong),
+                "{strong} is accepted by the key and must not be reset"
+            );
+        }
+    }
+
+    /// Each class missing on its own is enough to fail.
+    #[test]
+    fn a_password_missing_any_one_class_is_weak() {
+        assert!(!is_secure_password("nouppercase1!"), "no upper case");
+        assert!(!is_secure_password("NOLOWERCASE1!"), "no lower case");
+        assert!(!is_secure_password("NoDigitsHere!"), "no digit");
+        assert!(!is_secure_password("NoSymbolsHere1"), "no symbol");
+        assert!(!is_secure_password("Sh0rt!"), "too short");
+    }
+
+    /// The README says in as many words not to change the primary user's
+    /// password, because it auto-logs in and changing it can lock the
+    /// competitor out of the machine mid-round.
+    #[test]
+    fn the_primary_users_password_is_never_reset() {
+        let readme = ReadmeData {
+            administrators: vec![
+                AuthorizedUser {
+                    username: "perry".to_string(),
+                    password: Some("weak".to_string()),
+                    is_admin: true,
+                    is_primary_user: true,
+                    notes: None,
+                },
+                AuthorizedUser {
+                    username: "pinky".to_string(),
+                    password: Some("grilledcheese".to_string()),
+                    is_admin: true,
+                    is_primary_user: false,
+                    notes: None,
+                },
+            ],
+            ..Default::default()
+        };
+        assert_eq!(accounts_with_weak_passwords(&readme), ["pinky"]);
+    }
+
+    /// An account the README lists without a password says nothing about its
+    /// strength, and guessing would reset every user on the image.
+    #[test]
+    fn an_account_with_no_published_password_is_left_alone() {
+        let readme = ReadmeData {
+            users: vec![user("bob", false)],
+            ..Default::default()
+        };
+        assert!(accounts_with_weak_passwords(&readme).is_empty());
     }
 
     /// Every account gets a distinct password. Cycling the fixed list alone

@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-303-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-333-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -290,7 +290,7 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 303 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 333 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
 

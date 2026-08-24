@@ -68,7 +68,7 @@ impl FirewallTask {
     /// a remotely administered image, and an open port 22 on a machine that is
     /// not using it costs nothing that the service being masked does not
     /// already fix.
-    fn ports_to_open(&self) -> Vec<&'static str> {
+    pub fn ports_to_open(&self) -> Vec<&'static str> {
         let mut ports = vec!["22/tcp"];
         for (unit, port) in PORT_FOR_UNIT {
             if readme_services::is_critical(self.readme_data.as_ref(), unit)

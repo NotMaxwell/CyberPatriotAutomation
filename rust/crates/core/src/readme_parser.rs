@@ -386,13 +386,32 @@ fn parse_software_requirements(content: &str, data: &mut ReadmeData) {
     // Node.js. Trailing + and # are allowed outright, for C++ and C#.
     const NAME: &str = r"[A-Za-z0-9]+(?:[-.+#]+[A-Za-z0-9]+)*[+#]*";
 
+    // One sentence may name several programs:
+    //
+    // > Employees must also have access to the latest stable version of
+    // > Thunderbird **and Perl** to securely support top secret activities.
+    //
+    // Capturing a single name took Thunderbird and dropped Perl, which the
+    // Ubuntu 22.04 Exhibition Round answer key scores as a -5 penalty for
+    // removing required software. The conjunction is part of the name list, so
+    // it belongs in the pattern; the existing splitter then separates them.
+    //
+    // The repetition is anchored on NAME rather than on "anything up to a full
+    // stop", so it stops at "Perl" instead of running on through "to securely
+    // support top secret activities".
+    const NAME_LIST: &str = concat!(
+        r"[A-Za-z0-9]+(?:[-.+#]+[A-Za-z0-9]+)*[+#]*",
+        r"(?:(?:,\s*and\s+|,\s*|\s+and\s+)",
+        r"[A-Za-z0-9]+(?:[-.+#]+[A-Za-z0-9]+)*[+#]*)*"
+    );
+
     let patterns = [
-        format!(r"(?is)latest\s+(?:stable\s+)?version\s+of\s+({NAME})"),
+        format!(r"(?is)latest\s+(?:stable\s+)?version\s+of\s+({NAME_LIST})"),
         // The list form keeps its own class because it spans several names and
         // ends at a full stop; a '.' inside the class would swallow that.
         r"(?is)access\s+to\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?([A-Za-z0-9,+#\s-]+?)(?:\s+for\s+company|\s+for\s+use|\.)".to_string(),
         format!(
-            r"(?is)should\s+(?:be\s+)?(?:using|have|install)\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?({NAME})"
+            r"(?is)should\s+(?:be\s+)?(?:using|have|install)\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?({NAME_LIST})"
         ),
         format!(
             r"(?is)default\s+(?:web\s+)?browser.*?should\s+be\s+(?:the\s+)?(?:latest\s+)?(?:stable\s+)?(?:version\s+of\s+)?({NAME})"
@@ -551,25 +570,132 @@ fn add_prohibited_service(service: &str, data: &mut ReadmeData) {
 }
 
 fn parse_group_requirements(content: &str, data: &mut ReadmeData) {
-    let group = re(
+    // Two phrasings, and a README uses whichever reads better.
+    //
+    // **Group first** - "make a group called allsafe and add the users a, b".
+    // The group is being created, so the sentence leads with it.
+    let group_first = re(
         r#"(?is)(?:make|create)\s+(?:a\s+)?(?:new\s+)?group\s+(?:called\s+)?["']?(\w+)["']?\s+and\s+add\s+(?:the\s+following\s+users?\s+to\s+(?:the\s+)?["']?\w+["']?\s+group:?\s*)?([^.]+)"#,
     );
     // The C# original used a single `Regex.Match`, so a README asking for two
     // groups only ever produced the first one. Iterate over every match.
-    for caps in group.captures_iter(content) {
-        let group_name = caps[1].trim().to_string();
-        let members = extract_group_members(&strip_html_tags(&caps[2]));
-        let already_present = data
-            .group_requirements
-            .iter()
-            .any(|g| g.group_name.eq_ignore_ascii_case(&group_name));
-        if !group_name.is_empty() && !members.is_empty() && !already_present {
-            data.group_requirements.push(GroupRequirement {
-                group_name,
-                members,
-            });
-        }
+    for caps in group_first.captures_iter(content) {
+        add_group_requirement(
+            caps[1].trim(),
+            &extract_group_members(&strip_html_tags(&caps[2])),
+            data,
+        );
     }
+
+    // **User first** - "add the user \"candace\" to the \"firesidegirls\" group".
+    // The group already exists, so the sentence leads with the person. This
+    // phrasing cost eight points in the Ubuntu 22.04 Exhibition Round, where it
+    // was the only group requirement in the document and the group-first
+    // pattern above matched nothing at all.
+    //
+    // The member list is captured non-greedily and stops at the first `to`, so
+    // a sentence naming two groups does not swallow both.
+    let user_first = re(
+        r#"(?is)\badd\s+(?:the\s+)?(?:users?|accounts?|members?)?\s*([^.]+?)\s+(?:in)?to\s+(?:the\s+)?["'\u{201C}\u{2018}]?(\w+)["'\u{201D}\u{2019}]?\s+group\b"#,
+    );
+    for caps in user_first.captures_iter(content) {
+        add_group_requirement(
+            caps[2].trim(),
+            &extract_group_members(&strip_html_tags(&caps[1])),
+            data,
+        );
+    }
+}
+
+/// Record a group requirement, merging with one already recorded for the same
+/// group.
+///
+/// Merging rather than skipping: a README may name a group once to create it
+/// and again to add somebody, and taking only the first sentence loses whoever
+/// the second one named.
+fn add_group_requirement(group_name: &str, members: &[String], data: &mut ReadmeData) {
+    if group_name.is_empty() || members.is_empty() || !is_plausible_group_name(group_name) {
+        return;
+    }
+    if let Some(existing) = data
+        .group_requirements
+        .iter_mut()
+        .find(|g| g.group_name.eq_ignore_ascii_case(group_name))
+    {
+        for member in members {
+            if !existing
+                .members
+                .iter()
+                .any(|m| m.eq_ignore_ascii_case(member))
+            {
+                existing.members.push(member.clone());
+            }
+        }
+        return;
+    }
+    data.group_requirements.push(GroupRequirement {
+        group_name: group_name.to_string(),
+        members: members.to_vec(),
+    });
+}
+
+/// Punctuation that surrounds a name in prose rather than being part of it.
+///
+/// READMEs quote the names they mention - *add the user "candace" to the
+/// "firesidegirls" group* - and a member that arrives as `"candace"` fails
+/// username validation and is dropped silently. That cost eight points in the
+/// Ubuntu 22.04 Exhibition Round: the group requirement parsed, the member list
+/// came back empty, and an empty list is discarded.
+///
+/// Curly quotes are included because a README pasted out of a word processor
+/// has them, and they are the harder case to spot by eye.
+fn is_name_punctuation(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '.'
+            | ';'
+            | ':'
+            | '"'
+            | '\''
+            | '\u{201C}'
+            | '\u{201D}'
+            | '\u{2018}'
+            | '\u{2019}'
+            | '('
+            | ')'
+    )
+}
+
+/// Could this be a group name, or is it a word from the sentence around it?
+///
+/// The user-first pattern has an ambiguity it cannot resolve on its own, because
+/// Rust's regex crate has no lookahead. Given
+///
+/// > add the users a, b and c **into the group**.
+///
+/// the optional `the` can be skipped, letting `the` itself be captured as the
+/// group name and `group` satisfy the literal that follows. The corpus caught
+/// exactly this: a fixture that had parsed correctly for months grew a second,
+/// bogus requirement named `the`.
+///
+/// That sentence refers back to a group the group-first pattern already
+/// captured, so rejecting the connective loses nothing.
+fn is_plausible_group_name(name: &str) -> bool {
+    const NOT_A_NAME: &[&str] = &[
+        "the",
+        "a",
+        "an",
+        "this",
+        "that",
+        "these",
+        "those",
+        "following",
+        "new",
+        "same",
+        "it",
+    ];
+    let lower = name.to_lowercase();
+    !NOT_A_NAME.contains(&lower.as_str()) && !MEMBERSHIP_WORDS.contains(&lower.as_str())
 }
 
 /// Words that describe the membership rather than name a member.
@@ -609,7 +735,7 @@ pub fn extract_group_members(members_text: &str) -> Vec<String> {
     let splitter = re(r"[,\s]+");
     splitter
         .split(&text)
-        .map(|m| m.trim().trim_matches(|c| c == ',' || c == '.').to_string())
+        .map(|m| m.trim().trim_matches(is_name_punctuation).to_string())
         .filter(|m| {
             !m.is_empty()
                 && !MEMBERSHIP_WORDS.iter().any(|w| w.eq_ignore_ascii_case(m))

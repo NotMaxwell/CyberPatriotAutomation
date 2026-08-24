@@ -50,7 +50,7 @@ impl ServiceManagementTask {
     }
 
     /// The units the README wants running, resolved to unit names.
-    fn required_units(&self) -> Vec<String> {
+    pub fn required_units(&self) -> Vec<String> {
         self.readme_data
             .as_ref()
             .map(|r| {
@@ -63,7 +63,7 @@ impl ServiceManagementTask {
     }
 
     /// The units to mask: the prohibited list, minus anything protected.
-    fn units_to_mask(&self) -> Vec<(&'static str, &'static str)> {
+    pub fn units_to_mask(&self) -> Vec<(&'static str, &'static str)> {
         PROHIBITED_SERVICES
             .iter()
             .copied()

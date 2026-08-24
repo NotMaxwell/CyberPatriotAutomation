@@ -41,6 +41,14 @@ pub enum Style {
     Space,
     /// `net.ipv4.ip_forward = 0` - sysctl.conf, limits.conf.
     Equals,
+    /// `APT::Periodic::Update-Package-Lists "1";` - the apt configuration
+    /// directory.
+    ///
+    /// Its own style because the value is quoted and the line ends in a
+    /// semicolon, and apt rejects the file outright if either is missing -
+    /// which disables *all* automatic updating rather than just the setting
+    /// being written.
+    AptConf,
 }
 
 impl Style {
@@ -49,6 +57,7 @@ impl Style {
         match self {
             Style::Space => format!("{key} {value}"),
             Style::Equals => format!("{key} = {value}"),
+            Style::AptConf => format!("{key} \"{value}\";"),
         }
     }
 
@@ -68,6 +77,21 @@ impl Style {
             Style::Equals => {
                 let (key, value) = line.split_once('=')?;
                 Some((key.trim(), value.trim()))
+            }
+            Style::AptConf => {
+                let mut parts = line.splitn(2, char::is_whitespace);
+                let key = parts.next()?;
+                // Compared against the bare value, so the quoting and the
+                // trailing semicolon are stripped here rather than at every
+                // call site.
+                let value = parts
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_end_matches(';')
+                    .trim()
+                    .trim_matches('"');
+                Some((key, value))
             }
         }
     }
@@ -432,6 +456,51 @@ mod tests {
                 "runaway blank lines for {original:?}"
             );
         }
+    }
+
+    /// apt rejects a configuration file whose value is unquoted or whose line
+    /// has no semicolon, and a rejected file disables *all* automatic updating
+    /// rather than just the setting being written.
+    #[test]
+    fn apt_conf_values_keep_their_quotes_and_semicolon() {
+        let out = rewrite(
+            "",
+            Style::AptConf,
+            "APT::Periodic::Update-Package-Lists",
+            "1",
+        );
+        assert!(
+            out.contains(r#"APT::Periodic::Update-Package-Lists "1";"#),
+            "{out}"
+        );
+    }
+
+    /// Reading strips them again, so the comparison is against the bare value.
+    #[test]
+    fn an_apt_conf_value_reads_back_without_its_punctuation() {
+        let text = "APT::Periodic::Update-Package-Lists \"1\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n";
+        assert_eq!(
+            active_values(text, Style::AptConf, "APT::Periodic::Update-Package-Lists"),
+            ["1"]
+        );
+        assert_eq!(
+            active_values(text, Style::AptConf, "APT::Periodic::Unattended-Upgrade"),
+            ["0"]
+        );
+    }
+
+    #[test]
+    fn an_existing_apt_conf_value_is_replaced_not_appended() {
+        let out = rewrite(
+            "APT::Periodic::Update-Package-Lists \"0\";\n",
+            Style::AptConf,
+            "APT::Periodic::Update-Package-Lists",
+            "1",
+        );
+        assert_eq!(
+            active_values(&out, Style::AptConf, "APT::Periodic::Update-Package-Lists"),
+            ["1"]
+        );
     }
 
     #[test]
