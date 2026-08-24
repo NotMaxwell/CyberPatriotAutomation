@@ -10,6 +10,72 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.18.0
+
+`--directives`: what this round does differently.
+
+### Added
+
+- **`crates/core/src/directives.rs` and the `--directives` flag.** Most of a
+  hardening run is the same every round, and the tasks handle that part. What
+  loses points is the other part: the sentence in paragraph four saying this
+  machine is administered over SSH, or that Firefox must come from a PPA rather
+  than a snap, or that the display manager must stay as it is. A generic script
+  does the standard thing and quietly gets those wrong.
+
+  The parser already extracted what the tool could *act* on. Everything it could
+  not act on vanished silently - which is precisely the material a competitor
+  most needs and most often misses.
+
+  Each recognised instruction is sorted into one of three groups:
+
+  | Group | Meaning |
+  |---|---|
+  | `AUTOMATED` | a task acts on it, and the entry names which task and how |
+  | `NOT TOUCHED` | the tool has no code that would violate it |
+  | `BY HAND` | a person has to do it, and the entry says what |
+
+  The `BY HAND` group is the point. On the Ubuntu 22.04 Exhibition Round it
+  contains five items, including the one this module was written for: *Firefox
+  must remain installed using the official Mozilla PPA, and NOT as a SNAP
+  package*. `apt install firefox` on 22.04 installs a transitional package that
+  pulls the snap, so a tool reporting "installed Firefox" would satisfy nothing
+  and the competitor would never know.
+
+  `NOT TOUCHED` exists because *"we do not do that"* is only reassuring when it
+  is written down and checkable. *Do not change the time zone* is a promise this
+  tool can keep only because it has no code that would.
+
+  The report runs on `--directives` as a read-only summary, on `--parse-readme`
+  alongside the parsed data, and automatically at the start of every real run -
+  after the README is displayed and **before** any task executes, because the
+  by-hand list is no use at the end. Every directive is recorded in the
+  remediation ledger, with the by-hand ones marked non-compliant: they are
+  outstanding work, and a ledger that marked them done would be lying about the
+  state of the machine.
+
+### Notes on the implementation
+
+- **Sentences are split on punctuation only, never on a line break.** READMEs
+  wrap prose mid-sentence - the Ubuntu one breaks *Please add the / user
+  "candace"* across two lines - so treating a newline as a boundary would cut
+  exactly the sentences worth matching in half. A test pins it.
+
+- **Excerpts are centred on the phrase that matched**, not taken from the start
+  of the sentence. The `<pre>` block of usernames has no punctuation, so it
+  merges with the guideline after it, and the instruction about the primary
+  user's password was being shown as twenty-four usernames and an ellipsis.
+
+- **One directive per sentence.** Two patterns can describe the same
+  instruction from different angles - the PPA requirement and the "not a snap"
+  requirement are one sentence - and printing it twice makes a short report look
+  padded.
+
+- **The patterns are deliberately conservative.** One that fires on prose it
+  does not understand produces a confident, wrong classification, which is read
+  and believed - worse than the sentence going unmentioned. A README with no
+  such prose produces an empty report, and a test asserts that.
+
 ## 1.17.0
 
 The Ubuntu 22.04 Exhibition Round answer key, as a test suite - and the four

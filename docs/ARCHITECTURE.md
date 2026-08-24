@@ -35,6 +35,7 @@ is the short version — start there if you only want to run the thing.
   - [5.2 ReadmeParser](#52-readmeparser)
   - [5.8 knowledge — the tables](#58-knowledge--the-tables)
   - [5.9 The README corpus](#59-the-readme-corpus)
+  - [5.10 Directives — what this round does differently](#510-directives--what-this-round-does-differently)
 - [6. Native layer](#6-native-layer)
 - [7. Models](#7-models)
 - [8. The interactive menu](#8-the-interactive-menu)
@@ -126,12 +127,12 @@ alongside it until 2026-08-23 and is now frozen under
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
 | Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.17.0 | 1.8.0, frozen |
+| Version | 1.18.0 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |
-| Tests | 333 | 202, frozen |
+| Tests | 354 | 202, frozen |
 | Published size | ~2.7 MB | ~42 MB self-contained |
 | Startup | immediate, no runtime | JIT + runtime |
 
@@ -1572,6 +1573,64 @@ unquoted attribute, no `<html>`); and software named in prose alongside a
 
 ---
 
+## 5.10 Directives — what this round does differently
+
+`rust/crates/core/src/directives.rs` · `--directives`
+
+**Why.** Most of a hardening run is the same every round, and the tasks handle
+that part. What loses points is the other part: the sentence in paragraph four
+saying this machine is administered over SSH, or that Firefox must come from a
+PPA rather than a snap, or that the display manager must stay as it is. A
+generic script does the standard thing and quietly gets those wrong.
+
+The parser already extracts what the tool can *act* on — critical services,
+required software, group requirements. Everything it could not act on used to
+vanish silently, which is precisely the material a competitor most needs and
+most often misses.
+
+**What it does.** Reads the README's plain text, splits it into sentences, and
+matches each against a table of patterns anchored on wording that has actually
+appeared in a competition README. Each match is classified into one of three
+groups:
+
+| Group | Meaning |
+|---|---|
+| `AUTOMATED` | A task acts on it, and the entry names which task and how |
+| `NOT TOUCHED` | The tool has no code that would violate it — worth stating, because *"we do not do that"* is only reassuring when it is written down and checkable |
+| `BY HAND` | A person has to do it, and the entry says what |
+
+The last group is the point of the module.
+
+**How the sentence splitting works, and the trap in it.** Split on sentence
+punctuation only, never on a line break. READMEs wrap prose mid-sentence — the
+Ubuntu 22.04 one breaks *Please add the / user "candace"* across two lines — so
+treating a newline as a boundary would cut exactly the sentences worth matching
+in half.
+
+Excerpts are centred on the phrase that matched rather than taken from the start
+of the sentence. That is not cosmetic: the `<pre>` block of usernames has no
+punctuation, so it merges with the guideline that follows, and the instruction
+about the primary user's password was being displayed as twenty-four usernames
+and an ellipsis.
+
+**One directive per sentence.** Two patterns can describe the same instruction
+from different angles — the PPA requirement and the "not a snap" requirement are
+one sentence — and printing it twice makes a short report look padded.
+
+**Where it runs.** `--directives` on its own is a read-only report. It also runs
+automatically at the start of every real run, immediately after the parsed
+README is displayed and *before* any task executes, because the by-hand list is
+no use at the end. Every directive is recorded in the remediation ledger, with
+the by-hand ones marked non-compliant — they are outstanding work, and a ledger
+that marked them done would be lying about the state of the machine.
+
+**What it deliberately does not do.** The patterns are conservative. A pattern
+that fires on prose it does not understand produces a confident, wrong
+classification, which is read and believed — worse than the sentence going
+unmentioned. A README with no such prose produces an empty report.
+
+---
+
 ## 6. Native layer
 
 `rust/crates/windows/src/native/` (the `windows` crate)
@@ -1793,7 +1852,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 333 tests
+cargo test --workspace                  # 354 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat

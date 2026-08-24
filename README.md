@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-333-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-354-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -147,6 +147,49 @@ refuses to touch — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
 
 ---
 
+## What this round does differently
+
+Most of a hardening run is the same every round. What loses points is the other
+part: the sentence in paragraph four saying this machine is administered over
+SSH, or that Firefox must come from a PPA rather than a snap, or that the
+display manager must stay as it is. A generic script does the standard thing and
+quietly gets those wrong.
+
+`--directives` reads the prose and sorts every such instruction into three
+groups — and it runs automatically at the start of every real run, before
+anything is changed.
+
+```
+$ pinnacle-cypat --directives -r README.html
+
+Handled by a task - the README changed what the run does
+  ✓ a critical service - Service Management protects it and never masks it
+      "Therefore, sshd is a critical service and needs to remain enabled"
+  ✓ a group membership - User Management adds the named members
+      "Please add the user "candace" to the "firesidegirls" group"
+
+Not touched - no task has code that would break these
+  ✓ the clock - no task calls timedatectl, date or the time-zone APIs
+      "Please do not change the time zone, date, or time on this image"
+
+Do these by hand (5) - this tool cannot, and a missed one is a lost item
+  ! forensics questions - read them from the Desktop and answer them BEFORE
+      running any task - a remediation can destroy the evidence
+  ! install source - apt installs the snap transitional package on Ubuntu
+      22.04; add the PPA and pin it by hand
+      "Firefox must remain installed using the official Mozilla PPA, and NOT
+       as a SNAP package"
+  ! the display manager - verify with `cat /etc/X11/default-display-manager`
+      "The display manager should remain set to GDM3"
+```
+
+**The last group is the point.** The parser already extracts what the tool can
+act on; everything it *cannot* act on used to vanish silently. Every directive
+quotes the sentence it came from, so the classification can be checked rather
+than taken on trust, and all of them land in the run log.
+
+---
+
 ## How the README is found
 
 > [!IMPORTANT]
@@ -196,6 +239,7 @@ These are the same on both platforms:
 | `--readme <path>` | `-r` | Read the competition README at `<path>` |
 | `--auto-readme` | `-R` | Find the README automatically |
 | `--parse-readme` | | Show what the parser extracted, then exit (read-only) |
+| `--directives` | | Show what this round does differently, then exit (read-only) |
 | `--dry-run` | `-d` | Report what would change without changing it |
 | `--all` | | Run every task |
 | `--log <path>` | | Write the run log to `<path>` |
@@ -290,7 +334,7 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 333 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 354 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
 ```
 

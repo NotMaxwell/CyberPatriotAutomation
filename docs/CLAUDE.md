@@ -203,6 +203,19 @@ parser does; accepting a diff without reading it discards the only check there
 is. Adding a real competition README to `tests/corpus/` is the single most
 valuable contribution to the parser.
 
+### Adding a directive pattern
+
+`crates/core/src/directives.rs` classifies the README instructions that fall
+outside the standard checklist. When you add a task that honours a README
+instruction, move its pattern from `Manual` to `Automated` and say which task
+handles it — an entry that claims automation the code does not do is worse than
+no entry.
+
+Be conservative. A pattern that fires on prose it does not understand produces a
+confident, wrong classification that will be read and believed. Anchor each one
+on wording that has actually appeared in a competition README, and add a test
+against the corpus fixture it came from.
+
 ### Answer keys are the specification
 
 CyberPatriot publishes an answer key for its Exhibition Rounds: every scored

@@ -18,6 +18,7 @@
 
 pub mod app_config;
 pub mod command;
+pub mod directives;
 pub mod html;
 pub mod models;
 pub mod platform;

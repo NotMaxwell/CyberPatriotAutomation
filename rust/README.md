@@ -31,7 +31,7 @@ Or by hand:
 
 ```bash
 cd rust
-cargo test --workspace     # 333 tests
+cargo test --workspace     # 354 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```

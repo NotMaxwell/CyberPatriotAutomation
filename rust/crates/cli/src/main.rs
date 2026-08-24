@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use pinnacle_core::app_config;
+use pinnacle_core::directives;
 use pinnacle_core::models::{FixOutcome, ReadmeData, TaskResult};
 use pinnacle_core::platform::{Concurrency, Platform, TaskSpec};
 use pinnacle_core::readme_parser;
@@ -78,6 +79,11 @@ const GLOBAL_FLAGS: &[(&str, &str, &str)] = &[
         "--parse-readme",
         "",
         "Show what the parser extracted, then exit (read-only)",
+    ),
+    (
+        "--directives",
+        "",
+        "Show what this round does differently, then exit (read-only)",
     ),
     (
         "--dry-run",
@@ -167,6 +173,29 @@ fn print_help() {
     println!("    pinnacle-cypat --auto-readme --all            # apply");
 }
 
+/// Scan the README for round-specific instructions, show them, and record them.
+///
+/// Returns false when there was no README to scan, so the caller can say so
+/// rather than printing an empty report.
+async fn report_directives(path: Option<&str>) -> bool {
+    let Some(path) = path else {
+        return false;
+    };
+    let Ok(html) = tokio::fs::read_to_string(path).await else {
+        // The parser already read this file successfully, so a failure here is
+        // odd enough to mention rather than swallow.
+        ui::markup_line(&format!(
+            "[yellow]⚠ Could not re-read {} to scan for round-specific instructions.[/]",
+            ui::escape(path)
+        ));
+        return true;
+    };
+    let found = directives::extract(&html);
+    directives::display(&found);
+    directives::record(&found);
+    true
+}
+
 async fn with_spinner<T, F: Future<Output = T>>(message: &str, fut: F) -> T {
     let pb = ProgressBar::new_spinner();
     pb.enable_steady_tick(Duration::from_millis(100));
@@ -244,13 +273,14 @@ async fn run_automation() {
         .collect();
 
     let parse_readme_only = has_flag(&cli_args, &["--parse-readme"]);
+    let directives_only = has_flag(&cli_args, &["--directives"]);
 
     // Where to write the run log; `--log <path>` overrides the default.
     let log_path = extract_argument(&cli_args, &["--log"])
         .map(std::path::PathBuf::from)
         .unwrap_or_else(run_log::default_log_path);
 
-    let any_task_named = !named.is_empty() || parse_readme_only;
+    let any_task_named = !named.is_empty() || parse_readme_only || directives_only;
 
     // Running everything has to be asked for.
     //
@@ -283,6 +313,10 @@ async fn run_automation() {
     // itself as HTML. If it does not resolve, the original path is kept so the
     // parser reports "not found" against what the user actually typed.
     let mut readme_data: Option<ReadmeData> = None;
+    // The document the parser actually read, kept so the directive scan works
+    // on the same bytes rather than re-resolving the path and possibly
+    // disagreeing about which file was used.
+    let mut readme_source: Option<String> = None;
     if let Some(file) = &readme_file {
         if !file.is_empty() {
             let path = std::path::Path::new(file);
@@ -306,6 +340,7 @@ async fn run_automation() {
                         ));
                     }
                     readme_data = Some(readme_parser::parse_html_readme_async(&resolved).await);
+                    readme_source = Some(resolved);
                 }
                 // A shortcut or URL that could not be followed must not be fed
                 // to the HTML parser: an INI file yields a README with no title
@@ -326,6 +361,7 @@ async fn run_automation() {
                     // "not found" against exactly what was typed.
                     ui::markup_line(&format!("[dim]Using README: {}[/]", ui::escape(file)));
                     readme_data = Some(readme_parser::parse_html_readme_async(file).await);
+                    readme_source = Some(file.clone());
                 }
             }
         }
@@ -341,10 +377,29 @@ async fn run_automation() {
         }
     }
 
+    // Directives-only mode: report what this round does differently, and stop.
+    //
+    // Separate from --parse-readme because they answer different questions.
+    // That one asks "what did the parser get out of this document"; this one
+    // asks "what about this round is not the standard checklist", which is the
+    // question a competitor has ninety seconds to answer at the start.
+    if directives_only {
+        match report_directives(readme_source.as_deref()).await {
+            true => {}
+            false => ui::markup_line(
+                "[yellow]No README file specified. Use --readme <file> or --auto-readme.[/]",
+            ),
+        }
+        ui::write_line();
+        finish_log(&log_path);
+        return;
+    }
+
     // Parse-only mode: display the parsed data and stop.
     if parse_readme_only {
         if let Some(data) = &readme_data {
             readme_parser::display_parsed_data(data);
+            report_directives(readme_source.as_deref()).await;
         } else {
             ui::markup_line(
                 "[yellow]No README file specified. Use --readme <file> to parse one.[/]",
@@ -371,6 +426,10 @@ async fn run_automation() {
     // it first is what makes the run reviewable, and it lands in the log too.
     if let Some(data) = &readme_data {
         readme_parser::display_parsed_data(data);
+        // What this round does differently, before anything is changed. The
+        // by-hand list is the part of a README a competitor most often misses,
+        // and it is no use at the end of the run.
+        report_directives(readme_source.as_deref()).await;
         ui::write_line();
     }
 
