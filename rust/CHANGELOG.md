@@ -10,6 +10,29 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.19.1
+
+### Fixed
+
+- **The Linux binary is now built against musl and runs on Ubuntu 22.04.**
+
+  A glibc build links against whatever the *build* machine has. Built on a
+  current distribution it required `GLIBC_2.39`; Ubuntu 22.04 - the image a
+  round actually runs on - ships 2.35, so the binary refused to start, with an
+  error naming a symbol version rather than the problem. Worse, the failure
+  appeared on the competition image rather than at build time.
+
+  glibc cannot be upgraded past what an Ubuntu release ships: `libc6` is pinned
+  to the release, and forcing a newer one is a well-known way to break the
+  system. So the fix has to be on the build side. musl links statically - no
+  libc dependency at all, and the same binary runs on any Linux. It costs about
+  200 KB.
+
+- **`publish.sh` builds both platforms and refuses to ship a glibc-linked Linux
+  binary.** It checks the artefact for glibc symbol versions and fails the build
+  if it finds any, because that failure is otherwise invisible until the worst
+  possible moment.
+
 ## 1.19.0
 
 Linux brought to parity with Windows: fifteen tasks, and tables the same size.

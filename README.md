@@ -343,7 +343,25 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ```bash
 ./scripts/check.sh      # fmt, clippy, 381 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
+                        # -> publish-linux-x64/pinnacle-cypat
 ```
+
+> [!IMPORTANT]
+> **The Linux binary is built against musl, not glibc, and has to be.** A glibc
+> build links against whatever the *build* machine has: built on a current
+> distribution it requires `GLIBC_2.39`, while Ubuntu 22.04 — the image a round
+> actually runs on — ships 2.35. It refuses to start, with an error naming a
+> symbol version rather than the problem.
+>
+> glibc cannot be upgraded past what an Ubuntu release ships (`libc6` is pinned
+> to the release, and forcing a newer one breaks the system), so the fix has to
+> be on the build side. musl links statically: no libc dependency at all, and
+> the same binary runs on any Linux. It costs about 200 KB, and `publish.sh`
+> fails the build if the artefact turns out to reference glibc anyway.
+>
+> ```bash
+> rustup target add x86_64-unknown-linux-musl
+> ```
 
 `check.sh` is everything CI runs, ordered so it fails fastest; `check.ps1` is the
 same on Windows. By hand:

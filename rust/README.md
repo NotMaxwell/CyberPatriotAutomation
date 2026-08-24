@@ -52,6 +52,24 @@ cargo insta review                                                    # step thr
 Adding a real competition README to `crates/core/tests/corpus/` is the most useful thing you
 can do for the parser — it found two bugs on its first run.
 
+### Producing the Linux binary
+
+Built against **musl**, not glibc, and it has to be. A glibc build links against
+whatever the build machine has: built on a current distribution it requires
+`GLIBC_2.39`, while Ubuntu 22.04 ships 2.35 and refuses to start it. glibc
+cannot be upgraded past what an Ubuntu release ships, so the fix is on this
+side.
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release -p pinnacle-cypat --target x86_64-unknown-linux-musl
+# -> target/x86_64-unknown-linux-musl/release/pinnacle-cypat  (static, ~3.5 MB)
+```
+
+`./scripts/publish.sh` does this and then checks the result for glibc symbol
+versions, failing the build if it finds any — that failure is otherwise
+invisible until the binary is on the competition image.
+
 ### Producing a Windows `.exe`
 
 Tests and lints run on any host, but the shipping artefact is a Windows binary.

@@ -127,7 +127,7 @@ alongside it until 2026-08-23 and is now frozen under
 | | Rust (the tool) | C# (archived) |
 |---|---|---|
 | Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.19.0 | 1.8.0, frozen |
+| Version | 1.19.1 | 1.8.0, frozen |
 | Framework | Rust 2024 | .NET 10 |
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
@@ -1897,8 +1897,25 @@ unnoticed. Individual crates are addressable with `-p pinnacle-linux` and so on.
 non-Windows fallbacks — the whole of `crates/windows/src/native` is
 `#[cfg(windows)]` and is never seen. A Windows host is the mirror image.
 
-**Cross-compiling from Linux** needs the GNU target — `x86_64-pc-windows-msvc`
-requires Microsoft's linker:
+**The Linux artefact is musl, not glibc.** A glibc build links against whatever
+the build machine has, and a binary built on a current distribution requires
+`GLIBC_2.39` while Ubuntu 22.04 — the image a round runs on — ships 2.35. It
+refuses to start, with an error naming a symbol version rather than the problem,
+and it does so on the competition image rather than here.
+
+glibc cannot be upgraded past what an Ubuntu release ships, so the fix has to be
+on this side. musl links statically: no libc dependency, and the same binary
+runs on any Linux. `publish.sh` checks the artefact for glibc symbol versions
+and fails the build if it finds any, because that failure is otherwise invisible
+until the worst possible moment.
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+cargo build --release -p pinnacle-cypat --target x86_64-unknown-linux-musl
+```
+
+**Cross-compiling for Windows from Linux** needs the GNU target —
+`x86_64-pc-windows-msvc` requires Microsoft's linker:
 
 ```bash
 rustup target add x86_64-pc-windows-gnu
