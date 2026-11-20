@@ -52,7 +52,7 @@ rust/
     │   ├── {account,policy,registry,service}_ops.rs   proved writes
     │   ├── knowledge.rs · chocolatey.rs · readme_services.rs
     │   └── tasks/
-    ├── linux/         pinnacle-linux    — thirteen tasks
+    ├── linux/         pinnacle-linux    — fifteen tasks
     │   ├── platform.rs                  the task table
     │   ├── file_ops.rs                  proved writes to /etc (what registry_ops is)
     │   ├── systemd_ops.rs               proved systemctl (what service_ops is)

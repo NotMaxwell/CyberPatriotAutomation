@@ -19,9 +19,10 @@ Size estimates are rough guesses, not measurements.
 These are needed whether or not the GUI happens. Details are under
 [Linux build: what is left](#linux-build-what-is-left).
 
-- [ ] Fix the dry-run test race that writes to `/etc` when tests run as root
-- [ ] Add CI (GitHub Actions) running `scripts/check.sh` and `scripts/publish.sh`
-- [ ] Fix the stale task and test counts in the docs
+- [x] Fix the dry-run test race that writes to `/etc` when tests run as root
+- [x] Add CI (GitHub Actions) running `scripts/check.sh` and `scripts/publish.sh` (`.github/workflows/ci.yml`)
+- [x] Fix the stale task and test counts in the docs
+- [x] Add `RUN.sh`, the Linux launcher
 
 **Done when:** `cargo test --workspace` passes as root and as a normal user, and CI runs on every push.
 
@@ -119,7 +120,7 @@ State checked on 2026-11-20 in a Linux container (x86_64, running as root, no Wi
 | `cargo test --workspace -- --test-threads=1` | pass: 395 passed, 0 failed |
 | Windows `.exe` cross-build | not run (mingw linker not installed here) |
 
-### 1. Dry-run tests race on a global, and wrote to `/etc` as root (bug)
+### 1. Dry-run tests race on a global, and wrote to `/etc` as root (bug) — FIXED
 
 `run_log::DRY_RUN` is one process-wide `AtomicBool`. Six Linux tests set it to
 `true`, run a task, then set it back to `false`:
@@ -139,7 +140,7 @@ changes it.
 for the whole of each of those six tests. Optionally, add a check that fails any
 test that touches `/etc` while running as root.
 
-### 2. No CI
+### 2. No CI — ADDED
 
 `.github/` contains only `copilot-instructions.md`. `check.sh` and `publish.sh`
 run only when someone remembers. Add one workflow:
@@ -156,13 +157,13 @@ records one real Ubuntu run (1.19.2). 1.20.0 then changed README discovery
 log showing that version on a real image. Run `--auto-readme --all --dry-run`
 on an Ubuntu 22.04 image, then a real run, and keep both logs.
 
-### 4. No Linux launcher
+### 4. No Linux launcher — ADDED (`RUN.sh`)
 
 Windows has `RUN.bat` / `RUN.ps1`. Linux has nothing equivalent. Add a
 `RUN.sh` that checks for root, re-runs itself under `sudo` (keeping
 `SUDO_USER`), and sets the executable bit on the binary.
 
-### 5. Docs say thirteen Linux tasks; there are fifteen
+### 5. Docs say thirteen Linux tasks; there are fifteen — FIXED
 
 - "thirteen": `docs/CLAUDE.md` (layout tree), `docs/ARCHITECTURE.md:195`, `README.md:429`
 - "fifteen": `README.md` task table, `docs/ARCHITECTURE.md:254`

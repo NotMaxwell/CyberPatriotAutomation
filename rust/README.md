@@ -24,14 +24,14 @@ several are the kind of mistake that is easy to reintroduce.
 ## Build & test
 
 ```bash
-./scripts/check.sh         # fmt, clippy, 182 tests, and the Windows type-check
+./scripts/check.sh         # fmt, clippy, 395 tests, and the Windows type-check
 ```
 
 Or by hand:
 
 ```bash
 cd rust
-cargo test --workspace     # 381 tests
+cargo test --workspace     # 395 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -363,7 +363,7 @@ name an operating system; each platform crate implements
 |---|---|
 | `crates/core` | `platform.rs` (the seam), `task.rs`, `readme_parser.rs`, `html.rs`, `remediation.rs`, `run_log.rs`, `app_config.rs`, `command.rs`, `ui.rs`, `software_matching.rs`, `models/`, the README corpus |
 | `crates/windows` | `native/` (Win32), `{account,policy,registry,service}_ops.rs`, `knowledge.rs`, `chocolatey.rs`, `tasks/` — fifteen tasks |
-| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — thirteen tasks |
+| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — fifteen tasks |
 | `crates/cli` | `main.rs` (flags and the run pipeline), `tui.rs` (the menu) |
 
 Where the C# port's files ended up:

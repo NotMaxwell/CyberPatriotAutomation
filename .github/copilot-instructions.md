@@ -19,7 +19,7 @@ do not suggest publishing to crates.io — the crates are deliberately marked
 |---|---|---|
 | `crates/core` | README parser, remediation ledger, run log, models, console, the `Task` trait, the platform seam | **Nothing here may name an operating system** |
 | `crates/windows` | Win32 `native/`, `*_ops.rs`, `knowledge.rs`, `chocolatey.rs`, fifteen tasks | Windows only |
-| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, thirteen tasks | Linux only |
+| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, fifteen tasks | Linux only |
 | `crates/cli` | `main.rs`, `tui.rs` | Names no OS; reads `Host::tasks()` |
 
 **Do not suggest `#[cfg(windows)] / #[cfg(unix)]` arms of the same function**

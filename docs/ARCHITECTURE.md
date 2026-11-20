@@ -132,7 +132,7 @@ alongside it until 2026-08-23 and is now frozen under
 | Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
 | Console UI | hand-rolled `ui` module | Spectre.Console |
 | HTML | `scraper` (html5ever) | regex |
-| Tests | 381 | 202, frozen |
+| Tests | 395 | 202, frozen |
 | Published size | ~2.7 MB | ~42 MB self-contained |
 | Startup | immediate, no runtime | JIT + runtime |
 
@@ -192,7 +192,7 @@ rust/
     │   └── tests/
     ├── linux/                     pinnacle-linux
     │   └── src/
-    │       ├── platform.rs        the thirteen Linux tasks, one row each
+    │       ├── platform.rs        the fifteen Linux tasks, one row each
     │       ├── file_ops.rs        proved writes to /etc - see §3.2
     │       ├── systemd_ops.rs     proved systemctl operations
     │       ├── user_ops.rs        /etc/passwd, shadow, group; useradd, chage
@@ -1882,7 +1882,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 381 tests
+cargo test --workspace                  # 395 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat
