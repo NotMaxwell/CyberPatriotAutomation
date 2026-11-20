@@ -14,8 +14,6 @@ mod app;
 mod backend;
 mod screens;
 mod screenshot;
-// The screens that read most of this land in #3-#5; drop the allow with them.
-#[allow(dead_code)]
 mod state;
 
 #[cfg(target_os = "linux")]

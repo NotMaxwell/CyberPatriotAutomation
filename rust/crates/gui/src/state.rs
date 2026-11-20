@@ -320,13 +320,42 @@ fn row_for<'a>(rows: &'a mut Vec<TaskRow>, name: &str) -> &'a mut TaskRow {
 
 fn output_line(line: &ui::Line) -> Option<OutputLine> {
     match line {
-        ui::Line::Markup(text) => Some(OutputLine::Text(ui::plain(text))),
-        ui::Line::Section(title) => Some(OutputLine::Section(ui::plain(title))),
+        ui::Line::Markup(text) => Some(OutputLine::Text(for_display(&ui::plain(text)))),
+        ui::Line::Section(title) => Some(OutputLine::Section(for_display(&ui::plain(title)))),
         // Drawn tables and charts: the plain form is what the log keeps, and
         // what reads correctly without a terminal's box-drawing alignment.
         ui::Line::Rendered { plain, .. } if plain.is_empty() => None,
-        ui::Line::Rendered { plain, .. } => Some(OutputLine::Text(plain.clone())),
+        ui::Line::Rendered { plain, .. } => Some(OutputLine::Text(for_display(plain))),
     }
+}
+
+/// The console's symbols, made readable in egui's default font.
+///
+/// The CLI decorates its output with emoji and dingbats (📊 ✓ ⚠ ❌ 💡) that
+/// egui's bundled fonts lack, so they drew as empty boxes. The status marks
+/// carry meaning and become words; the decorative ones are dropped. The run
+/// log is untouched - this is display only.
+pub fn for_display(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '✓' | '✔' | '✅' => out.push_str("OK"),
+            '✗' | '✘' | '❌' => out.push('X'),
+            '⚠' => out.push('!'),
+            '\u{FE0F}' => {}
+            c if is_decorative(c) => {}
+            c => out.push(c),
+        }
+    }
+    // Dropping a leading emoji leaves the space that followed it.
+    match out.strip_prefix(' ') {
+        Some(rest) if text.starts_with(|c: char| is_decorative(c)) => rest.to_string(),
+        _ => out,
+    }
+}
+
+fn is_decorative(c: char) -> bool {
+    matches!(c as u32, 0x1F300..=0x1FAFF | 0x2600..=0x26FF | 0x2700..=0x27BF)
 }
 
 /// Where a GUI run writes its log: the same default the CLI uses.
@@ -517,7 +546,7 @@ mod tests {
         )));
         assert_eq!(
             s.run.as_ref().unwrap().output,
-            [OutputLine::Text("✓ done".to_string())]
+            [OutputLine::Text("OK done".to_string())]
         );
 
         s.apply_event(RunEvent::TaskFinished(TaskResult {
@@ -540,6 +569,31 @@ mod tests {
         assert_eq!(s.screen, Screen::Results);
         assert!(s.run.as_ref().unwrap().finished);
         assert!(s.summary.is_some());
+    }
+
+    #[test]
+    fn console_symbols_become_readable_text() {
+        assert_eq!(
+            for_display("✓ All changes verified"),
+            "OK All changes verified"
+        );
+        assert_eq!(
+            for_display("⚠️ Overall Completion Rate: 0.0%"),
+            "! Overall Completion Rate: 0.0%"
+        );
+        assert_eq!(
+            for_display("❌ Overall Confidence Level"),
+            "X Overall Confidence Level"
+        );
+        assert_eq!(for_display("💡 Tip: verify by hand"), "Tip: verify by hand");
+        assert_eq!(
+            for_display("📊 Reading current system state..."),
+            "Reading current system state..."
+        );
+        assert_eq!(
+            for_display("plain - 8.8.8.8 = Google"),
+            "plain - 8.8.8.8 = Google"
+        );
     }
 
     #[test]
