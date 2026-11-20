@@ -15,6 +15,7 @@
 //! | `PINNACLE_GUI_SELECT=all` | tick every task |
 //! | `PINNACLE_GUI_SCREEN=<readme\|tasks\|confirm>` | open that screen once the README is in |
 //! | `PINNACLE_GUI_DRY_RUN=1` | start a dry run once the README is in; capture after it finishes |
+//! | `PINNACLE_GUI_STAY=run` | stay on the Run screen after the run finishes, to capture it |
 //! | `PINNACLE_GUI_SCREENSHOT=<png>` | save a screenshot once the app has settled, then exit |
 //!
 //! The dry-run hook forces a preview whatever else is set: no hook can make the
@@ -37,6 +38,7 @@ use crate::state::{Action, AppState, Screen};
 struct Hooks {
     screen: Option<Screen>,
     dry_run: bool,
+    stay_on_run: bool,
     /// The hooked screen or run has been reached; nothing more to drive.
     done: bool,
 }
@@ -54,6 +56,7 @@ impl Hooks {
         Self {
             screen,
             dry_run: std::env::var("PINNACLE_GUI_DRY_RUN").is_ok_and(|v| v == "1"),
+            stay_on_run: std::env::var("PINNACLE_GUI_STAY").is_ok_and(|v| v == "run"),
             done: false,
         }
     }
@@ -156,7 +159,12 @@ impl<P: Platform + 'static> App<P> {
         if let Some(rx) = &self.events {
             loop {
                 match rx.try_recv() {
-                    Ok(event) => self.state.apply_event(event),
+                    Ok(event) => {
+                        self.state.apply_event(event);
+                        if self.hooks.stay_on_run && self.state.screen == Screen::Results {
+                            self.state.screen = Screen::Run;
+                        }
+                    }
                     Err(TryRecvError::Empty) => break,
                     Err(TryRecvError::Disconnected) => {
                         self.events = None;
