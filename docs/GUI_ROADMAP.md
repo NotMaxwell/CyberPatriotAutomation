@@ -155,8 +155,16 @@ sudo find /etc -name '*.pinnacle.bak'      # must print nothing
 `ReferenceMaterial/` has two run logs, both Windows v1.8.0. The CHANGELOG
 records one real Ubuntu run (1.19.2). 1.20.0 then changed README discovery
 (`.desktop` launchers, `/opt/CyberPatriot`, `SUDO_USER`), and the repo has no
-log showing that version on a real image. Run `--auto-readme --all --dry-run`
-on an Ubuntu 22.04 image, then a real run, and keep both logs.
+log showing that version on a real image. 1.21.0 adds PAM and sudoers changes,
+tested only in an Ubuntu 24.04 container. Run `./RUN.sh --auto-readme --all
+--dry-run` on an Ubuntu 22.04 image, then a real run, and keep both logs. After
+the real run, check by hand: log in as an admin with the correct password, run
+`sudo -k; sudo true` (should ask for the password), and change a password.
+
+A dry run of 1.20.0 against `ReferenceMaterial/README-Linux.html` in the dev
+container completed with exit 0 and changed nothing (every file under `/etc`
+and the account list checksummed before and after). That is a pipeline check,
+not a substitute for the image.
 
 ### 4. No Linux launcher — ADDED (`RUN.sh`)
 
@@ -170,7 +178,19 @@ Windows has `RUN.bat` / `RUN.ps1`. Linux has nothing equivalent. Add a
 - "fifteen": `README.md` task table, `docs/ARCHITECTURE.md:254`
 - `rust/README.md` says "182 tests" in one place and "381 tests" in another. The actual count is 395.
 
-### 6. Only one Linux answer key
+### 6. Reported-only gaps — FIXED in 1.21.0
+
+- PAM lockout (`pam_faillock`) and password history (`pam_pwhistory`) are now
+  enabled through `pam-auth-update` profiles, with a structural order check
+  and rollback (`crates/linux/src/pam_ops.rs`).
+- sudo `NOPASSWD` / `!authenticate` removed, rule kept, `visudo -c` guarded
+  (`crates/linux/src/sudo_ops.rs`).
+- Reported: PAM lines that skip the password check, GDM/LightDM auto-login,
+  LightDM guest sessions.
+
+### 7. Prohibited Media could delete `/opt/CyberPatriot` files — FIXED in 1.20.1
+
+### 8. Only one Linux answer key
 
 `crates/linux/tests/answer_key.rs` encodes the Ubuntu 22.04 Exhibition Round.
 Add more Ubuntu READMEs to `crates/core/tests/corpus/` as they become available.

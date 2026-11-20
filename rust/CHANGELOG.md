@@ -10,6 +10,51 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.21.0
+
+Linux: lockout, password history and passwordless sudo are now fixed rather
+than reported.
+
+### Added
+
+- **Lockout and password history are enabled through `pam-auth-update`.**
+  Both were reported and left alone, because a hand-inserted line in the
+  ordered PAM stack can make a correct password land on `pam_deny` and lock
+  out every account, root's included. The new `pam_ops` module installs the
+  CIS Ubuntu 22.04 profiles (`pam_faillock` preauth/authfail, `pam_pwhistory
+  remember=5`) and lets `pam-auth-update` compute the order. Safeguards:
+  - no `--force`: an image whose `common-*` files carry edits it cannot merge
+    is refused and reported, never overwritten;
+  - the result is checked structurally: a successful `pam_unix` must jump
+    past `authfail` and `pam_deny`, and `pam_pwhistory` must sit between
+    `pam_pwquality` and `pam_unix`;
+  - anything unexpected is rolled back: profiles disabled and removed, the
+    original files restored.
+  History is not attempted without `pam_pwquality`, which `pam_pwhistory`'s
+  `use_authtok` depends on.
+
+- **sudo `NOPASSWD` is removed (Account Permissions).** The tag is dropped
+  and the rule kept: commenting out a planted `%sudo ALL=(ALL:ALL) NOPASSWD:
+  ALL` would take sudo away from every administrator. `Defaults !authenticate`
+  is commented out. Every edit is checked with `visudo -c` and reverted if it
+  fails; a configuration that already fails the check is not touched.
+
+- **Reported, not changed:** PAM `auth` lines that let a login through
+  without a password (a planted `auth sufficient pam_permit.so`), GDM
+  auto-login and timed login, and LightDM guest sessions and auto-login.
+
+### Tested
+
+On this project's Ubuntu 24.04 dev container with `libpam-pwquality` (the
+22.04 desktop PAM layout), running the release binary for real and driving
+`su`, `passwd` and `sudo` as ordinary users: a correct password logs in, five
+wrong ones lock the account, a reset unlocks it; a reused password is refused;
+a second run changes nothing; an unmergeable edit is refused with all three
+PAM files byte-identical; planted `NOPASSWD` and `!authenticate` stop working
+while the user keeps sudo with a password; files stay 0440; an
+already-invalid sudoers is left untouched. **Not yet run on an Ubuntu 22.04
+competition image.**
+
 ## 1.20.1
 
 ### Fixed

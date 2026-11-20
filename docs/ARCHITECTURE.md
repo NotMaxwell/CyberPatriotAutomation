@@ -263,8 +263,8 @@ is no row for it — and a test asserts that.
 
 | Flag | Task | Mechanism |
 |---|---|---|
-| `--password-policy`, `-p` | Password Policy | `pwquality.conf`, `faillock.conf`, PAM |
-| `--account-permissions`, `-a` | Account Permissions | `/etc/shadow`, `chage`, uid-0 audit |
+| `--password-policy`, `-p` | Password Policy | `pwquality.conf`, `faillock.conf`; `pam_faillock` and `pam_pwhistory` as `pam-auth-update` profiles (`pam_ops`) |
+| `--account-permissions`, `-a` | Account Permissions | `/etc/shadow`, `chage`, sudoers `NOPASSWD` (`sudo_ops`), uid-0 and display-manager audit |
 | `--user-management`, `-u` | User Management | `useradd`, `userdel`, `gpasswd` |
 | `--service-management`, `-s` | Service Management | `systemctl` mask/enable |
 | `--audit-policy`, `-t` | Audit Policy | `auditd`, `rsyslog`, `rules.d` |
@@ -328,6 +328,26 @@ not:
 - **Every Samba share and NFS export.** A share may be exactly what the round
   requires — a README naming Samba as critical means the machine is a file
   server — so the options are graded and the definitions left alone.
+- **PAM lines that skip the password check** (a planted
+  `auth sufficient pam_permit.so`). Removing the wrong `auth` line can lock
+  everyone out, so the file and line are reported for a person to remove.
+- **Display-manager auto-login.** The README usually makes the primary account
+  auto-login on purpose, and Account Permissions runs without the README.
+  LightDM guest sessions are reported too.
+
+**PAM lockout and history are fixed, through `pam-auth-update`.** They were
+reported-only until 1.21.0, because a hand-inserted line in the ordered PAM
+stack can make a correct password land on `pam_deny` and lock out every account,
+root's included. `pam_ops` installs the CIS Ubuntu 22.04 profiles and lets
+`pam-auth-update` compute the order, never with `--force` (an image whose files
+carry edits it cannot merge is refused, not overwritten); it then checks the
+result structurally — a successful `pam_unix` must jump past `authfail` and
+`pam_deny` — and rolls everything back if the check fails.
+
+**sudo `NOPASSWD` is fixed by removing the tag, not the rule.** The usual plant
+is the stock `%sudo` line with `NOPASSWD:` added; commenting it out would take
+sudo away from every administrator. Every edit is checked with `visudo -c` and
+reverted if it fails, and a configuration that already fails is not touched.
 
 Media files are also reported rather than deleted unless the README's scenario
 text actually prohibits them — a round set at a media production company does
