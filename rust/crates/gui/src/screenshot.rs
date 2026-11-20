@@ -29,11 +29,17 @@ impl Screenshot {
         })
     }
 
-    /// Call once per frame, after drawing.
-    pub fn update(&mut self, ctx: &egui::Context) {
-        self.frame += 1;
+    /// Call once per frame, after drawing. `settled` is false while work the
+    /// screenshot should show the result of (an inspection, a run) is still in
+    /// flight; warm-up frames are counted only once it is true.
+    pub fn update(&mut self, ctx: &egui::Context, settled: bool) {
         // Keep frames coming; an idle egui app would never reach the capture.
         ctx.request_repaint();
+        if !settled {
+            self.frame = 0;
+            return;
+        }
+        self.frame += 1;
         if !self.requested && self.frame >= WARMUP_FRAMES {
             self.requested = true;
             let (path, done) = (self.path.clone(), ctx.clone());

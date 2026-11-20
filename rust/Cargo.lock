@@ -2042,12 +2042,14 @@ dependencies = [
 name = "pinnacle-cypat-gui"
 version = "1.22.0"
 dependencies = [
+ "async-trait",
  "eframe",
  "embed-manifest",
  "image",
  "pinnacle-core",
  "pinnacle-linux",
  "pinnacle-windows",
+ "tokio",
 ]
 
 [[package]]

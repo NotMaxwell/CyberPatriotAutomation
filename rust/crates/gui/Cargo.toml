@@ -19,6 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 pinnacle-core.workspace = true
+tokio.workspace = true
 # Only the PNG encoder: screenshot mode needs nothing else from `image`.
 image = { version = "0.25", default-features = false, features = ["png"] }
 
@@ -33,6 +34,9 @@ eframe = { version = "=0.37.0", default-features = false, features = ["wgpu", "d
 [target.'cfg(target_os = "linux")'.dependencies]
 pinnacle-linux.workspace = true
 eframe = { version = "=0.37.0", default-features = false, features = ["glow", "default_fonts", "x11"] }
+
+[dev-dependencies]
+async-trait.workspace = true
 
 [build-dependencies]
 embed-manifest = "1.5.1"
