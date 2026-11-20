@@ -14,7 +14,7 @@
 //! | Wanted | Where it lives |
 //! |---|---|
 //! | Length and character classes | `pam_pwquality` |
-//! | History (no reuse) | `pam_unix` `remember=` |
+//! | History (no reuse) | `pam_pwhistory`, via a `pam-auth-update` profile |
 //! | Lockout after failed attempts | `pam_faillock` |
 //! | Ageing (max/min/warn) | `login.defs`, applied by Security Hardening |
 //!
@@ -24,24 +24,21 @@
 //! `pam-auth-update` whenever a package touches authentication, which silently
 //! reverts arguments added there. `pwquality.conf` survives it.
 //!
-//! `pam_faillock` needs a line in `common-auth`, which has no equivalent
-//! standalone file. That edit is made in place, and the module comment on
-//! `file_ops` explains why a duplicate definition there is cleaned up rather
-//! than tolerated.
+//! `pam_faillock` and `pam_pwhistory` need lines in `common-auth` and
+//! `common-password`, whose order decides whether they work or lock everyone
+//! out. They are added as `pam-auth-update` profiles, which compute that order,
+//! and the result is checked and rolled back if unsafe - see [`crate::pam_ops`].
 
 use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::task::Task;
 use pinnacle_core::{impl_task_meta, remediation, ui};
 
 use crate::file_ops::{self, Style};
+use crate::pam_ops::{self, COMMON_AUTH, COMMON_PASSWORD};
 use async_trait::async_trait;
 
 /// Complexity, read by `pam_pwquality` on every password change.
 const PWQUALITY_CONF: &str = "/etc/security/pwquality.conf";
-
-/// Where `pam_faillock` and `pam_unix` are configured.
-const COMMON_AUTH: &str = "/etc/pam.d/common-auth";
-const COMMON_PASSWORD: &str = "/etc/pam.d/common-password";
 
 /// One complexity setting: the key, the value, and what it buys.
 const PWQUALITY: &[(&str, &str, &str)] = &[
@@ -77,7 +74,8 @@ const PWQUALITY: &[(&str, &str, &str)] = &[
     ),
 ];
 
-/// How many previous passwords `pam_unix` refuses to accept again.
+/// How many previous passwords are refused. Written into
+/// [`pam_ops::PWHISTORY_PROFILE`]; a test keeps the two in step.
 const REMEMBER: u32 = 5;
 
 /// Failed attempts before `pam_faillock` locks the account, and for how long.
@@ -118,17 +116,54 @@ pub fn faillock_configured(common_auth: &str) -> bool {
         .any(|l| l.contains("pam_faillock.so"))
 }
 
-/// The `remember=` value on the `pam_unix` password line, if there is one.
-pub fn remember_value(common_password: &str) -> Option<u32> {
-    common_password
-        .lines()
-        .filter(|l| file_ops::is_active(l))
-        .find(|l| l.contains("pam_unix.so"))
-        .and_then(|l| {
-            l.split_whitespace()
-                .find_map(|token| token.strip_prefix("remember="))
-        })
-        .and_then(|v| v.parse().ok())
+/// Report every `/etc/pam.d` file with an `auth` line that skips the password
+/// check. Read-only: which file a line belongs in, and whether the round put it
+/// there on purpose, is a decision for a person, and removing the wrong `auth`
+/// line can lock everyone out.
+async fn report_permissive_pam() -> usize {
+    let mut flagged = 0;
+    let Ok(mut entries) = tokio::fs::read_dir("/etc/pam.d").await else {
+        return 0;
+    };
+    let mut paths = Vec::new();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        paths.push(entry.path());
+    }
+    paths.sort();
+    for path in paths {
+        let Ok(text) = tokio::fs::read_to_string(&path).await else {
+            continue;
+        };
+        let lines = pam_ops::permissive_auth_lines(&text);
+        if lines.is_empty() {
+            continue;
+        }
+        flagged += 1;
+        let shown = path.display().to_string();
+        ui::markup_line(&format!(
+            "[red]✗ {} lets a login through without a password: {}[/]",
+            ui::escape(&shown),
+            ui::escape(&lines.join(" | "))
+        ));
+        remediation::record_finding(
+            &shown,
+            "every login checks a password",
+            false,
+            &format!(
+                "{} - remove it by hand after checking the README does not require it",
+                lines.join(" | ")
+            ),
+        );
+    }
+    if flagged == 0 {
+        remediation::record_finding(
+            "/etc/pam.d",
+            "every login checks a password",
+            true,
+            "no auth line passes a login through ahead of the password check",
+        );
+    }
+    flagged
 }
 
 #[async_trait]
@@ -161,13 +196,17 @@ impl Task for PasswordPolicyTask {
             ..Default::default()
         };
 
+        // Findings only, so they run in a dry run too.
+        let backdoors = report_permissive_pam().await;
+
         if self.dry_run {
             for (key, value, why) in PWQUALITY {
                 let _ = file_ops::set(PWQUALITY_CONF, Style::Equals, key, value, why).await;
             }
             ui::markup_line(&format!(
-                "[cyan]Would configure pam_faillock (deny={DENY}, unlock_time={UNLOCK_SECONDS}) \
-                 and pam_unix remember={REMEMBER}[/]"
+                "[cyan]Would enable pam_faillock (deny={DENY}, unlock_time={UNLOCK_SECONDS}) \
+                 and pam_pwhistory (remember={REMEMBER}) through pam-auth-update, \
+                 where they are not already in effect[/]"
             ));
             result.message = "DRY RUN: no password policy was changed.".to_string();
             return result;
@@ -183,13 +222,35 @@ impl Task for PasswordPolicyTask {
 
         // --- lockout ---------------------------------------------------------
         //
-        // Reported rather than rewritten. `common-auth` is an ordered stack
-        // where the position of a line changes what it does, and a `faillock`
-        // entry appended after `pam_deny.so` never runs. Getting that wrong
-        // locks every account out of the machine, including root - which is
-        // unrecoverable inside a competition round. So the task configures the
-        // parameters where it safely can, and says plainly when the module
-        // itself is missing rather than guessing at where to insert it.
+        // Enabled through pam-auth-update rather than a hand-inserted line: in
+        // `common-auth` a misplaced faillock entry makes a correct password
+        // land on the lockout check, and every login fails, root's included.
+        // `pam_ops` checks the resulting order and rolls back if it is unsafe.
+        let auth = tokio::fs::read_to_string(COMMON_AUTH)
+            .await
+            .unwrap_or_default();
+        if !faillock_configured(&auth) {
+            result.items_attempted += 1;
+            match pam_ops::enable(
+                pam_ops::FAILLOCK_PROFILES,
+                COMMON_AUTH,
+                COMMON_AUTH,
+                "accounts lock after repeated failed logins, and a correct password still logs in",
+                pam_ops::auth_order_is_safe,
+            )
+            .await
+            {
+                Ok(()) => result.items_succeeded += 1,
+                Err(e) => {
+                    ui::markup_line(&format!(
+                        "[yellow]⚠ Lockout not enabled: {}[/]",
+                        ui::escape(&e)
+                    ));
+                    failures.push(format!("pam_faillock: {e}"));
+                }
+            }
+        }
+
         let auth = tokio::fs::read_to_string(COMMON_AUTH)
             .await
             .unwrap_or_default();
@@ -218,40 +279,62 @@ impl Task for PasswordPolicyTask {
             {
                 failures.push(format!("faillock unlock_time: {e}"));
             }
-        } else {
-            ui::markup_line(
-                "[yellow]⚠ pam_faillock is not in /etc/pam.d/common-auth. Add it with \
-                 `pam-auth-update` rather than by hand - the order of that file decides \
-                 whether it locks attackers out or everyone.[/]",
-            );
-            remediation::record_finding(
-                COMMON_AUTH,
-                "accounts lock after repeated failed logins",
-                false,
-                "pam_faillock.so is absent; not inserted automatically, because a line \
-                 placed after pam_deny.so locks every account including root",
-            );
         }
 
         // --- history ---------------------------------------------------------
         let password = tokio::fs::read_to_string(COMMON_PASSWORD)
             .await
             .unwrap_or_default();
-        let remembered = remember_value(&password);
-        remediation::record_finding(
-            COMMON_PASSWORD,
-            &format!("the last {REMEMBER} passwords cannot be reused"),
-            remembered.is_some_and(|r| r >= REMEMBER),
-            &match remembered {
-                Some(r) => format!("pam_unix has remember={r}"),
-                None => "pam_unix has no remember= argument, so any old password may be reused"
-                    .to_string(),
-            },
-        );
-        if remembered.is_none_or(|r| r < REMEMBER) {
-            ui::markup_line(&format!(
-                "[yellow]⚠ Password history is not enforced. Add `remember={REMEMBER}` to the \
-                 pam_unix.so line in {COMMON_PASSWORD}.[/]"
+        let history = pam_ops::history_depth(&password);
+        if history.is_some_and(|r| r >= REMEMBER) {
+            remediation::record_finding(
+                COMMON_PASSWORD,
+                &format!("the last {REMEMBER} passwords cannot be reused"),
+                true,
+                &format!(
+                    "remember={} is already in effect",
+                    history.unwrap_or_default()
+                ),
+            );
+        } else if !pam_ops::pwquality_in_stack(&password) {
+            // pam_pwhistory's use_authtok takes the password pam_pwquality
+            // collected. Without pam_pwquality there is none, and every
+            // password change would fail - so this is reported, not attempted.
+            ui::markup_line(
+                "[yellow]⚠ Password history not enabled: pam_pwquality is not in the password \
+                 stack. Install libpam-pwquality, then re-run this task.[/]",
+            );
+            remediation::record_finding(
+                COMMON_PASSWORD,
+                &format!("the last {REMEMBER} passwords cannot be reused"),
+                false,
+                "pam_pwquality is absent, and pam_pwhistory depends on it; not enabled",
+            );
+        } else {
+            result.items_attempted += 1;
+            match pam_ops::enable(
+                &[pam_ops::PWHISTORY_PROFILE],
+                COMMON_PASSWORD,
+                COMMON_PASSWORD,
+                &format!("the last {REMEMBER} passwords cannot be reused, and a password change still works"),
+                pam_ops::password_order_is_safe,
+            )
+            .await
+            {
+                Ok(()) => result.items_succeeded += 1,
+                Err(e) => {
+                    ui::markup_line(&format!(
+                        "[yellow]⚠ Password history not enabled: {}[/]",
+                        ui::escape(&e)
+                    ));
+                    failures.push(format!("pam_pwhistory: {e}"));
+                }
+            }
+        }
+
+        if backdoors > 0 {
+            failures.push(format!(
+                "{backdoors} PAM file(s) let a login through without a password; see the ledger"
             ));
         }
 
@@ -260,9 +343,9 @@ impl Task for PasswordPolicyTask {
             "{} complexity settings applied; lockout {}.",
             result.items_succeeded,
             if has_faillock {
-                "configured"
+                "in effect"
             } else {
-                "reported as absent"
+                "not in effect"
             }
         );
         if !failures.is_empty() {
@@ -272,6 +355,19 @@ impl Task for PasswordPolicyTask {
     }
 
     async fn verify(&mut self) -> bool {
+        // Lockout and history are proved by order, not presence: a faillock
+        // line in the wrong place is worse than none.
+        let auth = tokio::fs::read_to_string(COMMON_AUTH)
+            .await
+            .unwrap_or_default();
+        let password = tokio::fs::read_to_string(COMMON_PASSWORD)
+            .await
+            .unwrap_or_default();
+        if !pam_ops::auth_order_is_safe(&auth)
+            || pam_ops::history_depth(&password).is_none_or(|r| r < REMEMBER)
+        {
+            return false;
+        }
         for (key, value, _why) in PWQUALITY {
             if file_ops::read(PWQUALITY_CONF, Style::Equals, key)
                 .await
@@ -317,18 +413,25 @@ auth    requisite                       pam_deny.so
         ));
     }
 
-    #[test]
-    fn the_remember_argument_is_read_off_the_pam_unix_line() {
-        let text = "password [success=1 default=ignore] pam_unix.so obscure sha512 remember=5\n";
-        assert_eq!(remember_value(text), Some(5));
-    }
-
     /// The stock file has no `remember=` at all, which means any previous
     /// password may be set again immediately.
     #[test]
     fn a_missing_remember_argument_reads_as_none() {
         let text = "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n";
-        assert_eq!(remember_value(text), None);
+        assert_eq!(pam_ops::history_depth(text), None);
+    }
+
+    /// The profile carries the number as text; this keeps it equal to the one
+    /// the task checks against, so the task never reports its own work as short.
+    #[test]
+    fn the_history_profile_remembers_what_the_task_requires() {
+        assert!(
+            pam_ops::PWHISTORY_PROFILE
+                .body
+                .contains(&format!("remember={REMEMBER} ")),
+            "{}",
+            pam_ops::PWHISTORY_PROFILE.body
+        );
     }
 
     #[test]

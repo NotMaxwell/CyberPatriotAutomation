@@ -17,16 +17,16 @@
 //! held to the same standard as one on Windows: read the state, skip if it is
 //! already right, write, then read it back as proof.
 //!
-//! **This platform is in progress.** [`file_ops`] and [`systemd_ops`] are the
-//! foundations - the counterparts of `registry_ops` and `service_ops` - and the
-//! task list in `platform.rs` grows as tasks are built on them. A task is
-//! listed only once it is implemented: an entry that did nothing would be worse
-//! than its absence, because the run would report success having changed
-//! nothing.
+//! [`file_ops`], [`systemd_ops`], [`user_ops`], [`apt`] and [`pam_ops`] are the
+//! proved-write layer - the counterparts of `registry_ops` and `service_ops` -
+//! and every task in `platform.rs` is built on them. A task is listed only once
+//! it is implemented: an entry that did nothing would be worse than its
+//! absence, because the run would report success having changed nothing.
 
 pub mod apt;
 pub mod file_ops;
 pub mod knowledge;
+pub mod pam_ops;
 pub mod readme_services;
 pub mod systemd_ops;
 pub mod tasks;
