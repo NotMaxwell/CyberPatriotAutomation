@@ -20,7 +20,7 @@
 # of `#[cfg]` branches threaded through every task. Two implementations kept in
 # one file drift silently; two crates cannot.
 [workspace]
-members = ["crates/core", "crates/windows", "crates/linux", "crates/cli"]
+members = ["crates/core", "crates/windows", "crates/linux", "crates/cli", "crates/gui"]
 resolver = "3"
 
 [workspace.package]

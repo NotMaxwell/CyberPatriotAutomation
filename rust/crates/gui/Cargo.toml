@@ -1,0 +1,38 @@
+# =============================================================================
+# pinnacle-cypat-gui - the PinnacleCyPat desktop front end
+# Copyright 2026 Maxwell McCormick
+# SPDX-License-Identifier: Apache-2.0
+# =============================================================================
+[package]
+name = "pinnacle-cypat-gui"
+description = "Desktop front end for PinnacleCyPat."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "pinnacle-cypat-gui"
+path = "src/main.rs"
+
+[dependencies]
+pinnacle-core.workspace = true
+# Only the PNG encoder: screenshot mode needs nothing else from `image`.
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# Windows renders through wgpu (Direct3D 12, falling back to WARP when there is
+# no GPU driver); glow would get only the OpenGL 1.1 of a basic display adapter.
+[target.'cfg(windows)'.dependencies]
+pinnacle-windows.workspace = true
+eframe = { version = "=0.37.0", default-features = false, features = ["wgpu", "default_fonts"] }
+
+# Linux is development-only here (the shipping Linux front end is a web UI), so
+# glow over Mesa is enough and keeps Xvfb screenshots working.
+[target.'cfg(target_os = "linux")'.dependencies]
+pinnacle-linux.workspace = true
+eframe = { version = "=0.37.0", default-features = false, features = ["glow", "default_fonts", "x11"] }
+
+[build-dependencies]
+embed-manifest = "1.5.1"

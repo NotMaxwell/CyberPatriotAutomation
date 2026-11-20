@@ -22,12 +22,12 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root/rust"
 
 build() {
-    local target="$1" out_dir="$2" artifact="$3"
+    local target="$1" out_dir="$2" artifact="$3" package="${4:-pinnacle-cypat}"
     if ! rustup target list --installed | grep -q "^$target"; then
         echo "   skipped: rustup target add $target" >&2
         return
     fi
-    cargo build --release -p pinnacle-cypat --target "$target"
+    cargo build --release -p "$package" --target "$target"
     mkdir -p "$root/$out_dir"
     cp "target/$target/release/$artifact" "$root/$out_dir/"
     printf -- '-> %s/%s   %s\n' "$out_dir" "$artifact" \
@@ -36,6 +36,9 @@ build() {
 
 echo "==> Windows"
 build x86_64-pc-windows-gnu publish-win-x64 pinnacle-cypat.exe
+# Windows only: the Linux front end is a web UI, so the GUI crate is not built
+# for musl (and its Linux build is a development aid, not a shipping binary).
+build x86_64-pc-windows-gnu publish-win-x64 pinnacle-cypat-gui.exe pinnacle-cypat-gui
 
 echo
 echo "==> Linux"
