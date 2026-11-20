@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-381-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-395-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -22,7 +22,8 @@ checklist, and tells you exactly what it changed.
 ## Quick start
 
 **Easiest:** double-click `RUN.bat`. It checks for Administrator, then opens the
-built-in menu.
+built-in menu. On Linux, `./RUN.sh` does the same: it re-runs itself under
+`sudo` if needed and passes any arguments straight to the tool.
 
 **From a terminal:**
 
@@ -357,7 +358,7 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 381 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 395 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
                         # -> publish-linux-x64/pinnacle-cypat
 ```
@@ -426,7 +427,7 @@ PinnacleCyPat/
 │       │   ├── native/            Win32 APIs (Windows only)
 │       │   ├── knowledge.rs       The tables: registry, packages, services
 │       │   └── *_ops.rs           Proved writes
-│       ├── linux/                 pinnacle-linux — the thirteen Linux tasks
+│       ├── linux/                 pinnacle-linux — the fifteen Linux tasks
 │       │   ├── file_ops.rs        Proved writes to /etc
 │       │   ├── systemd_ops.rs     Proved systemctl operations
 │       │   ├── user_ops.rs        /etc/passwd, shadow, group
