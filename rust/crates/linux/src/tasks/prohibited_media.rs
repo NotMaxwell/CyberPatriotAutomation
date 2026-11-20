@@ -48,6 +48,13 @@ const EXEMPT_PATH_FRAGMENTS: &[&str] = &[
     "/.config/",
     "/site-packages/",
     "/node_modules/",
+    // The scoring engine's own directory - the counterpart of C:\CyberPatriot,
+    // which the Windows scan never reaches because it searches only C:\Users.
+    // `/opt` is searched here, so without this a README that prohibits media
+    // would have the run delete whatever audio the scoring client ships with.
+    // Both spellings, as README discovery tries both.
+    "/opt/CyberPatriot/",
+    "/opt/cyberpatriot/",
 ];
 
 pub struct ProhibitedMediaTask {
@@ -302,6 +309,9 @@ mod tests {
         assert!(is_exempt("/home/alice/.local/share/Trash/files/old.mp3"));
         assert!(!is_exempt("/home/alice/Music/song.mp3"));
         assert!(!is_exempt("/home/alice/Desktop/movie.mp4"));
+        assert!(is_exempt("/opt/CyberPatriot/sounds/gain.wav"));
+        assert!(is_exempt("/opt/cyberpatriot/sounds/gain.wav"));
+        assert!(!is_exempt("/opt/hidden/song.mp3"));
     }
 
     /// Without a README this task must not delete anything. The scenario text

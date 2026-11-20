@@ -10,6 +10,30 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.20.1
+
+### Fixed
+
+- **Prohibited Media could delete the scoring engine's files on Linux.** The
+  Linux scan searches `/opt`, and `/opt/CyberPatriot` is where an Ubuntu image
+  installs the round's resources, the scoring client included. On a README that
+  prohibits media, which is nearly all of them, a real run would have deleted
+  any audio or video file in that directory. It is now exempt, in both
+  spellings that README discovery tries. Windows was never affected: its scan
+  searches only `C:\Users`.
+
+- **The Linux dry-run tests could write to `/etc` when run as root.** Six tests
+  set the process-wide dry-run flag on and off around a task, and under the
+  parallel test runner one test's reset turned another's dry run into a real
+  one. Run as root, the suite wrote `/etc/sysctl.d/99-pinnacle.conf` and
+  rewrote `/etc/login.defs`. They now hold `run_log::dry_run_for_test()`, a
+  guard that serialises them. The shipping binary was not affected.
+
+### Added
+
+- **`RUN.sh`**, the Linux counterpart of `RUN.bat`: finds the build, restores
+  a missing executable bit, and re-runs itself under `sudo`.
+
 ## 1.20.0
 
 `--auto-readme` now works on an Ubuntu image.
