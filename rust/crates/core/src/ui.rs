@@ -171,20 +171,29 @@ pub fn escape(input: &str) -> String {
     input.replace('[', "[[").replace(']', "]]")
 }
 
-/// One unit of captured output.
-#[derive(Clone)]
+/// One unit of console output, as captured or streamed.
+#[derive(Clone, Debug)]
 pub enum Line {
     /// Markup to be rendered when replayed.
     Markup(String),
     /// A section heading.
     Section(String),
     /// Already-rendered text (a drawn table), with its plain form for the log.
+    /// An empty `plain` keeps the line out of the log, as blank lines and the
+    /// bars of a chart always have been.
     Rendered { rendered: String, plain: String },
 }
+
+type Emitter = Box<dyn Fn(Line) + Send + Sync>;
 
 tokio::task_local! {
     /// When set, output is collected here instead of being printed.
     static SINK: std::sync::Mutex<Vec<Line>>;
+
+    /// When set, output is handed here instead of being printed. Unlike
+    /// [`SINK`] each line is still recorded in the run log as it is emitted, so
+    /// the consumer only has to display it.
+    static STREAM: Emitter;
 }
 
 /// Run `fut` with its console output captured rather than printed.
@@ -202,67 +211,93 @@ pub async fn capture<F: std::future::Future>(fut: F) -> (F::Output, Vec<Line>) {
     .await
 }
 
+/// Run `fut` with every line it emits handed to `emit` instead of stdout.
+///
+/// This is how the engine turns console output into events for a front end
+/// that is not a terminal. Lines are recorded in the run log here, at emission,
+/// so a consumer that displays them with [`print_line`] does not log them twice.
+/// A [`capture`] inside the scope still wins, and its [`replay`] comes out here.
+pub async fn stream<F: std::future::Future>(
+    emit: impl Fn(Line) + Send + Sync + 'static,
+    fut: F,
+) -> F::Output {
+    STREAM.scope(Box::new(emit), fut).await
+}
+
 /// Print captured lines and mirror them to the run log, in order.
 pub fn replay(lines: &[Line]) {
     for line in lines {
-        match line {
-            Line::Markup(text) => print_markup(text),
-            Line::Section(title) => print_rule(title),
-            Line::Rendered { rendered, plain } => {
-                crate::run_log::record(plain);
-                println!("{rendered}");
-            }
-        }
+        emit(line.clone());
     }
 }
 
-/// Route a line to the active sink, or emit it. Returns true if captured.
-fn sink(line: Line) -> bool {
-    SINK.try_with(|s| s.lock().unwrap().push(line)).is_ok()
+/// Record a line in the run log, then stream it or print it.
+fn emit(line: Line) {
+    match &line {
+        Line::Markup(text) => crate::run_log::record(&plain(text)),
+        Line::Section(title) => crate::run_log::record_section(&plain(title)),
+        Line::Rendered { plain, .. } => crate::run_log::record(plain),
+    }
+    let mut pending = Some(line);
+    let streamed = STREAM.try_with(|stream| stream(pending.take().expect("taken once")));
+    if streamed.is_err()
+        && let Some(line) = pending
+    {
+        print_line(&line);
+    }
 }
 
-fn print_markup(input: &str) {
-    crate::run_log::record(&plain(input));
-    println!("{}", markup(input));
+/// Route a line to the capture sink if there is one, otherwise emit it.
+fn output(line: Line) {
+    let mut pending = Some(line);
+    let captured = SINK.try_with(|s| s.lock().unwrap().push(pending.take().expect("taken once")));
+    if captured.is_err()
+        && let Some(line) = pending
+    {
+        emit(line);
+    }
+}
+
+/// Write a line to stdout without recording it in the run log.
+///
+/// For a consumer of streamed lines, which [`stream`] has already recorded.
+pub fn print_line(line: &Line) {
+    match line {
+        Line::Markup(text) => println!("{}", markup(text)),
+        Line::Section(title) => println!("{}", render_rule(title)),
+        Line::Rendered { rendered, .. } => println!("{rendered}"),
+    }
 }
 
 /// Print a markup string followed by a newline, mirroring it to the run log.
 pub fn markup_line(input: &str) {
-    if !sink(Line::Markup(input.to_string())) {
-        print_markup(input);
-    }
+    output(Line::Markup(input.to_string()));
 }
 
 /// Print an empty line.
 pub fn write_line() {
-    if !sink(Line::Rendered {
+    output(Line::Rendered {
         rendered: String::new(),
         plain: String::new(),
-    }) {
-        println!();
-    }
+    });
 }
 
 /// Print a horizontal rule with a centered, markup-styled title.
 pub fn rule(title: &str) {
-    if !sink(Line::Section(title.to_string())) {
-        print_rule(title);
-    }
+    output(Line::Section(title.to_string()));
 }
 
-fn print_rule(title: &str) {
-    crate::run_log::record_section(&plain(title));
+fn render_rule(title: &str) -> String {
     let width = 80usize;
     let rendered = markup(title);
     let visible = visible_len(&rendered);
     if visible + 2 >= width {
-        println!("── {rendered} ──");
-        return;
+        return format!("── {rendered} ──");
     }
     let remaining = width - visible - 2;
     let left = remaining / 2;
     let right = remaining - left;
-    println!("{} {} {}", "─".repeat(left), rendered, "─".repeat(right));
+    format!("{} {} {}", "─".repeat(left), rendered, "─".repeat(right))
 }
 
 /// Print an exception-style error block.
@@ -366,13 +401,10 @@ impl TableBuilder {
         }
         let rendered = table.to_string();
         let plain_body = log_lines.join("\n");
-        if !sink(Line::Rendered {
-            rendered: rendered.clone(),
-            plain: plain_body.clone(),
-        }) {
-            crate::run_log::record(&plain_body);
-            println!("{rendered}");
-        }
+        output(Line::Rendered {
+            rendered,
+            plain: plain_body,
+        });
 
         if let Some(note) = &self.footnote {
             markup_line(note);
@@ -409,6 +441,10 @@ pub fn bar_chart(label: &str, items: &[(String, f64, BarColor)]) {
             BarColor::Red => bar.red().to_string(),
             BarColor::Grey => bar.bright_black().to_string(),
         };
-        println!("{name:<12} {colored} {value:.2}");
+        // The bars were never in the run log, and an empty `plain` keeps them out.
+        output(Line::Rendered {
+            rendered: format!("{name:<12} {colored} {value:.2}"),
+            plain: String::new(),
+        });
     }
 }

@@ -5,18 +5,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
-use std::future::Future;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use pinnacle_core::app_config;
-use pinnacle_core::directives;
-use pinnacle_core::models::{FixOutcome, ReadmeData, TaskResult};
-use pinnacle_core::platform::{Concurrency, Platform, TaskSpec};
+use pinnacle_core::engine::{self, Phase, ReadmeChoice, RunEvent, RunPlan, TaskChoice};
+use pinnacle_core::platform::{Platform, TaskSpec};
 use pinnacle_core::readme_parser;
 use pinnacle_core::run_log;
-use pinnacle_core::task::Task;
-use pinnacle_core::ui::{self, BarColor};
+use pinnacle_core::ui;
+use tokio::sync::mpsc;
 
 mod tui;
 
@@ -173,39 +174,6 @@ fn print_help() {
     println!("    pinnacle-cypat --auto-readme --all            # apply");
 }
 
-/// Scan the README for round-specific instructions, show them, and record them.
-///
-/// Returns false when there was no README to scan, so the caller can say so
-/// rather than printing an empty report.
-async fn report_directives(path: Option<&str>) -> bool {
-    let Some(path) = path else {
-        return false;
-    };
-    let Ok(html) = tokio::fs::read_to_string(path).await else {
-        // The parser already read this file successfully, so a failure here is
-        // odd enough to mention rather than swallow.
-        ui::markup_line(&format!(
-            "[yellow]⚠ Could not re-read {} to scan for round-specific instructions.[/]",
-            ui::escape(path)
-        ));
-        return true;
-    };
-    let found = directives::extract(&html);
-    directives::display(&found);
-    directives::record(&found);
-    true
-}
-
-async fn with_spinner<T, F: Future<Output = T>>(message: &str, fut: F) -> T {
-    let pb = ProgressBar::new_spinner();
-    pb.enable_steady_tick(Duration::from_millis(100));
-    pb.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap());
-    pb.set_message(message.to_string());
-    let result = fut.await;
-    pb.finish_and_clear();
-    result
-}
-
 async fn run_automation() {
     let cli_args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -253,11 +221,14 @@ async fn run_automation() {
         return;
     }
 
-    for line in run_log::header(&cli_args.join(" ")) {
+    // The report modes write a log of their own; a run gets its header from
+    // the engine, which starts the log afresh.
+    let command_line = cli_args.join(" ");
+    for line in run_log::header(&command_line) {
         run_log::record_raw(&line);
     }
 
-    let mut readme_file = extract_argument(&cli_args, &["--readme", "-r"]);
+    let readme_file = extract_argument(&cli_args, &["--readme", "-r"]);
     let auto_find_readme = has_flag(&cli_args, &["--auto-readme", "-R"]);
     let dry_run = has_flag(&cli_args, &["--dry-run", "-d"]);
 
@@ -298,84 +269,11 @@ async fn run_automation() {
         return;
     }
 
-    // Auto-find the README if requested and none supplied.
-    let mut discovery_attempts: Vec<String> = Vec::new();
-    if readme_file.is_none() && auto_find_readme {
-        readme_file = app_config::find_readme_file_reporting(&mut discovery_attempts).await;
-    }
-
-    // Parse README if needed.
-    //
-    // An explicitly supplied path is resolved the same way an auto-discovered
-    // one is: the documented location on a competition image is
-    // `C:\CyberPatriot\README.url`, so `--readme` pointing at a `.url` (or a
-    // `.lnk`) has to follow the shortcut rather than parse the shortcut file
-    // itself as HTML. If it does not resolve, the original path is kept so the
-    // parser reports "not found" against what the user actually typed.
-    let mut readme_data: Option<ReadmeData> = None;
-    // The document the parser actually read, kept so the directive scan works
-    // on the same bytes rather than re-resolving the path and possibly
-    // disagreeing about which file was used.
-    let mut readme_source: Option<String> = None;
-    if let Some(file) = &readme_file {
-        if !file.is_empty() {
-            let path = std::path::Path::new(file);
-            let indirect = app_config::is_remote_target(file) || app_config::is_shortcut(path);
-
-            match app_config::resolve_readme_candidate(path).await {
-                Some(resolved) => {
-                    // Say which document was actually used. Without this a
-                    // shortcut resolving to the wrong target is invisible: the
-                    // run just reports an empty README with nothing to point at.
-                    if resolved == *file {
-                        ui::markup_line(&format!(
-                            "[dim]Using README: {}[/]",
-                            ui::escape(&resolved)
-                        ));
-                    } else {
-                        ui::markup_line(&format!(
-                            "[dim]Using README: {} (resolved from {})[/]",
-                            ui::escape(&resolved),
-                            ui::escape(file)
-                        ));
-                    }
-                    readme_data = Some(readme_parser::parse_html_readme_async(&resolved).await);
-                    readme_source = Some(resolved);
-                }
-                // A shortcut or URL that could not be followed must not be fed
-                // to the HTML parser: an INI file yields a README with no title
-                // and no detectable OS, reporting "Unknown" for everything and
-                // hiding the real failure.
-                None if indirect => {
-                    ui::markup_line(&format!(
-                        "[red]✗ Could not obtain the README from {}[/]",
-                        ui::escape(file)
-                    ));
-                    ui::markup_line(
-                        "[yellow]If the image has no network access, open the README in a browser, \
-                         save it as HTML, and pass it with --readme <file>.[/]",
-                    );
-                }
-                None => {
-                    // A plain path that does not exist: let the parser report
-                    // "not found" against exactly what was typed.
-                    ui::markup_line(&format!("[dim]Using README: {}[/]", ui::escape(file)));
-                    readme_data = Some(readme_parser::parse_html_readme_async(file).await);
-                    readme_source = Some(file.clone());
-                }
-            }
-        }
-    } else if auto_find_readme {
-        ui::markup_line(
-            "[yellow]⚠ No README found automatically. Pass --readme <file> to specify one.[/]",
-        );
-        // Show where it looked, so a candidate that exists but cannot be
-        // followed is visible rather than silently skipped.
-        ui::markup_line("[dim]Locations checked:[/]");
-        for attempt in &discovery_attempts {
-            ui::markup_line(&format!("[dim]  - {}[/]", ui::escape(attempt)));
-        }
-    }
+    let readme = match readme_file {
+        Some(path) => ReadmeChoice::Path(path),
+        None if auto_find_readme => ReadmeChoice::Auto,
+        None => ReadmeChoice::None,
+    };
 
     // Directives-only mode: report what this round does differently, and stop.
     //
@@ -384,22 +282,23 @@ async fn run_automation() {
     // asks "what about this round is not the standard checklist", which is the
     // question a competitor has ninety seconds to answer at the start.
     if directives_only {
-        match report_directives(readme_source.as_deref()).await {
-            true => {}
-            false => ui::markup_line(
+        let inspection = engine::inspect_readme(&readme).await;
+        if !engine::report_directives(&inspection) {
+            ui::markup_line(
                 "[yellow]No README file specified. Use --readme <file> or --auto-readme.[/]",
-            ),
+            );
         }
         ui::write_line();
-        finish_log(&log_path);
+        engine::finish_log(&log_path);
         return;
     }
 
     // Parse-only mode: display the parsed data and stop.
     if parse_readme_only {
-        if let Some(data) = &readme_data {
+        let inspection = engine::inspect_readme(&readme).await;
+        if let Some(data) = &inspection.data {
             readme_parser::display_parsed_data(data);
-            report_directives(readme_source.as_deref()).await;
+            engine::report_directives(&inspection);
         } else {
             ui::markup_line(
                 "[yellow]No README file specified. Use --readme <file> to parse one.[/]",
@@ -417,529 +316,70 @@ async fn run_automation() {
                 "[yellow]Drop --parse-readme to apply them - the README is displayed either way.[/]",
             );
         }
-        finish_log(&log_path);
+        engine::finish_log(&log_path);
         return;
     }
 
-    // Show what was extracted before acting on it. The tasks are driven by this
-    // data - which users are authorised, which services are critical - so seeing
-    // it first is what makes the run reviewable, and it lands in the log too.
-    if let Some(data) = &readme_data {
-        readme_parser::display_parsed_data(data);
-        // What this round does differently, before anything is changed. The
-        // by-hand list is the part of a README a competitor most often misses,
-        // and it is no use at the end of the run.
-        report_directives(readme_source.as_deref()).await;
-        ui::write_line();
-    }
+    let plan = RunPlan {
+        readme,
+        readme_override: None,
+        tasks: if run_all {
+            TaskChoice::All
+        } else {
+            TaskChoice::Flags(named.iter().map(|spec| spec.flag.to_string()).collect())
+        },
+        dry_run,
+        log_path,
+        command_line,
+        cancel: Arc::new(AtomicBool::new(false)),
+    };
+    let (sender, receiver) = mpsc::unbounded_channel();
+    tokio::join!(engine::run::<Host>(plan, sender), show_events(receiver));
+}
 
-    // A README was asked for and could not be obtained, yet tasks are about to
-    // run. Say so where it cannot be missed.
-    //
-    // The run continues deliberately - the tasks that need a README decline on
-    // their own, and the rest apply defaults that are correct on any image. But
-    // a competitor who asked for a README and did not get one has lost every
-    // decision it would have driven, and the two red lines about the download
-    // scroll off the top of the screen long before the run ends.
-    if readme_data.is_none() && (readme_file.is_some() || auto_find_readme) {
-        let declining: Vec<&str> = Host::tasks()
-            .iter()
-            .filter(|spec| spec.needs_readme)
-            .filter(|spec| run_all || named.iter().any(|s| s.flag == spec.flag))
-            .map(|spec| spec.label)
-            .collect();
+/// Print the engine's lines and draw a spinner while each task works.
+///
+/// The engine has already recorded every line in the run log, so they are
+/// printed with `print_line`, which does not record them again.
+async fn show_events(mut receiver: mpsc::UnboundedReceiver<RunEvent>) {
+    // Concurrent audits report their phases while a sequential task is also
+    // running, so each task gets its own spinner under one MultiProgress -
+    // separate bars would draw over each other.
+    let multi = MultiProgress::new();
+    let mut spinners: HashMap<String, ProgressBar> = HashMap::new();
 
-        ui::write_line();
-        ui::rule("[bold yellow]Running without a README[/]");
-        ui::markup_line(
-            "[yellow]The README could not be obtained, so nothing in it is driving this run.[/]",
-        );
-        if !declining.is_empty() {
-            ui::markup_line(
-                "[yellow]These tasks cannot tell authorised from unauthorised and will \
-                 decline to act:[/]",
-            );
-            for label in &declining {
-                ui::markup_line(&format!("[yellow]    {}[/]", ui::escape(label)));
-            }
-        }
-        ui::markup_line(
-            "[dim]The remaining tasks apply defaults, which are correct on any image - but \
-             anything this round does differently is lost.[/]",
-        );
-        ui::markup_line(
-            "[dim]To fix: open the README in a browser, save it as HTML, and re-run with \
-             --readme <file>.[/]",
-        );
-        ui::write_line();
-    }
-
-    // Build the task list from the platform's own table.
-    //
-    // The task, its flag, its help line and its menu entry all come from one
-    // row there, so this block cannot fall out of step with the argument parser
-    // or the menu the way three hand-maintained lists did.
-    //
-    // The independent audits are separated out here: they touch disjoint areas
-    // and share no state with each other, so they are the only tasks it is safe
-    // to overlap. Everything else contends for the same accounts, services and
-    // configuration, where concurrent writes would race.
-    let readme = readme_data.as_ref();
-    let mut tasks: Vec<Box<dyn Task>> = Vec::new();
-    let mut concurrent: Vec<Box<dyn Task>> = Vec::new();
-    for spec in Host::tasks() {
-        if !run_all && !named.iter().any(|s| s.flag == spec.flag) {
-            continue;
-        }
-        let task = (spec.build)(readme);
-        match spec.concurrency {
-            Concurrency::Sequential => tasks.push(task),
-            Concurrency::Concurrent => concurrent.push(task),
-        }
-    }
-
-    for task in tasks.iter_mut().chain(concurrent.iter_mut()) {
-        task.set_dry_run(dry_run);
-    }
-
-    // The `*_ops` modules record every change against whichever task is running,
-    // and hold back from writing anything at all during a dry run.
-    run_log::set_dry_run(dry_run);
-
-    let mut results: Vec<TaskResult> = Vec::new();
-
-    // Start the independent audits now so their external commands overlap the
-    // sequential work below instead of adding to the total wall time. Their
-    // output is captured and replayed as whole blocks once they finish, so
-    // concurrent tasks do not interleave line by line.
-    let audit_handles: Vec<_> = concurrent
-        .into_iter()
-        .map(|mut task| tokio::spawn(async move { ui::capture(run_task(&mut task)).await }))
-        .collect();
-
-    for task in &mut tasks {
-        results.push(run_task(task).await);
-    }
-
-    if !audit_handles.is_empty() {
-        ui::write_line();
-        ui::rule("[bold blue]Independent Audits (run concurrently)[/]");
-        for handle in audit_handles {
-            match handle.await {
-                Ok((result, lines)) => {
-                    ui::replay(&lines);
-                    results.push(result);
+    while let Some(event) = receiver.recv().await {
+        match event {
+            RunEvent::Line(line) => multi.suspend(|| ui::print_line(&line)),
+            RunEvent::TaskPhase { name, phase } => {
+                if let Some(old) = spinners.remove(&name) {
+                    old.finish_and_clear();
                 }
-                // A panicking task must not take the run's results with it.
-                Err(e) => ui::markup_line(&format!(
-                    "[red]✗ An audit task failed to complete: {}[/]",
-                    ui::escape(&e.to_string())
-                )),
+                let message = match phase {
+                    Phase::Reading => "📊 Reading system state...",
+                    Phase::Executing => "🔧 Executing remediation...",
+                    Phase::Verifying => "🔍 Verifying changes...",
+                };
+                let spinner = multi.add(ProgressBar::new_spinner());
+                spinner.set_style(ProgressStyle::with_template("{spinner:.cyan} {msg}").unwrap());
+                spinner.set_message(message);
+                spinner.enable_steady_tick(Duration::from_millis(100));
+                spinners.insert(name, spinner);
             }
-        }
-    }
-
-    run_log::begin_task("(summary)");
-    display_summary(&results);
-    display_ledger_summary();
-    ui::write_line();
-    ui::rule("[bold green]✓ Automation Complete[/]");
-    ui::write_line();
-
-    run_log::append_ledger();
-    append_result_details(&results);
-    finish_log(&log_path);
-}
-
-/// Read state, remediate, then verify - the pipeline every task follows.
-///
-/// The whole pipeline is scoped to the task's name so every change the `*_ops`
-/// modules record underneath it is attributed correctly, including for the
-/// audits that run concurrently.
-async fn run_task(task: &mut Box<dyn Task>) -> TaskResult {
-    let name = task.name().to_string();
-    run_log::in_task(&name, run_task_inner(task)).await
-}
-
-async fn run_task_inner(task: &mut Box<dyn Task>) -> TaskResult {
-    ui::write_line();
-    ui::rule(&format!("[bold blue]{}[/]", ui::escape(task.name())));
-    ui::write_line();
-
-    // Step 1: Read system state.
-    ui::markup_line("[cyan]📊 Reading current system state...[/]");
-    with_spinner("📊 Reading system state...", task.read_system_state()).await;
-    ui::markup_line("[green]✓ System state captured[/]");
-    ui::write_line();
-
-    // Step 2: Execute remediation.
-    ui::markup_line("[yellow]🔧 Applying security fixes...[/]");
-    let mut result = with_spinner("🔧 Executing remediation...", task.execute()).await;
-    if result.success {
-        ui::markup_line(&format!("[green]✓ {}[/]", ui::escape(&result.message)));
-    } else {
-        ui::markup_line(&format!("[red]✗ {}[/]", ui::escape(&result.message)));
-    }
-    ui::write_line();
-
-    // Step 3: Verify changes.
-    ui::markup_line("[magenta]🔍 Verifying applied changes...[/]");
-    let verified = with_spinner("🔍 Verifying changes...", task.verify()).await;
-    result.verified = verified;
-    if !verified {
-        result.confidence_percent = (result.confidence_percent - 30).max(50);
-        ui::markup_line("[yellow]⚠ Some changes may need manual verification[/]");
-    } else {
-        ui::markup_line("[green]✓ All changes verified successfully[/]");
-    }
-    ui::write_line();
-
-    result
-}
-
-/// Append a structured, per-task record to the log.
-///
-/// The narrative above it says what happened as it happened; this block makes
-/// the outcome of each task greppable without reading the whole run.
-fn append_result_details(results: &[TaskResult]) {
-    run_log::record_raw("");
-    run_log::record_raw(&"=".repeat(79));
-    run_log::record_raw("TASK RESULTS");
-    run_log::record_raw(&"=".repeat(79));
-
-    for result in results {
-        run_log::record_raw("");
-        run_log::record_raw(&format!("Task:      {}", result.task_name));
-        run_log::record_raw(&format!(
-            "Outcome:   {}",
-            if result.success { "SUCCESS" } else { "FAILED" }
-        ));
-        run_log::record_raw(&format!(
-            "Verified:  {}",
-            if result.verified { "yes" } else { "no" }
-        ));
-        run_log::record_raw(&format!(
-            "Items:     {} attempted, {} succeeded, {} skipped",
-            result.items_attempted, result.items_succeeded, result.items_skipped
-        ));
-        run_log::record_raw(&format!("Confidence: {}%", result.confidence_percent));
-        for line in result.message.lines() {
-            run_log::record_raw(&format!("           {line}"));
-        }
-        if let Some(details) = &result.error_details {
-            run_log::record_raw("Issues:");
-            for line in details.lines() {
-                run_log::record_raw(&format!("  - {line}"));
+            RunEvent::TaskFinished(result) => {
+                if let Some(old) = spinners.remove(&result.task_name) {
+                    old.finish_and_clear();
+                }
             }
+            // A task whose result carries a different name, or an audit that
+            // panicked, would otherwise leave its spinner running.
+            RunEvent::Finished(_) => {
+                for (_, old) in spinners.drain() {
+                    old.finish_and_clear();
+                }
+            }
+            RunEvent::Readme(_) | RunEvent::TaskStarted { .. } => {}
         }
-    }
-}
-
-/// Write the run log, reporting where it went (or why it could not be written).
-fn finish_log(path: &std::path::Path) {
-    match run_log::write_to(path) {
-        Ok(()) => ui::markup_line(&format!(
-            "[dim]Run log written to: {}[/]",
-            ui::escape(&path.to_string_lossy())
-        )),
-        Err(e) => ui::markup_line(&format!(
-            "[yellow]Could not write run log to {}: {}[/]",
-            ui::escape(&path.to_string_lossy()),
-            ui::escape(&e.to_string())
-        )),
-    }
-}
-
-fn display_summary(results: &[TaskResult]) {
-    ui::write_line();
-    ui::rule("[bold blue]Summary[/]");
-    ui::write_line();
-
-    let mut table = ui::TableBuilder::new().columns(&[
-        "[bold]Task[/]",
-        "[bold]Status[/]",
-        "[bold]Completion[/]",
-        "[bold]Confidence[/]",
-        "[bold]Message[/]",
-        "[bold]Time[/]",
-    ]);
-
-    for result in results {
-        let status = if result.success {
-            "[green]✓ Success[/]"
-        } else {
-            "[red]✗ Failed[/]"
-        };
-        let completion_rate = result.completion_rate();
-        let completion_color = if completion_rate >= 90.0 {
-            "green"
-        } else if completion_rate >= 70.0 {
-            "yellow"
-        } else {
-            "red"
-        };
-        let confidence_color = if result.confidence_percent >= 90 {
-            "green"
-        } else if result.confidence_percent >= 70 {
-            "yellow"
-        } else {
-            "red"
-        };
-
-        table.add_row([
-            format!("[bold]{}[/]", ui::escape(&result.task_name)),
-            status.to_string(),
-            format!("[{completion_color}]{completion_rate:.1}%[/]"),
-            format!("[{confidence_color}]{}%[/]", result.confidence_percent),
-            ui::escape(&result.message),
-            format!("[dim]{}[/]", result.executed_at.format("%H:%M:%S")),
-        ]);
-
-        if let Some(details) = &result.error_details
-            && !details.is_empty()
-        {
-            table.add_row([
-                String::new(),
-                String::new(),
-                String::new(),
-                String::new(),
-                format!("[dim italic]{}[/]", ui::escape(details)),
-                String::new(),
-            ]);
-        }
-    }
-
-    table.print();
-    ui::write_line();
-
-    display_overall_statistics(results);
-}
-
-/// Show what the run actually changed, and how much of it was confirmed.
-///
-/// The task summary above answers "did each task run"; this answers "what is
-/// different about this machine now, and how do we know". The two disagree more
-/// often than is comfortable - a task that reports success while every change it
-/// made reads back unverified is exactly the case worth surfacing before the
-/// round ends, so anything not confirmed is listed by name.
-fn display_ledger_summary() {
-    let fixes = run_log::fixes();
-    if fixes.is_empty() {
-        return;
-    }
-
-    ui::write_line();
-    ui::rule("[bold blue]Changes and Proof[/]");
-    ui::write_line();
-
-    let count = |outcome: FixOutcome| {
-        fixes
-            .iter()
-            .filter(|f| f.outcome == outcome)
-            .count()
-            .to_string()
-    };
-
-    let mut table = ui::TableBuilder::new().columns(&[
-        "[bold]Outcome[/]",
-        "[bold]Count[/]",
-        "[bold]Meaning[/]",
-    ]);
-
-    for (label, outcome, meaning) in [
-        (
-            "[green]Fixed[/]",
-            FixOutcome::Fixed,
-            "changed, and reading it back confirms it",
-        ),
-        (
-            "[green]Already OK[/]",
-            FixOutcome::AlreadyCompliant,
-            "nothing to do; the machine was already right",
-        ),
-        (
-            "[red]Failed[/]",
-            FixOutcome::Failed,
-            "attempted and did not take",
-        ),
-        (
-            "[yellow]Unverified[/]",
-            FixOutcome::Unverified,
-            "the write reported success but could not be confirmed",
-        ),
-        ("[dim]Skipped[/]", FixOutcome::Skipped, "not attempted"),
-    ] {
-        table.add_row([
-            label.to_string(),
-            count(outcome),
-            format!("[dim]{meaning}[/]"),
-        ]);
-    }
-
-    table.print();
-
-    let needs_attention: Vec<_> = fixes
-        .iter()
-        .filter(|f| matches!(f.outcome, FixOutcome::Failed | FixOutcome::Unverified))
-        .collect();
-
-    if !needs_attention.is_empty() {
-        ui::write_line();
-        ui::markup_line("[yellow]Not confirmed - check these by hand:[/]");
-        for fix in needs_attention {
-            ui::markup_line(&format!(
-                "  [dim]{:<10}[/] {} [dim]- {}[/]",
-                fix.outcome.tag(),
-                ui::escape(&fix.target),
-                ui::escape(&fix.evidence)
-            ));
-        }
-    }
-
-    ui::write_line();
-    ui::markup_line(
-        "[dim]Every change, with what it wanted and the read-back that proves it, \
-         is in the run log.[/]",
-    );
-}
-
-fn display_overall_statistics(results: &[TaskResult]) {
-    if results.is_empty() {
-        return;
-    }
-
-    let success_count = results.iter().filter(|r| r.success).count();
-    let verified_count = results.iter().filter(|r| r.verified).count();
-
-    let total_attempted: i32 = results.iter().map(|r| r.items_attempted).sum();
-    let total_succeeded: i32 = results.iter().map(|r| r.items_succeeded).sum();
-    let total_skipped: i32 = results.iter().map(|r| r.items_skipped).sum();
-
-    // With no per-item counts reported, fall back to the share of tasks that
-    // succeeded. The previous flat 100% meant the headline "Overall Completion
-    // Rate" always read 100%, however many tasks had failed.
-    let overall_completion_rate = if total_attempted > 0 {
-        (total_succeeded + total_skipped) as f64 / total_attempted as f64 * 100.0
-    } else {
-        success_count as f64 / results.len() as f64 * 100.0
-    };
-
-    let mut overall_confidence = if total_attempted > 0 {
-        results
-            .iter()
-            .map(|r| r.confidence_percent * r.items_attempted)
-            .sum::<i32>() as f64
-            / total_attempted as f64
-    } else {
-        results.iter().map(|r| r.confidence_percent).sum::<i32>() as f64 / results.len() as f64
-    };
-
-    let verification_bonus = verified_count as f64 / results.len() as f64;
-    overall_confidence = (overall_confidence * (0.7 + 0.3 * verification_bonus)).min(100.0);
-
-    ui::rule("[bold cyan]Overall Statistics[/]");
-    ui::write_line();
-
-    ui::markup_line(&format!(
-        "[bold]Tasks:[/] {}/{} passed    [bold]Verified:[/] {}/{}    [bold]Items:[/] {}/{}    [bold]Skipped:[/] {}",
-        success_count,
-        results.len(),
-        verified_count,
-        results.len(),
-        total_succeeded + total_skipped,
-        total_attempted,
-        total_skipped
-    ));
-    ui::write_line();
-
-    let completion_color = bar_color(overall_completion_rate);
-    ui::bar_chart(
-        "[bold]Completion Rate[/]",
-        &[
-            (
-                "Completed".to_string(),
-                overall_completion_rate,
-                completion_color,
-            ),
-            (
-                "Remaining".to_string(),
-                100.0 - overall_completion_rate,
-                BarColor::Grey,
-            ),
-        ],
-    );
-    ui::write_line();
-
-    let confidence_color = bar_color(overall_confidence);
-    ui::bar_chart(
-        "[bold]Confidence Level[/]",
-        &[
-            (
-                "Confident".to_string(),
-                overall_confidence,
-                confidence_color,
-            ),
-            (
-                "Uncertain".to_string(),
-                100.0 - overall_confidence,
-                BarColor::Grey,
-            ),
-        ],
-    );
-    ui::write_line();
-
-    let completion_emoji = if overall_completion_rate >= 90.0 {
-        "🎉"
-    } else if overall_completion_rate >= 70.0 {
-        "👍"
-    } else {
-        "⚠️"
-    };
-    let confidence_emoji = if overall_confidence >= 90.0 {
-        "✅"
-    } else if overall_confidence >= 70.0 {
-        "🔶"
-    } else {
-        "❌"
-    };
-
-    let completion_word = if overall_completion_rate >= 90.0 {
-        "green"
-    } else if overall_completion_rate >= 70.0 {
-        "yellow"
-    } else {
-        "red"
-    };
-    let confidence_word = if overall_confidence >= 90.0 {
-        "green"
-    } else if overall_confidence >= 70.0 {
-        "yellow"
-    } else {
-        "red"
-    };
-
-    ui::markup_line(&format!(
-        "{completion_emoji} [bold]Overall Completion Rate:[/] [{completion_word}]{overall_completion_rate:.1}%[/]"
-    ));
-    ui::markup_line(&format!(
-        "{confidence_emoji} [bold]Overall Confidence Level:[/] [{confidence_word}]{overall_confidence:.1}%[/]"
-    ));
-
-    if overall_confidence < 90.0 {
-        ui::write_line();
-        ui::markup_line(
-            "[dim italic]💡 Tip: Manual verification recommended for tasks with low confidence.[/]",
-        );
-    }
-}
-
-fn bar_color(value: f64) -> BarColor {
-    if value >= 90.0 {
-        BarColor::Green
-    } else if value >= 70.0 {
-        BarColor::Yellow
-    } else {
-        BarColor::Red
     }
 }
 

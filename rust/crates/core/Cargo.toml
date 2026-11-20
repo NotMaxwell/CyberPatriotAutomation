@@ -20,7 +20,8 @@ name = "pinnacle_core"
 path = "src/lib.rs"
 
 [dependencies]
-tokio.workspace = true
+# `sync` for the engine's event channel.
+tokio = { workspace = true, features = ["sync"] }
 async-trait.workspace = true
 regex.workspace = true
 html-escape.workspace = true
