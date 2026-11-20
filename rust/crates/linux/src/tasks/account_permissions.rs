@@ -11,7 +11,12 @@
 //! Every one of these is scored, and every one is invisible from the desktop.
 //! An account with an empty hash field in `/etc/shadow` logs in by pressing
 //! enter; an account with uid 0 that is not called `root` is a second
-//! superuser that `sudo` never records.
+//! superuser that `sudo` never records; a `NOPASSWD:` sudo rule makes every
+//! administrator root without a password.
+//!
+//! Display-manager auto-login and guest sessions are reported, not changed:
+//! the README usually says the primary account auto-logs in on purpose, and
+//! this task runs without the README.
 //!
 //! Unlike User Management, this task acts without a README - which is why it is
 //! careful to change only things that are wrong on any image, and to *report*
@@ -24,6 +29,7 @@ use pinnacle_core::task::Task;
 use pinnacle_core::{impl_task_meta, remediation, ui};
 
 use crate::knowledge::SYSTEM_ACCOUNTS;
+use crate::sudo_ops;
 use crate::user_ops::{self, Account};
 use async_trait::async_trait;
 
@@ -84,6 +90,122 @@ pub fn service_accounts_with_shells(accounts: &[Account]) -> Vec<String> {
         })
         .map(|a| a.name.clone())
         .collect()
+}
+
+/// GDM's settings: auto-login lives in `[daemon]`.
+const GDM_CONF: &str = "/etc/gdm3/custom.conf";
+/// LightDM's main file and drop-ins: guest sessions and auto-login.
+const LIGHTDM_CONF: &str = "/etc/lightdm/lightdm.conf";
+const LIGHTDM_CONF_D: &str = "/etc/lightdm/lightdm.conf.d";
+
+/// The value of `key` in `[section]` of an ini-style file, ignoring comments.
+/// `section` of `None` matches any section.
+pub fn ini_value(text: &str, section: Option<&str>, key: &str) -> Option<String> {
+    let mut current = String::new();
+    let mut found = None;
+    for line in text.lines() {
+        let t = line.trim();
+        if t.starts_with('#') || t.starts_with(';') || t.is_empty() {
+            continue;
+        }
+        if let Some(name) = t.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+            current = name.trim().to_string();
+            continue;
+        }
+        if section.is_some_and(|s| s != current) {
+            continue;
+        }
+        if let Some((k, v)) = t.split_once('=')
+            && k.trim() == key
+        {
+            // Last definition wins, as in both display managers' parsers.
+            found = Some(v.trim().to_string());
+        }
+    }
+    found
+}
+
+fn is_true(value: Option<String>) -> bool {
+    value.is_some_and(|v| matches!(v.to_ascii_lowercase().as_str(), "true" | "1" | "yes"))
+}
+
+/// The account GDM logs in without a password, if auto-login or timed login is
+/// on.
+pub fn gdm_autologin(custom_conf: &str) -> Option<String> {
+    let daemon = Some("daemon");
+    if is_true(ini_value(custom_conf, daemon, "AutomaticLoginEnable")) {
+        return Some(ini_value(custom_conf, daemon, "AutomaticLogin").unwrap_or_default());
+    }
+    if is_true(ini_value(custom_conf, daemon, "TimedLoginEnable")) {
+        return Some(ini_value(custom_conf, daemon, "TimedLogin").unwrap_or_default());
+    }
+    None
+}
+
+/// Report display-manager auto-login and guest sessions. Read-only.
+async fn report_display_manager() -> usize {
+    let mut findings = 0;
+    if let Ok(text) = tokio::fs::read_to_string(GDM_CONF).await {
+        let user = gdm_autologin(&text);
+        if let Some(user) = &user {
+            findings += 1;
+            ui::markup_line(&format!(
+                "[yellow]⚠ GDM logs {} in automatically. Leave it if the README names this as \
+                 the auto-login account; otherwise set AutomaticLoginEnable=false in {GDM_CONF}.[/]",
+                ui::escape(if user.is_empty() { "an account" } else { user })
+            ));
+        }
+        remediation::record_finding(
+            GDM_CONF,
+            "no account logs in without a password, unless the README says so",
+            user.is_none(),
+            &match &user {
+                Some(u) => format!(
+                    "auto-login is on for '{u}'; not changed, since the README usually makes the \
+                     primary account auto-login on purpose"
+                ),
+                None => "auto-login and timed login are off".to_string(),
+            },
+        );
+    }
+
+    let mut lightdm = Vec::new();
+    if let Ok(text) = tokio::fs::read_to_string(LIGHTDM_CONF).await {
+        lightdm.push((LIGHTDM_CONF.to_string(), text));
+    }
+    if let Ok(mut entries) = tokio::fs::read_dir(LIGHTDM_CONF_D).await {
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let path = entry.path().display().to_string();
+            if let Ok(text) = tokio::fs::read_to_string(&path).await {
+                lightdm.push((path, text));
+            }
+        }
+    }
+    for (path, text) in &lightdm {
+        if is_true(ini_value(text, None, "allow-guest")) {
+            findings += 1;
+            ui::markup_line(&format!(
+                "[red]✗ {} allows guest sessions: set allow-guest=false[/]",
+                ui::escape(path)
+            ));
+            remediation::record_finding(path, "no guest sessions", false, "allow-guest=true");
+        }
+        if let Some(user) = ini_value(text, None, "autologin-user").filter(|u| !u.is_empty()) {
+            findings += 1;
+            ui::markup_line(&format!(
+                "[yellow]⚠ LightDM logs {} in automatically ({}); leave it only if the README says so[/]",
+                ui::escape(&user),
+                ui::escape(path)
+            ));
+            remediation::record_finding(
+                path,
+                "no account logs in without a password, unless the README says so",
+                false,
+                &format!("autologin-user={user}"),
+            );
+        }
+    }
+    findings
 }
 
 #[async_trait]
@@ -153,6 +275,19 @@ impl Task for AccountPermissionsTask {
             },
         );
 
+        let display_findings = report_display_manager().await;
+
+        // --- passwordless sudo, which is acted on ---------------------------
+        let mut sudo_entries: Vec<(String, Vec<String>)> = Vec::new();
+        for path in sudo_ops::files().await {
+            if let Ok(text) = tokio::fs::read_to_string(&path).await {
+                let entries = sudo_ops::passwordless_entries(&text);
+                if !entries.is_empty() {
+                    sudo_entries.push((path, entries));
+                }
+            }
+        }
+
         // --- passwordless accounts, which are acted on ----------------------
         let mut passwordless: Vec<String> = Vec::new();
         for account in &humans {
@@ -161,7 +296,7 @@ impl Task for AccountPermissionsTask {
             }
         }
 
-        result.items_attempted = (passwordless.len() + humans.len()) as i32;
+        result.items_attempted = (passwordless.len() + humans.len() + sudo_entries.len()) as i32;
 
         if self.dry_run {
             for name in &passwordless {
@@ -170,10 +305,19 @@ impl Task for AccountPermissionsTask {
                     ui::escape(name)
                 ));
             }
+            for (path, entries) in &sudo_entries {
+                ui::markup_line(&format!(
+                    "[cyan]Would require a password in {}: {}[/]",
+                    ui::escape(path),
+                    ui::escape(&entries.join(" | "))
+                ));
+            }
             result.message = format!(
-                "DRY RUN: would lock {} passwordless accounts and age {} accounts.",
+                "DRY RUN: would lock {} passwordless accounts, age {} accounts and fix {} \
+                 passwordless sudo files.",
                 passwordless.len(),
-                humans.len()
+                humans.len(),
+                sudo_entries.len()
             );
             return result;
         }
@@ -196,6 +340,29 @@ impl Task for AccountPermissionsTask {
             }
         }
 
+        let mut sudo_fixed = 0;
+        for (path, entries) in &sudo_entries {
+            match sudo_ops::require_password(path).await {
+                Ok(_) => {
+                    result.items_succeeded += 1;
+                    sudo_fixed += 1;
+                    ui::markup_line(&format!(
+                        "[green]✓ sudo now asks for a password: {} [dim]({})[/][/]",
+                        ui::escape(path),
+                        ui::escape(&entries.join(" | "))
+                    ));
+                }
+                Err(e) => {
+                    ui::markup_line(&format!(
+                        "[red]✗ {}: {}[/]",
+                        ui::escape(path),
+                        ui::escape(&e)
+                    ));
+                    failures.push(format!("{path}: {e}"));
+                }
+            }
+        }
+
         for account in &humans {
             match user_ops::set_ageing(&account.name, MAX_DAYS, MIN_DAYS, WARN_DAYS).await {
                 Ok(()) => result.items_succeeded += 1,
@@ -205,10 +372,12 @@ impl Task for AccountPermissionsTask {
 
         result.success = failures.is_empty();
         result.message = format!(
-            "{} passwordless accounts locked, {} accounts aged; {} findings reported.",
+            "{} passwordless accounts locked, {} accounts aged, {} sudoers files fixed; \
+             {} findings reported.",
             passwordless.len(),
             humans.len(),
-            doubles.len() + shells.len()
+            sudo_fixed,
+            doubles.len() + shells.len() + display_findings
         );
         if !failures.is_empty() {
             result.error_details = Some(failures.join("; "));
@@ -225,6 +394,13 @@ impl Task for AccountPermissionsTask {
                 return false;
             }
         }
+        for path in sudo_ops::files().await {
+            if let Ok(text) = tokio::fs::read_to_string(&path).await
+                && !sudo_ops::passwordless_entries(&text).is_empty()
+            {
+                return false;
+            }
+        }
         true
     }
 }
@@ -232,6 +408,49 @@ impl Task for AccountPermissionsTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gdm_autologin_is_read_from_the_daemon_section() {
+        let conf = "\
+[daemon]
+AutomaticLoginEnable=True
+AutomaticLogin=perry
+
+[security]
+";
+        assert_eq!(gdm_autologin(conf), Some("perry".to_string()));
+    }
+
+    /// The stock file ships the keys commented out.
+    #[test]
+    fn the_stock_gdm_file_has_no_autologin() {
+        let stock = "\
+[daemon]
+# AutomaticLoginEnable = true
+# AutomaticLogin = user1
+";
+        assert_eq!(gdm_autologin(stock), None);
+    }
+
+    #[test]
+    fn the_key_in_another_section_does_not_count() {
+        let conf = "[security]\nAutomaticLoginEnable=true\n[daemon]\n";
+        assert_eq!(gdm_autologin(conf), None);
+    }
+
+    #[test]
+    fn lightdm_guest_is_found_in_any_section() {
+        assert!(is_true(ini_value(
+            "[Seat:*]\nallow-guest=true\n",
+            None,
+            "allow-guest"
+        )));
+        assert!(!is_true(ini_value(
+            "[Seat:*]\nallow-guest=false\n",
+            None,
+            "allow-guest"
+        )));
+    }
 
     fn account(name: &str, uid: u32, shell: &str) -> Account {
         Account {

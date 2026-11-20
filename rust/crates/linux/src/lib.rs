@@ -17,7 +17,7 @@
 //! held to the same standard as one on Windows: read the state, skip if it is
 //! already right, write, then read it back as proof.
 //!
-//! [`file_ops`], [`systemd_ops`], [`user_ops`], [`apt`] and [`pam_ops`] are the
+//! [`file_ops`], [`systemd_ops`], [`user_ops`], [`apt`], [`pam_ops`] and [`sudo_ops`] are the
 //! proved-write layer - the counterparts of `registry_ops` and `service_ops` -
 //! and every task in `platform.rs` is built on them. A task is listed only once
 //! it is implemented: an entry that did nothing would be worse than its
@@ -28,6 +28,7 @@ pub mod file_ops;
 pub mod knowledge;
 pub mod pam_ops;
 pub mod readme_services;
+pub mod sudo_ops;
 pub mod systemd_ops;
 pub mod tasks;
 pub mod user_ops;

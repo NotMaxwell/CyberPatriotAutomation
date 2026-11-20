@@ -286,7 +286,7 @@ pub fn is_active(line: &str) -> bool {
 /// Written once - if a backup is already there, an earlier task in the same run
 /// made it, and overwriting it would replace the pristine copy with a
 /// half-modified one.
-async fn back_up(path: &str, original: &str) -> Result<(), String> {
+pub(crate) async fn back_up(path: &str, original: &str) -> Result<(), String> {
     let backup = format!("{path}.pinnacle.bak");
     if Path::new(&backup).exists() {
         return Ok(());
@@ -303,7 +303,7 @@ async fn back_up(path: &str, original: &str) -> Result<(), String> {
 /// intact. The naive `write` leaves a zero-length `/etc/shadow` or
 /// `sshd_config`, which locks the machine out of the thing being hardened -
 /// exactly the failure a competitor cannot recover from mid-round.
-async fn write_atomically(path: &str, contents: &str) -> Result<(), String> {
+pub(crate) async fn write_atomically(path: &str, contents: &str) -> Result<(), String> {
     let temp = format!("{path}.pinnacle.tmp");
 
     // Take the original's mode before replacing it: a fresh file would be
