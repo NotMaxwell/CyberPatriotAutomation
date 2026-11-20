@@ -85,6 +85,44 @@ pub fn dry_run() -> bool {
     DRY_RUN.load(Ordering::Relaxed)
 }
 
+#[cfg(any(test, feature = "test-support"))]
+static DRY_RUN_GATE: Mutex<()> = Mutex::new(());
+
+/// Keeps the process in dry-run mode until dropped, and keeps every other
+/// holder waiting until then.
+///
+/// [`DRY_RUN`] is process-global, and the test runner is multi-threaded. Tests
+/// that each called `set_dry_run(true)` ... `set_dry_run(false)` raced: one
+/// test's reset turned another's dry run into a real one partway through. As
+/// root that wrote `/etc/sysctl.d/99-pinnacle.conf` and rewrote
+/// `/etc/login.defs` on the machine running the tests; as an ordinary user the
+/// writes failed on permissions and the test passed, which is why it hid.
+///
+/// Holding this across `.await` is sound: `#[tokio::test]` gives each test its
+/// own single-threaded runtime, so the guard never moves between threads and a
+/// waiting test blocks only its own thread.
+#[cfg(any(test, feature = "test-support"))]
+#[must_use = "dry-run mode ends when the guard is dropped"]
+pub struct DryRunGuard {
+    _gate: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub fn dry_run_for_test() -> DryRunGuard {
+    let gate = lock(&DRY_RUN_GATE);
+    set_dry_run(true);
+    DryRunGuard { _gate: gate }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+impl Drop for DryRunGuard {
+    // Runs before the gate field is dropped, so the reset happens while the
+    // lock is still held - and also when the test panicked.
+    fn drop(&mut self) {
+        set_dry_run(false);
+    }
+}
+
 /// Record one attempted change, and mirror a one-line summary into the
 /// narrative so the log reads in order.
 pub fn record_fix(

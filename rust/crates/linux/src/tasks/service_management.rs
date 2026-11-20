@@ -266,11 +266,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_dry_run_reports_without_masking_anything() {
-        pinnacle_core::run_log::set_dry_run(true);
+        let _dry_run = pinnacle_core::run_log::dry_run_for_test();
         let mut task = ServiceManagementTask::new();
         task.set_dry_run(true);
         let result = pinnacle_core::ui::capture(task.execute()).await.0;
-        pinnacle_core::run_log::set_dry_run(false);
         assert!(result.success);
         assert!(result.message.starts_with("DRY RUN"), "{}", result.message);
     }

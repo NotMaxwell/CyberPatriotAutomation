@@ -343,11 +343,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_dry_run_writes_nothing() {
-        pinnacle_core::run_log::set_dry_run(true);
+        let _dry_run = pinnacle_core::run_log::dry_run_for_test();
         let mut task = SecurityHardeningTask::new();
         task.set_dry_run(true);
         let result = task.execute().await;
-        pinnacle_core::run_log::set_dry_run(false);
 
         assert!(result.success);
         assert!(

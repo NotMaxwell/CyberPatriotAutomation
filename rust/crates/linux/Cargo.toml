@@ -25,3 +25,4 @@ regex.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+pinnacle-core = { workspace = true, features = ["test-support"] }

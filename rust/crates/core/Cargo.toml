@@ -38,6 +38,11 @@ ego-tree.workspace = true
 # `pinnacle-windows`, which is where a new binding belongs.
 windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Console"] }
 
+# Test helpers other crates' tests need from core. Never enabled by a shipping
+# build: only the platform crates' dev-dependencies turn it on.
+[features]
+test-support = []
+
 [dev-dependencies]
 insta.workspace = true
 tokio = { workspace = true }
