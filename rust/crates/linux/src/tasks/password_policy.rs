@@ -13,7 +13,7 @@
 //!
 //! | Wanted | Where it lives |
 //! |---|---|
-//! | Length and character classes | `pam_pwquality` |
+//! | Length and character classes | `pam_pwquality` (installed if absent) |
 //! | History (no reuse) | `pam_pwhistory`, via a `pam-auth-update` profile |
 //! | Lockout after failed attempts | `pam_faillock` |
 //! | Ageing (max/min/warn) | `login.defs`, applied by Security Hardening |
@@ -33,12 +33,21 @@ use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::task::Task;
 use pinnacle_core::{impl_task_meta, remediation, ui};
 
+use crate::apt;
 use crate::file_ops::{self, Style};
+use crate::knowledge::LOGIN_DEFS;
 use crate::pam_ops::{self, COMMON_AUTH, COMMON_PASSWORD};
 use async_trait::async_trait;
 
 /// Complexity, read by `pam_pwquality` on every password change.
 const PWQUALITY_CONF: &str = "/etc/security/pwquality.conf";
+
+/// The minimum length, as the number the scored checks compare against.
+const MIN_LEN: u32 = 14;
+
+/// The package that provides `pam_pwquality`, and with it a `pam-auth-update`
+/// profile that puts the module into `common-password`.
+const PWQUALITY_PACKAGE: &str = "libpam-pwquality";
 
 /// One complexity setting: the key, the value, and what it buys.
 const PWQUALITY: &[(&str, &str, &str)] = &[
@@ -73,6 +82,8 @@ const PWQUALITY: &[(&str, &str, &str)] = &[
         "the rules are enforced rather than merely warned about",
     ),
 ];
+
+const PASS_MIN_LEN_WHY: &str = "obsolete under PAM, but checkers read it; matches pwquality minlen";
 
 /// How many previous passwords are refused. Written into
 /// [`pam_ops::PWHISTORY_PROFILE`]; a test keeps the two in step.
@@ -114,6 +125,46 @@ pub fn faillock_configured(common_auth: &str) -> bool {
         .lines()
         .filter(|l| file_ops::is_active(l))
         .any(|l| l.contains("pam_faillock.so"))
+}
+
+/// Is the minimum length actually enforced? `pwquality.conf` is only read by
+/// `pam_pwquality`, so a `minlen` there with the module absent from the stack
+/// is a setting that does nothing - the failure that scored no points.
+pub fn minlen_is_effective(common_password: &str, conf_minlen: Option<&str>) -> bool {
+    pam_ops::pwquality_in_stack(common_password)
+        && conf_minlen
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .is_some_and(|n| n >= MIN_LEN)
+}
+
+/// Make sure `pam_pwquality` is in the password stack, installing it if needed.
+///
+/// Debian does not ship `libpam-pwquality` by default, and without it every
+/// pwquality setting - and `pam_pwhistory`, which needs its password - is inert.
+/// Installing the package runs `pam-auth-update`, which adds the module itself.
+async fn ensure_pwquality() -> Result<(), String> {
+    let password = tokio::fs::read_to_string(COMMON_PASSWORD)
+        .await
+        .unwrap_or_default();
+    if pam_ops::pwquality_in_stack(&password) {
+        return Ok(());
+    }
+    if !apt::is_installed(PWQUALITY_PACKAGE).await {
+        let why = "pam_pwquality enforces the minimum length and complexity";
+        if apt::install(PWQUALITY_PACKAGE, why).await.is_err() {
+            // A fresh image often has empty package lists.
+            apt::update_lists().await;
+            apt::install(PWQUALITY_PACKAGE, why).await?;
+        }
+    }
+    let password = tokio::fs::read_to_string(COMMON_PASSWORD)
+        .await
+        .unwrap_or_default();
+    if pam_ops::pwquality_in_stack(&password) {
+        return Ok(());
+    }
+    // Installed but taken out of the stack (or the postinst could not run).
+    pam_ops::enable_pwquality().await
 }
 
 /// Report every `/etc/pam.d` file with an `auth` line that skips the password
@@ -192,7 +243,7 @@ impl Task for PasswordPolicyTask {
         let mut result = TaskResult {
             task_name: self.name.clone(),
             success: true,
-            items_attempted: PWQUALITY.len() as i32 + 2,
+            items_attempted: PWQUALITY.len() as i32 + 3,
             ..Default::default()
         };
 
@@ -203,6 +254,18 @@ impl Task for PasswordPolicyTask {
             for (key, value, why) in PWQUALITY {
                 let _ = file_ops::set(PWQUALITY_CONF, Style::Equals, key, value, why).await;
             }
+            let _ = file_ops::set(
+                LOGIN_DEFS,
+                Style::Space,
+                "PASS_MIN_LEN",
+                &MIN_LEN.to_string(),
+                PASS_MIN_LEN_WHY,
+            )
+            .await;
+            ui::markup_line(&format!(
+                "[cyan]Would install {PWQUALITY_PACKAGE} if pam_pwquality is not in the password \
+                 stack[/]"
+            ));
             ui::markup_line(&format!(
                 "[cyan]Would enable pam_faillock (deny={DENY}, unlock_time={UNLOCK_SECONDS}) \
                  and pam_pwhistory (remember={REMEMBER}) through pam-auth-update, \
@@ -213,11 +276,40 @@ impl Task for PasswordPolicyTask {
         }
 
         let mut failures: Vec<String> = Vec::new();
+
+        // First, so the settings below take effect and pam_pwhistory has the
+        // password pam_pwquality collects.
+        match ensure_pwquality().await {
+            Ok(()) => result.items_succeeded += 1,
+            Err(e) => {
+                ui::markup_line(&format!(
+                    "[yellow]⚠ pam_pwquality is not in the password stack: {}[/]",
+                    ui::escape(&e)
+                ));
+                failures.push(format!("pam_pwquality: {e}"));
+            }
+        }
+
         for (key, value, why) in PWQUALITY {
             match file_ops::set(PWQUALITY_CONF, Style::Equals, key, value, why).await {
                 Ok(()) => result.items_succeeded += 1,
                 Err(e) => failures.push(format!("{key}: {e}")),
             }
+        }
+
+        // shadow-utils treats PASS_MIN_LEN as obsolete under PAM and ignores it,
+        // but scoring checks read it, so it is set to agree with pwquality.
+        match file_ops::set(
+            LOGIN_DEFS,
+            Style::Space,
+            "PASS_MIN_LEN",
+            &MIN_LEN.to_string(),
+            PASS_MIN_LEN_WHY,
+        )
+        .await
+        {
+            Ok(()) => result.items_succeeded += 1,
+            Err(e) => failures.push(format!("PASS_MIN_LEN: {e}")),
         }
 
         // --- lockout ---------------------------------------------------------
@@ -368,6 +460,10 @@ impl Task for PasswordPolicyTask {
         {
             return false;
         }
+        let minlen = file_ops::read(PWQUALITY_CONF, Style::Equals, "minlen").await;
+        if !minlen_is_effective(&password, minlen.as_deref()) {
+            return false;
+        }
         for (key, value, _why) in PWQUALITY {
             if file_ops::read(PWQUALITY_CONF, Style::Equals, key)
                 .await
@@ -447,6 +543,24 @@ auth    requisite                       pam_deny.so
                 "{required} is missing"
             );
         }
+    }
+
+    #[test]
+    fn minlen_counts_only_with_pam_pwquality_in_the_stack() {
+        let with = "password requisite pam_pwquality.so retry=3\n";
+        let without = "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n";
+        assert!(minlen_is_effective(with, Some("14")));
+        assert!(minlen_is_effective(with, Some("20")));
+        assert!(!minlen_is_effective(without, Some("14")));
+        assert!(!minlen_is_effective(with, Some("8")));
+        assert!(!minlen_is_effective(with, None));
+        assert!(!minlen_is_effective(with, Some("abc")));
+    }
+
+    #[test]
+    fn the_minimum_length_matches_the_pwquality_table() {
+        assert!(PWQUALITY.contains(&("minlen", "14", "minimum password length")));
+        assert_eq!(MIN_LEN, 14);
     }
 
     #[tokio::test]

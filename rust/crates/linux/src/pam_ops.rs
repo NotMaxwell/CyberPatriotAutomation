@@ -257,6 +257,45 @@ pub async fn enable(
     .await
 }
 
+/// Put `pam_pwquality` into `common-password` through its own profile, for an
+/// image where `libpam-pwquality` is installed but was taken out of the stack.
+pub async fn enable_pwquality() -> Result<(), String> {
+    remediation::apply(
+        COMMON_PASSWORD,
+        "pam_pwquality is in the password stack, so minlen is enforced",
+        || async {
+            let text = tokio::fs::read_to_string(COMMON_PASSWORD).await.ok()?;
+            Some(if pwquality_in_stack(&text) {
+                "in effect".to_string()
+            } else {
+                "not in effect".to_string()
+            })
+        },
+        |state| state == "in effect",
+        "pam-auth-update --enable pwquality",
+        || async {
+            // No --force, for the reason given in the module notes.
+            let (code, out, err) = command::execute_for_exit_code_with_env(
+                "pam-auth-update",
+                Some("--enable pwquality"),
+                &[("DEBIAN_FRONTEND", "noninteractive")],
+                Duration::from_secs(60),
+            )
+            .await;
+            if code == Some(0) {
+                Ok(())
+            } else {
+                Err(format!(
+                    "pam-auth-update --enable pwquality failed: {} {}",
+                    out,
+                    err.unwrap_or_default()
+                ))
+            }
+        },
+    )
+    .await
+}
+
 async fn install(
     profiles: &[Profile],
     file: &str,
