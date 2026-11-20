@@ -14,9 +14,10 @@
 //! superuser that `sudo` never records; a `NOPASSWD:` sudo rule makes every
 //! administrator root without a password.
 //!
-//! Display-manager auto-login and guest sessions are reported, not changed:
-//! the README usually says the primary account auto-logs in on purpose, and
-//! this task runs without the README.
+//! Display-manager auto-login is reported, not changed: the README usually
+//! says the primary account auto-logs in on purpose, and this task runs without
+//! the README. LightDM guest sessions are turned off, because no README wants
+//! an anonymous login and the round scores "Guest account is disabled".
 //!
 //! Unlike User Management, this task acts without a README - which is why it is
 //! careful to change only things that are wrong on any image, and to *report*
@@ -97,6 +98,16 @@ const GDM_CONF: &str = "/etc/gdm3/custom.conf";
 /// LightDM's main file and drop-ins: guest sessions and auto-login.
 const LIGHTDM_CONF: &str = "/etc/lightdm/lightdm.conf";
 const LIGHTDM_CONF_D: &str = "/etc/lightdm/lightdm.conf.d";
+/// The drop-in this task owns. Any later `/etc/lightdm` file that enables guests
+/// is edited in place as well, since it would override this one.
+const LIGHTDM_NO_GUEST: &str = "/etc/lightdm/lightdm.conf.d/50-pinnacle-no-guest.conf";
+const LIGHTDM_NO_GUEST_BODY: &str = "# Written by PinnacleCyPat: a guest session is an anonymous login.\n[Seat:*]\nallow-guest=false\n";
+/// Where LightDM's older Ubuntu guest mechanism lives.
+const LIGHTDM_GUEST_FILES: [&str; 3] = [
+    "/usr/share/lightdm/lightdm.conf.d/50-guest-wrapper.conf",
+    "/usr/lib/lightdm/lightdm-guest-session",
+    "/usr/lib/lightdm/guest-session-auto.sh",
+];
 
 /// The value of `key` in `[section]` of an ini-style file, ignoring comments.
 /// `section` of `None` matches any section.
@@ -142,7 +153,190 @@ pub fn gdm_autologin(custom_conf: &str) -> Option<String> {
     None
 }
 
-/// Report display-manager auto-login and guest sessions. Read-only.
+/// Is this ini section one whose `allow-guest` LightDM honours? `Seat:*` is the
+/// current spelling, `SeatDefaults` the pre-1.15 one, and `Seat:<name>`
+/// overrides `Seat:*` for a single seat.
+fn is_seat_section(name: &str) -> bool {
+    name == "SeatDefaults" || name.starts_with("Seat:")
+}
+
+/// Whether guest sessions are on, given LightDM's files in precedence order
+/// (earliest first; the last definition of a key wins).
+///
+/// LightDM's default is `true`, so a machine with no setting at all allows
+/// guests - a missing key is therefore not compliant. Each seat section is
+/// resolved separately across the files, and guests are on if *any* resolves
+/// to true: `[Seat:seat0]` saying true overrides a `[Seat:*]` saying false for
+/// that seat, so a single false is not proof.
+pub fn effective_allow_guest(files: &[(String, String)]) -> bool {
+    let mut sections: Vec<(String, bool)> = Vec::new();
+    for (_, text) in files {
+        let mut current = String::new();
+        for line in text.lines() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') || t.starts_with(';') {
+                continue;
+            }
+            if let Some(name) = t.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+                current = name.trim().to_string();
+                continue;
+            }
+            if !is_seat_section(&current) {
+                continue;
+            }
+            if let Some((k, v)) = t.split_once('=')
+                && k.trim() == "allow-guest"
+            {
+                let on = is_true(Some(v.trim().to_string()));
+                match sections.iter_mut().find(|(n, _)| *n == current) {
+                    Some(entry) => entry.1 = on,
+                    None => sections.push((current.clone(), on)),
+                }
+            }
+        }
+    }
+    sections.is_empty() || sections.iter().any(|(_, on)| *on)
+}
+
+/// `text` with every active seat-section `allow-guest=true` set to false, or
+/// `None` if nothing needed changing. Rewritten in place, not deleted, so the
+/// old value stays readable.
+pub fn without_guest(text: &str) -> Option<String> {
+    let mut current = String::new();
+    let mut changed = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let t = line.trim();
+        if let Some(name) = t.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+            current = name.trim().to_string();
+        } else if is_seat_section(&current)
+            && !t.starts_with('#')
+            && !t.starts_with(';')
+            && let Some((k, v)) = t.split_once('=')
+            && k.trim() == "allow-guest"
+            && is_true(Some(v.trim().to_string()))
+        {
+            // The note is its own line: a keyfile value runs to the end of the
+            // line, so a trailing comment would make the boolean unparsable.
+            out.push(format!("# {t}    # superseded by PinnacleCyPat"));
+            out.push("allow-guest=false".to_string());
+            changed = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    changed.then(|| out.join("\n") + "\n")
+}
+
+/// LightDM's configuration in the order it reads it, later overriding earlier:
+/// the packaged and XDG drop-ins, `/etc/lightdm/lightdm.conf.d/*.conf`, then
+/// `/etc/lightdm/lightdm.conf` itself. The main file therefore beats every
+/// drop-in, so a drop-in alone cannot undo `allow-guest=true` written there.
+async fn lightdm_files() -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    for dir in [
+        "/usr/share/lightdm/lightdm.conf.d",
+        "/etc/xdg/lightdm/lightdm.conf.d",
+        LIGHTDM_CONF_D,
+    ] {
+        let mut names = Vec::new();
+        if let Ok(mut entries) = tokio::fs::read_dir(dir).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.ends_with(".conf") {
+                    names.push(name);
+                }
+            }
+        }
+        names.sort();
+        for name in names {
+            let path = format!("{dir}/{name}");
+            if let Ok(text) = tokio::fs::read_to_string(&path).await {
+                files.push((path, text));
+            }
+        }
+    }
+    if let Ok(text) = tokio::fs::read_to_string(LIGHTDM_CONF).await {
+        files.push((LIGHTDM_CONF.to_string(), text));
+    }
+    files
+}
+
+async fn lightdm_installed() -> bool {
+    tokio::fs::metadata("/etc/lightdm").await.is_ok() || crate::apt::is_installed("lightdm").await
+}
+
+/// Turn LightDM guest sessions off and prove the *effective* value is false.
+///
+/// The drop-in is needed because the default is true; any later file that says
+/// true is edited in place because it would override the drop-in. The proof
+/// reads every file again.
+async fn disable_lightdm_guest() -> Result<(), String> {
+    remediation::apply(
+        "LightDM allow-guest",
+        "guest sessions are off (effective value across lightdm.conf and its drop-ins)",
+        || async {
+            let on = effective_allow_guest(&lightdm_files().await);
+            Some(if on { "true" } else { "false" }.to_string())
+        },
+        |state| state == "false",
+        &format!(
+            "write allow-guest=false to {LIGHTDM_NO_GUEST} and to any /etc/lightdm file that enables it"
+        ),
+        || async {
+            tokio::fs::create_dir_all(LIGHTDM_CONF_D)
+                .await
+                .map_err(|e| format!("could not create {LIGHTDM_CONF_D}: {e}"))?;
+            crate::file_ops::write_atomically(LIGHTDM_NO_GUEST, LIGHTDM_NO_GUEST_BODY).await?;
+            for (path, text) in lightdm_files().await {
+                if !path.starts_with("/etc/lightdm/") || path == LIGHTDM_NO_GUEST {
+                    continue;
+                }
+                if let Some(updated) = without_guest(&text) {
+                    crate::file_ops::back_up(&path, &text).await?;
+                    crate::file_ops::write_atomically(&path, &updated).await?;
+                }
+            }
+            Ok(())
+        },
+    )
+    .await
+}
+
+/// Report the older Ubuntu guest mechanism. It is a package's files rather than
+/// a setting, and removing the package is not this task's call.
+async fn report_guest_wrapper() -> usize {
+    let mut present = Vec::new();
+    for path in LIGHTDM_GUEST_FILES {
+        if tokio::fs::metadata(path).await.is_ok() {
+            present.push(path);
+        }
+    }
+    if user_ops::accounts()
+        .await
+        .iter()
+        .any(|a| a.name == "guest" || a.name.starts_with("guest-"))
+    {
+        present.push("a guest account in /etc/passwd");
+    }
+    if present.is_empty() {
+        return 0;
+    }
+    ui::markup_line(&format!(
+        "[yellow]⚠ LightDM guest-session machinery is present ({}); allow-guest=false stops it \
+         being offered, but it is left installed[/]",
+        ui::escape(&present.join(", "))
+    ));
+    remediation::record_finding(
+        "LightDM guest session",
+        "no guest login mechanism is installed",
+        false,
+        &format!("present: {}; not removed", present.join(", ")),
+    );
+    1
+}
+
+/// Report display-manager auto-login, and turn LightDM guest sessions off.
 async fn report_display_manager() -> usize {
     let mut findings = 0;
     if let Ok(text) = tokio::fs::read_to_string(GDM_CONF).await {
@@ -169,27 +363,22 @@ async fn report_display_manager() -> usize {
         );
     }
 
-    let mut lightdm = Vec::new();
-    if let Ok(text) = tokio::fs::read_to_string(LIGHTDM_CONF).await {
-        lightdm.push((LIGHTDM_CONF.to_string(), text));
-    }
-    if let Ok(mut entries) = tokio::fs::read_dir(LIGHTDM_CONF_D).await {
-        while let Ok(Some(entry)) = entries.next_entry().await {
-            let path = entry.path().display().to_string();
-            if let Ok(text) = tokio::fs::read_to_string(&path).await {
-                lightdm.push((path, text));
+    if lightdm_installed().await {
+        match disable_lightdm_guest().await {
+            Ok(()) => {}
+            Err(e) => {
+                findings += 1;
+                ui::markup_line(&format!(
+                    "[red]✗ could not turn off LightDM guest sessions: {}[/]",
+                    ui::escape(&e)
+                ));
             }
         }
+        findings += report_guest_wrapper().await;
     }
+
+    let lightdm = lightdm_files().await;
     for (path, text) in &lightdm {
-        if is_true(ini_value(text, None, "allow-guest")) {
-            findings += 1;
-            ui::markup_line(&format!(
-                "[red]✗ {} allows guest sessions: set allow-guest=false[/]",
-                ui::escape(path)
-            ));
-            remediation::record_finding(path, "no guest sessions", false, "allow-guest=true");
-        }
         if let Some(user) = ini_value(text, None, "autologin-user").filter(|u| !u.is_empty()) {
             findings += 1;
             ui::markup_line(&format!(
@@ -504,5 +693,55 @@ AutomaticLogin=perry
     fn a_human_account_with_a_shell_is_not_a_finding() {
         let accounts = vec![account("alice", 1000, "/bin/bash")];
         assert!(service_accounts_with_shells(&accounts).is_empty());
+    }
+
+    fn files(list: &[&str]) -> Vec<(String, String)> {
+        list.iter()
+            .map(|t| (String::new(), t.to_string()))
+            .collect()
+    }
+
+    /// LightDM's own default is to allow guests.
+    #[test]
+    fn no_setting_at_all_means_guests_are_allowed() {
+        assert!(effective_allow_guest(&files(&[])));
+        assert!(effective_allow_guest(&files(&[
+            "[Seat:*]\n#allow-guest=false\n"
+        ])));
+    }
+
+    #[test]
+    fn a_later_file_overrides_an_earlier_one() {
+        let off = "[Seat:*]\nallow-guest=false\n";
+        let on = "[Seat:*]\nallow-guest=true\n";
+        assert!(!effective_allow_guest(&files(&[on, off])));
+        assert!(effective_allow_guest(&files(&[off, on])));
+    }
+
+    #[test]
+    fn a_seat_specific_true_is_not_hidden_by_the_wildcard() {
+        assert!(effective_allow_guest(&files(&[
+            "[Seat:*]\nallow-guest=false\n[Seat:seat0]\nallow-guest=true\n"
+        ])));
+    }
+
+    #[test]
+    fn the_legacy_section_counts_and_other_sections_do_not() {
+        assert!(effective_allow_guest(&files(&[
+            "[SeatDefaults]\nallow-guest=true\n"
+        ])));
+        assert!(!effective_allow_guest(&files(&[
+            "[Seat:*]\nallow-guest=false\n[LightDM]\nallow-guest=true\n"
+        ])));
+    }
+
+    #[test]
+    fn without_guest_rewrites_only_enabled_seat_lines() {
+        let text = "[Seat:*]\nallow-guest=true\nautologin-user=a\n[Other]\nallow-guest=true\n";
+        let fixed = without_guest(text).unwrap();
+        assert!(!effective_allow_guest(&files(&[&fixed])));
+        assert!(fixed.contains("autologin-user=a"));
+        assert!(fixed.contains("[Other]\nallow-guest=true"));
+        assert_eq!(without_guest(&fixed), None);
     }
 }
