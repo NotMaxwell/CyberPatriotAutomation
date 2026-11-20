@@ -1,5 +1,4 @@
 /target
-Cargo.lock
 
 # Run logs are per-execution artefacts written next to wherever the tool ran.
 PinnacleCyPat_RunLog_*.txt

@@ -124,8 +124,8 @@ so `--help` and a run log read the same way on either.
 
 | Task | Flag | What it does |
 |---|---|---|
-| Password Policy | `-p` | `pam_pwquality` complexity; `faillock` lockout and `pwhistory` password history via `pam-auth-update`, rolled back if the order is unsafe; reports PAM lines that skip the password check |
-| Account Permissions | `-a` | Locks passwordless accounts, applies ageing, removes sudo `NOPASSWD` (keeping the rule), reports duplicate uid 0, service accounts with shells and display-manager auto-login or guest |
+| Password Policy | `-p` | `pam_pwquality` complexity (installed if missing), `PASS_MIN_LEN`; `faillock` lockout and `pwhistory` password history via `pam-auth-update`, rolled back if the order is unsafe; reports PAM lines that skip the password check |
+| Account Permissions | `-a` | Locks passwordless accounts, applies ageing, removes sudo `NOPASSWD` (keeping the rule), turns off LightDM guest sessions; reports duplicate uid 0, service accounts with shells and display-manager auto-login |
 | User Management | `-u` | Deletes unauthorised accounts (keeping home directories), fixes `sudo` membership, creates required users |
 | Service Management | `-s` | Masks 58 insecure units, protects the README's critical ones and the scoring engine |
 | Audit Policy | `-t` | Installs and enables `auditd` and `rsyslog`, writes 34 audit rules and tunes retention |

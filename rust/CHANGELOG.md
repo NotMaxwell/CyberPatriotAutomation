@@ -10,6 +10,51 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.22.0
+
+Linux items from a real practice round's scoring report, and the start of the
+GUI: the run pipeline now lives in `pinnacle-core` behind an event stream.
+
+### Fixed
+
+- **"A minimum password length is required" could not pass on Debian.**
+  `minlen=14` was written to `pwquality.conf`, which only `pam_pwquality`
+  reads, and Debian does not install it. Password Policy now installs
+  `libpam-pwquality` when the module is missing (its postinst adds the
+  `pam-auth-update` profile), and also sets `PASS_MIN_LEN 14` in `login.defs`,
+  which checkers read although PAM ignores it. Verify now treats a `minlen`
+  without the module in the stack as not enforced. Password history, which
+  needs `pam_pwquality`, now works in the same run.
+- **The guest account was reported, not disabled.** Account Permissions now
+  writes `allow-guest=false` in a LightDM drop-in and rewrites any
+  `allow-guest=true` in other LightDM files - `lightdm.conf` is read after
+  every drop-in, so a drop-in alone loses to it. The read-back resolves the
+  effective value per seat across all files; LightDM's default is to allow
+  guests, so a missing key counts as allowing them.
+- **Ettercap survived its purge**: `ettercap-common`, which owns
+  `/usr/bin/ettercap`, was not on the list. **Freeciv** was not prohibited at
+  all; its metapackage, clients, server and data are now.
+
+### Added
+
+- `crates/linux/tests/answer_key_practice_round.rs`: the automatable items of
+  that round, one test each.
+- `pinnacle_core::engine`: `RunPlan`, `RunEvent`, `inspect_readme`, `run`. The
+  CLI is now one consumer of it; console output and run log are unchanged
+  (checked against 1.21.0 with the same dry run, back to back).
+- `pinnacle-cypat-gui`, a toolkit spike: an elevated eframe window listing the
+  tasks. Not yet a usable front end.
+- `rust/Cargo.lock` is now committed. An existing lock extended for the GUI
+  crate reused `windows 0.59` for `gpu-allocator` and broke the Windows GUI
+  build; a committed lock pins the resolution that works.
+
+### Tested
+
+In the Ubuntu 24.04 dev container, with real runs of `-p` and `-a`: with
+`libpam-pwquality` removed, a 10-character password was refused and a long
+complex one accepted after the run; a planted `allow-guest=true` resolved to
+false; second runs changed nothing. Not yet run on a competition image.
+
 ## 1.21.0
 
 Linux: lockout, password history and passwordless sudo are now fixed rather

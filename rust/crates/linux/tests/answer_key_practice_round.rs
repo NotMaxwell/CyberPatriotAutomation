@@ -14,7 +14,9 @@
 
 use pinnacle_core::models::ReadmeData;
 use pinnacle_linux::knowledge::{ALWAYS_PROHIBITED, HARDENING_SETTINGS, PROHIBITED_SERVICES};
-use pinnacle_linux::tasks::{firewall, prohibited_media, software_management};
+use pinnacle_linux::tasks::{
+    account_permissions, firewall, password_policy, prohibited_media, software_management,
+};
 
 fn prohibited_without_readme() -> Vec<String> {
     software_management::prohibited_packages(None)
@@ -25,22 +27,52 @@ fn prohibited_without_readme() -> Vec<String> {
 
 /// **Guest account is disabled: 5 pts.**
 ///
-/// Pending: another agent owns the account tasks. It must make the tool turn
-/// off LightDM `allow-guest` (and GDM guest login) and the guest session.
+///
+/// LightDM allows guests unless told otherwise, and `lightdm.conf` is read
+/// after every drop-in - so the drop-in the tool writes is not enough alone
+/// when `lightdm.conf` says true, which is why the task also rewrites it.
 #[test]
-#[ignore = "pending: account_permissions agent must disable the guest account (lightdm allow-guest=false)"]
 fn item_guest_account_is_disabled() {
-    unimplemented!("expose the guest-account decision and assert it here");
+    let dropin = (
+        "50-pinnacle-no-guest.conf".to_string(),
+        "[Seat:*]\nallow-guest=false\n".to_string(),
+    );
+    let planted = (
+        "lightdm.conf".to_string(),
+        "[Seat:*]\nallow-guest=true\n".to_string(),
+    );
+    let fixed = (
+        "lightdm.conf".to_string(),
+        "[Seat:*]\nallow-guest=false\n".to_string(),
+    );
+
+    assert!(
+        account_permissions::effective_allow_guest(&[]),
+        "LightDM's default allows guests"
+    );
+    assert!(account_permissions::effective_allow_guest(&[
+        dropin.clone(),
+        planted
+    ]));
+    assert!(!account_permissions::effective_allow_guest(&[
+        dropin, fixed
+    ]));
 }
 
 /// **A minimum password length is required: 6 pts.**
 ///
-/// Pending: another agent owns password_policy. It must make the tool require
-/// a minimum length (pam_unix/pam_pwquality `minlen`, login.defs `PASS_MIN_LEN`).
+///
+/// `minlen` in `pwquality.conf` does nothing unless `pam_pwquality` is in the
+/// password stack, and Debian does not install it - so the task installs it,
+/// and its verify step treats a minlen without the module as not enforced.
 #[test]
-#[ignore = "pending: password_policy agent must set a minimum password length (pam_pwquality minlen)"]
 fn item_minimum_password_length_is_required() {
-    unimplemented!("expose the minlen decision and assert it here");
+    let without = "password\t[success=1 default=ignore]\tpam_unix.so obscure yescrypt\n";
+    let with = "password\trequisite\tpam_pwquality.so retry=3\n\
+                password\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok yescrypt\n";
+    assert!(!password_policy::minlen_is_effective(without, Some("14")));
+    assert!(!password_policy::minlen_is_effective(with, Some("8")));
+    assert!(password_policy::minlen_is_effective(with, Some("14")));
 }
 
 /// **UFW protection enabled: 6 pts.**
