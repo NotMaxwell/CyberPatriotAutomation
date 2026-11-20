@@ -58,3 +58,5 @@ AMD/Chipset_Installer/Chipset.exe
 
 # Scratch files and extra build dirs (agents and humans): never committed.
 .scratch/
+# Agent worktrees: temporary checkouts, merged by hand, never committed.
+.claude/worktrees/
