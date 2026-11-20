@@ -1058,6 +1058,19 @@ pub const ALWAYS_PROHIBITED: &[(&str, &str)] = &[
     ("aircrack-ng", "wireless key cracker"),
     ("ettercap-text-only", "man-in-the-middle tool"),
     ("ettercap-graphical", "man-in-the-middle tool"),
+    // The front ends depend on -common, which owns /usr/bin/ettercap; purging
+    // only them leaves the tool on disk and the scored check still fails.
+    ("ettercap-common", "man-in-the-middle tool"),
+    // Freeciv ships as a metapackage plus separately installed clients and
+    // data, so purging `freeciv` alone leaves the game runnable.
+    ("freeciv", "game"),
+    ("freeciv-client-gtk3", "game client"),
+    ("freeciv-client-qt", "game client"),
+    ("freeciv-client-sdl", "game client"),
+    ("freeciv-client-extras", "game client extras"),
+    ("freeciv-server", "game server"),
+    ("freeciv-data", "game data"),
+    ("freeciv-ruleset-tools", "game ruleset tools"),
     ("nikto", "web vulnerability scanner"),
     (
         "netcat-traditional",
