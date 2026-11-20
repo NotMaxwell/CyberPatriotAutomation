@@ -20,11 +20,10 @@ These are needed whether or not the GUI happens. Details are under
 [Linux build: what is left](#linux-build-what-is-left).
 
 - [x] Fix the dry-run test race that writes to `/etc` when tests run as root
-- [x] Add CI (GitHub Actions) running `scripts/check.sh` and `scripts/publish.sh` (`.github/workflows/ci.yml`)
 - [x] Fix the stale task and test counts in the docs
 - [x] Add `RUN.sh`, the Linux launcher
 
-**Done when:** `cargo test --workspace` passes as root and as a normal user, and CI runs on every push.
+**Done when:** `cargo test --workspace` passes as root and as a normal user.
 
 ## M1 — Windows toolkit spike (about 1–2 days)
 
@@ -140,14 +139,16 @@ changes it.
 for the whole of each of those six tests. Optionally, add a check that fails any
 test that touches `/etc` while running as root.
 
-### 2. No CI — ADDED
+### 2. No CI — not wanted
 
-`.github/` contains only `copilot-instructions.md`. `check.sh` and `publish.sh`
-run only when someone remembers. Add one workflow:
+There is no CI by choice. `scripts/check.sh` and `scripts/publish.sh` are run by
+hand. When checking a change to a task, also run the suite once as root, since
+only root sees a dry run that writes:
 
-- `ubuntu-latest`: `scripts/check.sh` as a normal user (and once as root after fix 1);
-- musl release build plus the glibc check from `publish.sh`;
-- Windows cross-build with mingw, or a `windows-latest` job running the Windows tests that Linux cannot run.
+```bash
+sudo -E env "PATH=$PATH" cargo test --workspace --manifest-path rust/Cargo.toml
+sudo find /etc -name '*.pinnacle.bak'      # must print nothing
+```
 
 ### 3. No Linux run log for the current version
 
