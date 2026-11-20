@@ -55,3 +55,6 @@ AMD/Chipset_Installer/Chipset.exe
 
 # Claude Code per-machine permission cache; not project content.
 .claude/settings.local.json
+
+# Scratch files and extra build dirs (agents and humans): never committed.
+.scratch/
