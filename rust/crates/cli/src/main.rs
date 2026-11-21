@@ -19,7 +19,6 @@ use pinnacle_core::run_log;
 use pinnacle_core::ui;
 use tokio::sync::mpsc;
 
-mod tui;
 mod web;
 
 // The platform this binary was built for. Everything below is written against
@@ -65,7 +64,6 @@ fn has_flag(args: &[String], flags: &[&str]) -> bool {
 /// menu. This table covers only what is true on every platform.
 const GLOBAL_FLAGS: &[(&str, &str, &str)] = &[
     ("--help", "-h", "Show this help and exit"),
-    ("--tui", "-i", "Open the interactive menu"),
     (
         "--web",
         "",
@@ -169,7 +167,14 @@ fn print_help() {
         Host::PRIVILEGED_ROLE
     );
     println!("Pass --dry-run first to see what would change.");
-    println!("Not sure? Run --tui for a guided menu.\n");
+    println!(
+        "Prefer a window? {}\n",
+        if cfg!(windows) {
+            "Run pinnacle-cypat-gui.exe."
+        } else {
+            "Run with --web (or with no arguments on a desktop) for the web interface."
+        }
+    );
     println!("OPTIONS:");
     for (long, short, description) in GLOBAL_FLAGS {
         println!("{:<34}{description}", spelling(long, short));
@@ -179,10 +184,70 @@ fn print_help() {
         println!("{:<34}{}", spelling(spec.flag, spec.short), spec.help);
     }
     println!("\nEXAMPLES:");
-    println!("    pinnacle-cypat --tui                          # guided menu");
+    if !cfg!(windows) {
+        println!("    pinnacle-cypat --web                          # web interface");
+    }
     println!("    pinnacle-cypat --auto-readme --parse-readme   # read-only");
     println!("    pinnacle-cypat --auto-readme --all --dry-run  # preview");
     println!("    pinnacle-cypat --auto-readme --all            # apply");
+}
+
+/// Open the graphical front end for a bare launch. True if one was opened.
+///
+/// Windows: the desktop GUI, when `pinnacle-cypat-gui.exe` ships beside this
+/// executable (as `publish.sh` arranges). Linux: the web UI, when there is a
+/// desktop session to show a browser in - a bare launch over SSH, or from a
+/// script, still gets the help text rather than a server nobody can reach.
+async fn open_front_end() -> bool {
+    #[cfg(windows)]
+    {
+        let Some(gui) = std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|d| d.join("pinnacle-cypat-gui.exe")))
+            .filter(|p| p.is_file())
+        else {
+            return false;
+        };
+        match std::process::Command::new(&gui).spawn() {
+            Ok(_) => true,
+            Err(e) => {
+                ui::markup_line(&format!(
+                    "[yellow]Could not open {}: {}[/]",
+                    ui::escape(&gui.to_string_lossy()),
+                    ui::escape(&e.to_string())
+                ));
+                false
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if !has_desktop_session(|name| std::env::var(name).ok()) {
+            return false;
+        }
+        if let Err(e) = web::serve::<Host>(None).await {
+            ui::markup_line(&format!(
+                "[red]Could not start the web interface: {}[/]",
+                ui::escape(&e.to_string())
+            ));
+            std::process::exit(1);
+        }
+        true
+    }
+}
+
+/// Is there a graphical session a browser could open in? Either this process
+/// has one, or it runs under sudo for a user who does. `sudo` strips `DISPLAY`
+/// by default, so the second case is the usual one on a competition image.
+#[cfg_attr(windows, allow(dead_code))]
+fn has_desktop_session(var: impl Fn(&str) -> Option<String>) -> bool {
+    let set = |name: &str| var(name).is_some_and(|v| !v.is_empty());
+    if set("DISPLAY") || set("WAYLAND_DISPLAY") {
+        return true;
+    }
+    var("SUDO_UID")
+        .filter(|uid| !uid.is_empty())
+        .is_some_and(|uid| std::path::Path::new(&format!("/run/user/{uid}/bus")).exists())
 }
 
 async fn run_automation() {
@@ -223,22 +288,13 @@ async fn run_automation() {
         return;
     }
 
-    // The interactive menu, either asked for or offered.
-    //
-    // A bare launch - which is what double-clicking the executable does - has
+    // A bare launch - double-clicking the executable, or typing its name - has
     // nothing to act on, and printing help at someone who cannot see a command
-    // line does not help them. The menu is offered instead, but only with a
-    // human at a terminal: redirected streams mean a script or a pipe, where a
-    // prompt would wait forever for an answer that never comes. Whatever the
-    // menu returns is a command line, so everything below is unchanged by it.
-    let mut cli_args = cli_args;
-    if has_flag(&cli_args, &["--tui", "-i"])
-        || (cli_args.is_empty() && tui::is_interactive_console())
-    {
-        match tui::build_arguments() {
-            Some(chosen) => cli_args = chosen,
-            None => return,
-        }
+    // line helps nobody. Open the graphical front end when there is one to
+    // open; otherwise fall through to the help below. This replaced the old
+    // terminal menu, which the GUI and the web UI made redundant.
+    if cli_args.is_empty() && open_front_end().await {
+        return;
     }
 
     // Reject anything unrecognised rather than letting it fall through.
@@ -526,6 +582,45 @@ mod tests {
 
     /// A task flag must not collide with a global one. `--security-hardening`
     /// once claimed `-h`, which made `--help` begin a remediation run.
+    #[test]
+    fn the_task_table_is_well_formed_for_every_front_end() {
+        // Moved from the old terminal menu: the GUI and web UI list tasks by
+        // these rows, so each needs a long flag, a label, and to appear once.
+        let mut seen: Vec<&str> = Vec::new();
+        for spec in Host::tasks() {
+            assert!(
+                spec.flag.starts_with("--"),
+                "{} is not long-form",
+                spec.flag
+            );
+            assert!(!spec.label.is_empty(), "{} has no label", spec.flag);
+            assert!(!seen.contains(&spec.flag), "{} listed twice", spec.flag);
+            seen.push(spec.flag);
+        }
+        assert!(!seen.is_empty(), "the platform offers no tasks at all");
+    }
+
+    #[test]
+    fn a_desktop_session_is_found_from_the_display_but_not_from_nothing() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == name)
+                    .map(|(_, v)| v.to_string())
+            }
+        };
+        assert!(has_desktop_session(env(&[("DISPLAY", ":0")])));
+        assert!(has_desktop_session(env(&[(
+            "WAYLAND_DISPLAY",
+            "wayland-0"
+        )])));
+        assert!(!has_desktop_session(env(&[])));
+        assert!(!has_desktop_session(env(&[("DISPLAY", "")])));
+        // A sudo user whose session bus does not exist: no desktop.
+        assert!(!has_desktop_session(env(&[("SUDO_UID", "65000")])));
+    }
+
     #[test]
     fn no_task_flag_shadows_a_global_one() {
         let globals: Vec<&str> = GLOBAL_FLAGS
