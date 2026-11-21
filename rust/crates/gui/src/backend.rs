@@ -31,6 +31,25 @@ impl Backend {
         Ok(Self { runtime, ctx })
     }
 
+    pub fn ctx(&self) -> &egui::Context {
+        &self.ctx
+    }
+
+    /// Every README location on the machine, for the picker. Read-only, though
+    /// following a shortcut to a web address downloads the document.
+    pub fn discover(&self) -> Receiver<Vec<pinnacle_core::app_config::ReadmeCandidate>> {
+        let (tx, rx) = mpsc::channel();
+        let ctx = self.ctx.clone();
+        self.runtime.spawn(async move {
+            let (found, _lines) =
+                pinnacle_core::ui::capture(pinnacle_core::app_config::find_readme_candidates())
+                    .await;
+            let _ = tx.send(found);
+            ctx.request_repaint();
+        });
+        rx
+    }
+
     /// Find and parse the README. Changes nothing on the machine.
     pub fn inspect(&self, choice: ReadmeChoice) -> Receiver<ReadmeInspection> {
         let (tx, rx) = mpsc::channel();

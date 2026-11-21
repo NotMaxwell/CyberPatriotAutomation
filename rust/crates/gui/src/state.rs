@@ -4,17 +4,25 @@
 // SPDX-License-Identifier: Apache-2.0
 // =============================================================================
 
-//! Everything the screens read and write, and nothing that draws.
+//! Everything the tabs read and write, and nothing that draws.
 //!
-//! Kept free of egui and of the platform crates so the rules that matter - which
-//! tasks a plan runs, what a README edit does, how events update the run view -
-//! are plain functions with unit tests. Screens take `&mut AppState` and return
-//! an [`Action`] for `app.rs` to carry out; they never start work themselves.
+//! The workflow is: find the README (a picker of every location found, or a
+//! path typed by hand) -> check and edit what was parsed -> choose tasks ->
+//! **dry run** -> **real run** -> results. The rule that matters most lives
+//! here, as a plain function with tests: a real run is offered only after a
+//! completed dry run of exactly the same selection and README, so what the
+//! person approves is what they previewed.
+//!
+//! Kept free of egui and of the platform crates. Tabs take `&mut AppState` and
+//! return an [`Action`] for `app.rs` to carry out; they never start work.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::time::{Duration, Instant};
 
+use pinnacle_core::app_config::ReadmeCandidate;
+use pinnacle_core::directives::Directive;
 use pinnacle_core::engine::{
     Phase, ReadmeChoice, ReadmeInspection, RunEvent, RunPlan, RunSummary, TaskChoice,
 };
@@ -22,50 +30,68 @@ use pinnacle_core::models::{ReadmeData, TaskResult};
 use pinnacle_core::platform::{Concurrency, TaskSpec};
 use pinnacle_core::{run_log, ui};
 
-/// The steps, in the order a run walks through them.
+/// The three places in the app. README first: nothing else is meaningful until
+/// it is right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Screen {
+pub enum Tab {
     Readme,
-    Tasks,
-    Confirm,
     Run,
     Results,
 }
 
-impl Screen {
-    pub const ALL: [Screen; 5] = [
-        Screen::Readme,
-        Screen::Tasks,
-        Screen::Confirm,
-        Screen::Run,
-        Screen::Results,
-    ];
+impl Tab {
+    pub const ALL: [Tab; 3] = [Tab::Readme, Tab::Run, Tab::Results];
 
     pub fn title(self) -> &'static str {
         match self {
-            Screen::Readme => "README",
-            Screen::Tasks => "Tasks",
-            Screen::Confirm => "Confirm",
-            Screen::Run => "Run",
-            Screen::Results => "Results",
+            Tab::Readme => "README",
+            Tab::Run => "Run",
+            Tab::Results => "Results",
         }
     }
 }
 
-/// What a screen asks `app.rs` to do. Screens only change state they own
-/// (inputs, selections); anything that starts work goes through here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunKind {
+    /// Changes nothing; shows what a real run would do.
+    Preview,
+    /// Changes the machine.
+    Real,
+}
+
+impl RunKind {
+    pub fn title(self) -> &'static str {
+        match self {
+            RunKind::Preview => "Dry run",
+            RunKind::Real => "Real run",
+        }
+    }
+}
+
+/// What a tab asks `app.rs` to do.
 #[derive(Debug, Clone)]
 pub enum Action {
-    Go(Screen),
-    /// Find or read the README and parse it, changing nothing.
-    Inspect(ReadmeChoice),
-    /// Build the plan from the current state and start the run.
-    StartRun,
+    OpenTab(Tab),
+    /// Look for every README location and open the picker.
+    DiscoverReadme,
+    /// Open or close the README locations picker.
+    ShowLocations(bool),
+    /// Parse this README (a location from the picker, or a typed path).
+    UseReadme(String),
+    /// Close the picker and carry on with no README.
+    ContinueWithoutReadme,
+    StartPreview,
+    /// Open the confirmation for a real run. Only offered when
+    /// [`AppState::real_run_gate`] allows it.
+    OpenApplyDialog,
+    CloseApplyDialog,
+    /// Start the real run. Refused unless the gate allows it and the
+    /// confirmation was ticked.
+    StartReal,
     /// Stop between tasks; never mid-write.
     Cancel,
     OpenLog(PathBuf),
-    /// Back to the README screen with a fresh selection, keeping the README.
-    NewRun,
+    CopyText(String),
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +106,16 @@ pub struct TaskRow {
     pub name: String,
     pub concurrent: bool,
     pub status: TaskStatus,
+    pub started: Option<Instant>,
+    pub elapsed: Option<Duration>,
+}
+
+impl TaskRow {
+    /// Time spent so far, or in total once finished.
+    pub fn time(&self, now: Instant) -> Option<Duration> {
+        self.elapsed
+            .or_else(|| self.started.map(|s| now.duration_since(s)))
+    }
 }
 
 /// One line of run output, as plain text: markup and ANSI removed.
@@ -89,17 +125,52 @@ pub enum OutputLine {
     Section(String),
 }
 
-pub struct RunView {
-    pub dry_run: bool,
+/// One run, preview or real, from start to summary.
+pub struct RunRecord {
+    pub kind: RunKind,
     pub rows: Vec<TaskRow>,
     pub output: Vec<OutputLine>,
     pub cancel: Arc<AtomicBool>,
     pub cancel_requested: bool,
-    pub finished: bool,
+    pub started: Instant,
+    pub ended: Option<Instant>,
+    pub summary: Option<RunSummary>,
+    /// What was run, to compare against when a real run is asked for.
+    pub selection: Vec<bool>,
+    pub readme_fingerprint: String,
 }
 
+impl RunRecord {
+    pub fn finished(&self) -> bool {
+        self.summary.is_some()
+    }
+
+    pub fn elapsed(&self, now: Instant) -> Duration {
+        self.ended.unwrap_or(now).duration_since(self.started)
+    }
+
+    /// Tasks finished out of tasks in the run.
+    pub fn progress(&self) -> (usize, usize) {
+        let done = self
+            .rows
+            .iter()
+            .filter(|r| matches!(r.status, TaskStatus::Done(_)))
+            .count();
+        (done, self.rows.len())
+    }
+}
+
+/// A short message that fades after a few seconds.
+pub struct Toast {
+    pub text: String,
+    pub success: bool,
+    pub shown: Instant,
+}
+
+pub const TOAST_SECONDS: u64 = 6;
+
 pub struct AppState {
-    pub screen: Screen,
+    pub tab: Tab,
 
     /// The platform's task table, in run order.
     pub tasks: &'static [TaskSpec],
@@ -108,27 +179,35 @@ pub struct AppState {
     pub elevation_hint: &'static str,
 
     // --- README ----------------------------------------------------------
-    /// What the user typed or browsed to; empty means "find it automatically".
+    pub discovering: bool,
+    /// Every README location found; `None` until discovery has run.
+    pub candidates: Option<Vec<ReadmeCandidate>>,
+    /// The README locations picker is open.
+    pub locations_open: bool,
+    /// The path typed by hand in the picker or on the README tab.
     pub readme_path: String,
     pub inspecting: bool,
     pub inspection: Option<ReadmeInspection>,
     /// Hand-edited README data. When set, it replaces the parse for the run
     /// (`RunPlan::readme_override`) and the run log records the difference.
     pub edited: Option<ReadmeData>,
+    /// Ticks for the README's by-hand instructions, one per manual directive.
+    pub hand_done: Vec<bool>,
 
-    // --- selection -------------------------------------------------------
+    // --- runs ------------------------------------------------------------
     /// One entry per `tasks` row.
     pub selected: Vec<bool>,
-    /// Preview by default: the harmless choice is the one you get by not
-    /// reading.
-    pub dry_run: bool,
-    /// The second, explicit confirmation an applying run needs.
+    pub preview: Option<RunRecord>,
+    pub real: Option<RunRecord>,
+    /// The run in progress, if any.
+    pub active: Option<RunKind>,
+    pub apply_dialog_open: bool,
+    /// The tick in the real-run confirmation.
     pub apply_confirmed: bool,
+    /// Which run the Results tab shows.
+    pub results_kind: RunKind,
 
-    // --- run -------------------------------------------------------------
-    pub run: Option<RunView>,
-    pub summary: Option<RunSummary>,
-    /// Set when a run could not start or the README could not be inspected.
+    pub toast: Option<Toast>,
     pub error: Option<String>,
 }
 
@@ -140,23 +219,34 @@ impl AppState {
         elevation_hint: &'static str,
     ) -> Self {
         Self {
-            screen: Screen::Readme,
+            tab: Tab::Readme,
             tasks,
             privileged,
             privileged_role,
             elevation_hint,
+            discovering: false,
+            candidates: None,
+            locations_open: false,
             readme_path: String::new(),
             inspecting: false,
             inspection: None,
             edited: None,
-            selected: vec![false; tasks.len()],
-            dry_run: true,
+            hand_done: Vec::new(),
+            // Everything a README is not needed for is ticked by default: the
+            // usual run is all of it, and a dry run comes first anyway.
+            selected: tasks.iter().map(|t| !t.needs_readme).collect(),
+            preview: None,
+            real: None,
+            active: None,
+            apply_dialog_open: false,
             apply_confirmed: false,
-            run: None,
-            summary: None,
+            results_kind: RunKind::Preview,
+            toast: None,
             error: None,
         }
     }
+
+    // --- README ------------------------------------------------------------
 
     /// The README the run will use: the hand-edited copy if there is one,
     /// otherwise what was parsed.
@@ -166,14 +256,47 @@ impl AppState {
             .or_else(|| self.inspection.as_ref()?.data.as_ref())
     }
 
-    pub fn readme_choice(&self) -> ReadmeChoice {
-        let path = self.readme_path.trim();
-        if path.is_empty() {
-            ReadmeChoice::Auto
-        } else {
-            ReadmeChoice::Path(path.to_string())
+    /// The document that was parsed, if any.
+    pub fn readme_source(&self) -> Option<&str> {
+        self.inspection.as_ref()?.source.as_deref()
+    }
+
+    /// The README's by-hand instructions, forensics first: they must be done
+    /// before any task runs, because a remediation can destroy the evidence.
+    pub fn manual_directives(&self) -> Vec<&Directive> {
+        let mut manual: Vec<&Directive> = self
+            .inspection
+            .iter()
+            .flat_map(|i| &i.directives)
+            .filter(|d| d.handling.needs_a_person())
+            .collect();
+        manual.sort_by_key(|d| !d.subject.to_lowercase().contains("forensic"));
+        manual
+    }
+
+    /// Install a finished inspection, enabling README-dependent tasks it makes
+    /// possible and resetting the checklist to match its instructions.
+    pub fn set_inspection(&mut self, inspection: ReadmeInspection) {
+        let had_readme = self.readme_data().is_some();
+        self.inspection = Some(inspection);
+        self.edited = None;
+        self.inspecting = false;
+        self.hand_done = vec![false; self.manual_directives().len()];
+        let has_readme = self.readme_data().is_some();
+        for (on, spec) in self.selected.iter_mut().zip(self.tasks) {
+            if spec.needs_readme {
+                *on = has_readme && (*on || !had_readme);
+            }
         }
     }
+
+    /// Something that identifies the README a run used, so a real run can be
+    /// refused when the edits changed after the dry run.
+    pub fn readme_fingerprint(&self) -> String {
+        format!("{:?}|{:?}", self.readme_source(), self.edited)
+    }
+
+    // --- planning ---------------------------------------------------------
 
     /// The selected task rows, in run order.
     pub fn selected_specs(&self) -> Vec<&'static TaskSpec> {
@@ -185,56 +308,99 @@ impl AppState {
             .collect()
     }
 
-    /// May this run change the machine? Only elevated, only after the second
-    /// confirmation. Anything else runs as a preview whatever `dry_run` says.
-    pub fn effective_dry_run(&self) -> bool {
-        self.dry_run || !self.privileged || !self.apply_confirmed
+    /// May a real run be started now? `Err` says why not, for the screen to
+    /// show next to the disabled button.
+    pub fn real_run_gate(&self) -> Result<(), String> {
+        if !self.privileged {
+            return Err(format!(
+                "Not running as {}. {}",
+                self.privileged_role, self.elevation_hint
+            ));
+        }
+        if self.active.is_some() {
+            return Err("A run is in progress.".to_string());
+        }
+        let Some(preview) = &self.preview else {
+            return Err(
+                "Run a dry run first: a real run does what the dry run showed.".to_string(),
+            );
+        };
+        if !preview.finished() {
+            return Err("The dry run has not finished.".to_string());
+        }
+        if preview.summary.as_ref().is_some_and(|s| s.cancelled) {
+            return Err("The dry run was cancelled. Run it again to completion.".to_string());
+        }
+        if preview.selection != self.selected {
+            return Err("The task selection changed since the dry run. Run it again.".to_string());
+        }
+        if preview.readme_fingerprint != self.readme_fingerprint() {
+            return Err(
+                "The README or its edits changed since the dry run. Run it again.".to_string(),
+            );
+        }
+        Ok(())
     }
 
-    /// The command line this plan corresponds to, stamped into the run log so
-    /// a GUI run can be repeated from a terminal.
-    pub fn command_line(&self) -> String {
+    /// The command line a plan corresponds to, stamped into the run log so a
+    /// GUI run can be repeated from a terminal.
+    pub fn command_line(&self, kind: RunKind) -> String {
         let mut parts = vec!["(gui)".to_string()];
-        match self.readme_choice() {
-            ReadmeChoice::Auto => parts.push("--auto-readme".to_string()),
-            ReadmeChoice::Path(p) => parts.push(format!("--readme \"{p}\"")),
-            ReadmeChoice::None => {}
+        if let Some(source) = self.readme_source() {
+            parts.push(format!("--readme \"{source}\""));
         }
         parts.extend(self.selected_specs().iter().map(|s| s.flag.to_string()));
-        if self.effective_dry_run() {
+        if kind == RunKind::Preview {
             parts.push("--dry-run".to_string());
         }
         parts.join(" ")
     }
 
-    /// The plan the engine runs. `None` with nothing selected.
-    pub fn plan(&self, log_path: PathBuf, cancel: Arc<AtomicBool>) -> Option<RunPlan> {
+    /// The plan the engine runs, or why there is none.
+    ///
+    /// A real plan is built only when [`Self::real_run_gate`] passes and the
+    /// confirmation is ticked: this is the second lock, independent of what any
+    /// screen enabled.
+    pub fn plan(
+        &self,
+        kind: RunKind,
+        log_path: PathBuf,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<RunPlan, String> {
         let specs = self.selected_specs();
         if specs.is_empty() {
-            return None;
+            return Err("No tasks selected.".to_string());
         }
-        let readme = match &self.inspection {
+        if self.active.is_some() {
+            return Err("A run is in progress.".to_string());
+        }
+        if kind == RunKind::Real {
+            self.real_run_gate()?;
+            if !self.apply_confirmed {
+                return Err("Confirm the real run first.".to_string());
+            }
+        }
+        let readme = match self.readme_source() {
             // Re-resolve exactly the document that was inspected, so the run
             // cannot quietly pick a different README than the one on screen.
-            Some(ReadmeInspection {
-                source: Some(source),
-                ..
-            }) => ReadmeChoice::Path(source.clone()),
-            _ => ReadmeChoice::None,
+            Some(source) => ReadmeChoice::Path(source.to_string()),
+            None => ReadmeChoice::None,
         };
-        Some(RunPlan {
+        Ok(RunPlan {
             readme,
             readme_override: self.edited.clone(),
             tasks: TaskChoice::Flags(specs.iter().map(|s| s.flag.to_string()).collect()),
-            dry_run: self.effective_dry_run(),
+            dry_run: kind == RunKind::Preview,
             log_path,
-            command_line: self.command_line(),
+            command_line: self.command_line(kind),
             cancel,
         })
     }
 
-    /// Start the run view for a plan that is about to be handed to the engine.
-    pub fn begin_run(&mut self, plan: &RunPlan) {
+    // --- running ----------------------------------------------------------
+
+    /// Record a run that is about to be handed to the engine.
+    pub fn begin_run(&mut self, kind: RunKind, plan: &RunPlan, now: Instant) {
         let rows = self
             .selected_specs()
             .iter()
@@ -242,24 +408,76 @@ impl AppState {
                 name: spec.label.to_string(),
                 concurrent: spec.concurrency == Concurrency::Concurrent,
                 status: TaskStatus::Waiting,
+                started: None,
+                elapsed: None,
             })
             .collect();
-        self.run = Some(RunView {
-            dry_run: plan.dry_run,
+        let record = RunRecord {
+            kind,
             rows,
             output: Vec::new(),
             cancel: plan.cancel.clone(),
             cancel_requested: false,
-            finished: false,
-        });
-        self.summary = None;
+            started: now,
+            ended: None,
+            summary: None,
+            selection: self.selected.clone(),
+            readme_fingerprint: self.readme_fingerprint(),
+        };
+        match kind {
+            RunKind::Preview => {
+                self.preview = Some(record);
+                // A new preview supersedes the real run it would have unlocked.
+                self.real = None;
+            }
+            RunKind::Real => self.real = Some(record),
+        }
+        self.active = Some(kind);
+        self.apply_dialog_open = false;
+        self.apply_confirmed = false;
         self.error = None;
-        self.screen = Screen::Run;
+        self.tab = Tab::Run;
     }
 
-    /// Fold one engine event into the run view.
-    pub fn apply_event(&mut self, event: RunEvent) {
-        let Some(run) = self.run.as_mut() else {
+    pub fn active_record(&self) -> Option<&RunRecord> {
+        match self.active? {
+            RunKind::Preview => self.preview.as_ref(),
+            RunKind::Real => self.real.as_ref(),
+        }
+    }
+
+    pub fn active_record_mut(&mut self) -> Option<&mut RunRecord> {
+        match self.active? {
+            RunKind::Preview => self.preview.as_mut(),
+            RunKind::Real => self.real.as_mut(),
+        }
+    }
+
+    /// The run the Results tab should show by default: the real one if there
+    /// is one, else the preview.
+    pub fn latest_finished(&self) -> Option<RunKind> {
+        if self.real.as_ref().is_some_and(RunRecord::finished) {
+            Some(RunKind::Real)
+        } else if self.preview.as_ref().is_some_and(RunRecord::finished) {
+            Some(RunKind::Preview)
+        } else {
+            None
+        }
+    }
+
+    pub fn record(&self, kind: RunKind) -> Option<&RunRecord> {
+        match kind {
+            RunKind::Preview => self.preview.as_ref(),
+            RunKind::Real => self.real.as_ref(),
+        }
+    }
+
+    /// Fold one engine event into the active run.
+    pub fn apply_event(&mut self, event: RunEvent, now: Instant) {
+        let Some(kind) = self.active else {
+            return;
+        };
+        let Some(run) = self.active_record_mut() else {
             return;
         };
         match event {
@@ -270,39 +488,64 @@ impl AppState {
             }
             RunEvent::Readme(_) => {}
             RunEvent::TaskStarted { name, .. } => {
-                row_for(&mut run.rows, &name).status = TaskStatus::Running(Phase::Reading);
+                let row = row_for(&mut run.rows, &name);
+                row.status = TaskStatus::Running(Phase::Reading);
+                row.started = Some(now);
             }
             RunEvent::TaskPhase { name, phase } => {
-                row_for(&mut run.rows, &name).status = TaskStatus::Running(phase);
+                let row = row_for(&mut run.rows, &name);
+                row.status = TaskStatus::Running(phase);
+                row.started.get_or_insert(now);
             }
             RunEvent::TaskFinished(result) => {
                 let name = result.task_name.clone();
-                row_for(&mut run.rows, &name).status = TaskStatus::Done(result);
+                let row = row_for(&mut run.rows, &name);
+                row.elapsed = row.started.map(|s| now.duration_since(s));
+                row.status = TaskStatus::Done(result);
             }
             RunEvent::Finished(summary) => {
-                run.finished = true;
-                self.summary = Some(summary);
-                self.screen = Screen::Results;
+                let cancelled = summary.cancelled;
+                let failed = summary.results.iter().filter(|r| !r.success).count();
+                run.summary = Some(summary);
+                run.ended = Some(now);
+                self.active = None;
+                self.results_kind = kind;
+                self.tab = Tab::Results;
+                self.toast = Some(Toast {
+                    text: finish_message(kind, cancelled, failed),
+                    success: !cancelled && failed == 0,
+                    shown: now,
+                });
             }
         }
     }
 
-    /// Back to the start for another run, keeping the README and any edits.
-    pub fn new_run(&mut self) {
-        self.selected = vec![false; self.tasks.len()];
-        self.dry_run = true;
-        self.apply_confirmed = false;
-        self.run = None;
-        self.summary = None;
-        self.error = None;
-        self.screen = Screen::Readme;
+    /// Drop the toast once it has been up long enough.
+    pub fn expire_toast(&mut self, now: Instant) {
+        if self
+            .toast
+            .as_ref()
+            .is_some_and(|t| now.duration_since(t.shown) >= Duration::from_secs(TOAST_SECONDS))
+        {
+            self.toast = None;
+        }
     }
 }
 
-/// The row a task's events belong to. Matched on the task's own name, which
-/// is what `TaskStarted` and `TaskResult` carry; a name the table did not
-/// predict (a task that renames itself) gets a row of its own rather than
-/// being dropped.
+fn finish_message(kind: RunKind, cancelled: bool, failed: usize) -> String {
+    match (cancelled, failed) {
+        (true, _) => format!(
+            "{} cancelled - no further tasks were started.",
+            kind.title()
+        ),
+        (false, 0) => format!("{} finished.", kind.title()),
+        (false, 1) => format!("{} finished - 1 task failed.", kind.title()),
+        (false, n) => format!("{} finished - {n} tasks failed.", kind.title()),
+    }
+}
+
+/// The row a task's events belong to, matched on the task's own name; a name
+/// the table did not predict gets a row of its own rather than being dropped.
 fn row_for<'a>(rows: &'a mut Vec<TaskRow>, name: &str) -> &'a mut TaskRow {
     let at = match rows.iter().position(|r| r.name == name) {
         Some(at) => at,
@@ -311,6 +554,8 @@ fn row_for<'a>(rows: &'a mut Vec<TaskRow>, name: &str) -> &'a mut TaskRow {
                 name: name.to_string(),
                 concurrent: false,
                 status: TaskStatus::Waiting,
+                started: None,
+                elapsed: None,
             });
             rows.len() - 1
         }
@@ -349,7 +594,7 @@ pub fn for_display(text: &str) -> String {
     }
     // Dropping a leading emoji leaves the space that followed it.
     match out.strip_prefix(' ') {
-        Some(rest) if text.starts_with(|c: char| is_decorative(c)) => rest.to_string(),
+        Some(rest) if text.starts_with(is_decorative) => rest.to_string(),
         _ => out,
     }
 }
@@ -366,6 +611,7 @@ pub fn default_log_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pinnacle_core::directives::Handling;
     use pinnacle_core::models::SystemInfo;
     use pinnacle_core::task::Task;
 
@@ -435,67 +681,165 @@ mod tests {
         AppState::new(&TASKS, privileged, "root", "use sudo")
     }
 
-    fn plan(s: &AppState) -> Option<RunPlan> {
-        s.plan(PathBuf::from("log.txt"), Arc::new(AtomicBool::new(false)))
+    fn cancel() -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(false))
     }
 
-    #[test]
-    fn nothing_selected_makes_no_plan() {
-        assert!(plan(&state(true)).is_none());
-    }
-
-    #[test]
-    fn the_plan_names_the_selected_flags_in_table_order() {
-        let mut s = state(true);
-        s.selected = vec![true, false, true];
-        let p = plan(&s).unwrap();
-        match p.tasks {
-            TaskChoice::Flags(flags) => assert_eq!(flags, ["--password-policy", "--dns-settings"]),
-            TaskChoice::All => panic!("expected named flags"),
+    fn summary(cancelled: bool) -> RunSummary {
+        RunSummary {
+            results: Vec::new(),
+            fixes: Vec::new(),
+            log_path: PathBuf::from("log.txt"),
+            log_error: None,
+            cancelled,
         }
     }
 
-    /// The harmless default must hold unless every gate is passed.
+    fn inspection() -> ReadmeInspection {
+        ReadmeInspection {
+            source: Some("/opt/CyberPatriot/README.html".to_string()),
+            data: Some(ReadmeData::default()),
+            directives: vec![
+                Directive {
+                    subject: "the clock",
+                    sentence: "Do not change the time".to_string(),
+                    handling: Handling::SafeByInaction("no task touches it"),
+                },
+                Directive {
+                    subject: "display manager",
+                    sentence: "Keep GDM3".to_string(),
+                    handling: Handling::Manual("check by hand"),
+                },
+                Directive {
+                    subject: "forensics questions",
+                    sentence: "Answer them".to_string(),
+                    handling: Handling::Manual("answer first"),
+                },
+            ],
+            attempts: Vec::new(),
+        }
+    }
+
+    /// Run a preview to completion, as the engine would.
+    fn finish_preview(s: &mut AppState, cancelled: bool) {
+        let now = Instant::now();
+        let plan = s
+            .plan(RunKind::Preview, PathBuf::from("log.txt"), cancel())
+            .unwrap();
+        s.begin_run(RunKind::Preview, &plan, now);
+        s.apply_event(RunEvent::Finished(summary(cancelled)), now);
+    }
+
     #[test]
-    fn a_run_applies_only_when_elevated_unticked_and_confirmed() {
+    fn readme_free_tasks_start_ticked_and_readme_tasks_wait_for_one() {
         let mut s = state(true);
-        s.selected = vec![true, false, false];
-        assert!(plan(&s).unwrap().dry_run, "dry run is the default");
-
-        s.dry_run = false;
-        assert!(
-            plan(&s).unwrap().dry_run,
-            "applying needs the second confirmation"
+        assert_eq!(s.selected, [true, false, true]);
+        s.set_inspection(inspection());
+        assert_eq!(
+            s.selected,
+            [true, true, true],
+            "a README enables what needs it"
         );
+    }
 
+    #[test]
+    fn the_checklist_lists_by_hand_items_forensics_first() {
+        let mut s = state(true);
+        s.set_inspection(inspection());
+        let subjects: Vec<&str> = s.manual_directives().iter().map(|d| d.subject).collect();
+        assert_eq!(subjects, ["forensics questions", "display manager"]);
+        assert_eq!(s.hand_done, [false, false]);
+    }
+
+    #[test]
+    fn a_real_run_needs_a_finished_matching_dry_run() {
+        let mut s = state(true);
+        assert!(s.real_run_gate().is_err(), "no dry run yet");
+
+        finish_preview(&mut s, true);
+        assert!(s.real_run_gate().err().unwrap().contains("cancelled"));
+
+        finish_preview(&mut s, false);
+        assert!(s.real_run_gate().is_ok());
+
+        s.selected[0] = false;
+        assert!(
+            s.real_run_gate()
+                .err()
+                .unwrap()
+                .contains("selection changed")
+        );
+        s.selected[0] = true;
+
+        s.edited = Some(ReadmeData {
+            critical_services: vec!["ssh".to_string()],
+            ..Default::default()
+        });
+        assert!(s.real_run_gate().err().unwrap().contains("README"));
+    }
+
+    #[test]
+    fn a_real_plan_needs_the_gate_and_the_tick_and_is_not_a_dry_run() {
+        let mut s = state(true);
+        finish_preview(&mut s, false);
+        let log = || PathBuf::from("log.txt");
+        assert!(
+            s.plan(RunKind::Real, log(), cancel())
+                .err()
+                .unwrap()
+                .contains("Confirm")
+        );
         s.apply_confirmed = true;
-        assert!(!plan(&s).unwrap().dry_run);
+        let plan = s.plan(RunKind::Real, log(), cancel()).unwrap();
+        assert!(!plan.dry_run);
+        assert!(!plan.command_line.contains("--dry-run"));
+    }
 
-        let mut unprivileged = state(false);
-        unprivileged.selected = vec![true, false, false];
-        unprivileged.dry_run = false;
-        unprivileged.apply_confirmed = true;
+    #[test]
+    fn never_a_real_run_unelevated() {
+        let mut s = state(false);
+        finish_preview(&mut s, false);
+        s.apply_confirmed = true;
         assert!(
-            plan(&unprivileged).unwrap().dry_run,
-            "never applies unelevated"
+            s.real_run_gate()
+                .err()
+                .unwrap()
+                .contains("Not running as root")
         );
+        assert!(s.plan(RunKind::Real, PathBuf::from("l"), cancel()).is_err());
+        assert!(
+            s.plan(RunKind::Preview, PathBuf::from("l"), cancel())
+                .unwrap()
+                .dry_run
+        );
+    }
+
+    #[test]
+    fn a_new_preview_supersedes_the_previous_real_run() {
+        let mut s = state(true);
+        finish_preview(&mut s, false);
+        s.apply_confirmed = true;
+        let now = Instant::now();
+        let plan = s.plan(RunKind::Real, PathBuf::from("l"), cancel()).unwrap();
+        s.begin_run(RunKind::Real, &plan, now);
+        s.apply_event(RunEvent::Finished(summary(false)), now);
+        assert!(s.real.is_some());
+        finish_preview(&mut s, false);
+        assert!(s.real.is_none());
     }
 
     #[test]
     fn the_run_uses_the_document_that_was_inspected_and_the_edits() {
         let mut s = state(true);
-        s.selected = vec![true, false, false];
-        s.inspection = Some(ReadmeInspection {
-            source: Some("/opt/CyberPatriot/README.html".to_string()),
-            data: Some(ReadmeData::default()),
-            ..Default::default()
-        });
+        s.set_inspection(inspection());
         let edited = ReadmeData {
             critical_services: vec!["ssh".to_string()],
             ..Default::default()
         };
         s.edited = Some(edited.clone());
-        let p = plan(&s).unwrap();
+        let p = s
+            .plan(RunKind::Preview, PathBuf::from("l"), cancel())
+            .unwrap();
         assert!(
             matches!(p.readme, ReadmeChoice::Path(ref path) if path == "/opt/CyberPatriot/README.html")
         );
@@ -503,72 +847,54 @@ mod tests {
             p.readme_override.unwrap().critical_services,
             edited.critical_services
         );
-        assert_eq!(s.readme_data().unwrap().critical_services, ["ssh"]);
+        assert!(p.dry_run);
     }
 
     #[test]
-    fn the_command_line_repeats_the_plan() {
+    fn events_drive_rows_timings_and_finish_on_results_with_a_toast() {
         let mut s = state(true);
-        s.readme_path = "C:\\CyberPatriot\\README.url".to_string();
-        s.selected = vec![true, true, false];
-        assert_eq!(
-            s.command_line(),
-            "(gui) --readme \"C:\\CyberPatriot\\README.url\" --password-policy --user-management --dry-run"
+        let t0 = Instant::now();
+        let plan = s
+            .plan(RunKind::Preview, PathBuf::from("l"), cancel())
+            .unwrap();
+        s.begin_run(RunKind::Preview, &plan, t0);
+        assert_eq!(s.tab, Tab::Run);
+        assert_eq!(s.active, Some(RunKind::Preview));
+
+        s.apply_event(
+            RunEvent::TaskStarted {
+                name: "Password Policy".to_string(),
+                index: 0,
+                total: 2,
+                concurrent: false,
+            },
+            t0,
         );
-    }
-
-    #[test]
-    fn events_drive_the_rows_and_finish_on_the_results_screen() {
-        let mut s = state(true);
-        s.selected = vec![true, false, true];
-        let p = plan(&s).unwrap();
-        s.begin_run(&p);
-        assert_eq!(s.screen, Screen::Run);
-        assert!(s.run.as_ref().unwrap().rows[1].concurrent);
-
-        s.apply_event(RunEvent::TaskStarted {
-            name: "Password Policy".to_string(),
-            index: 0,
-            total: 2,
-            concurrent: false,
-        });
-        s.apply_event(RunEvent::TaskPhase {
-            name: "Password Policy".to_string(),
-            phase: Phase::Verifying,
-        });
-        assert!(matches!(
-            s.run.as_ref().unwrap().rows[0].status,
-            TaskStatus::Running(Phase::Verifying)
-        ));
-
-        s.apply_event(RunEvent::Line(ui::Line::Markup(
-            "[green]✓ done[/]".to_string(),
-        )));
-        assert_eq!(
-            s.run.as_ref().unwrap().output,
-            [OutputLine::Text("OK done".to_string())]
+        s.apply_event(
+            RunEvent::Line(ui::Line::Markup("[green]✓ done[/]".to_string())),
+            t0,
         );
+        let t1 = t0 + Duration::from_secs(3);
+        s.apply_event(
+            RunEvent::TaskFinished(TaskResult {
+                task_name: "Password Policy".to_string(),
+                success: true,
+                ..Default::default()
+            }),
+            t1,
+        );
+        let run = s.preview.as_ref().unwrap();
+        assert_eq!(run.rows[0].elapsed, Some(Duration::from_secs(3)));
+        assert_eq!(run.output, [OutputLine::Text("OK done".to_string())]);
+        assert_eq!(run.progress(), (1, 2));
 
-        s.apply_event(RunEvent::TaskFinished(TaskResult {
-            task_name: "Password Policy".to_string(),
-            success: true,
-            ..Default::default()
-        }));
-        assert!(matches!(
-            s.run.as_ref().unwrap().rows[0].status,
-            TaskStatus::Done(_)
-        ));
-
-        s.apply_event(RunEvent::Finished(RunSummary {
-            results: Vec::new(),
-            fixes: Vec::new(),
-            log_path: PathBuf::from("log.txt"),
-            log_error: None,
-            cancelled: false,
-        }));
-        assert_eq!(s.screen, Screen::Results);
-        assert!(s.run.as_ref().unwrap().finished);
-        assert!(s.summary.is_some());
+        s.apply_event(RunEvent::Finished(summary(false)), t1);
+        assert_eq!(s.tab, Tab::Results);
+        assert_eq!(s.active, None);
+        assert_eq!(s.results_kind, RunKind::Preview);
+        assert_eq!(s.toast.as_ref().unwrap().text, "Dry run finished.");
+        s.expire_toast(t1 + Duration::from_secs(TOAST_SECONDS));
+        assert!(s.toast.is_none());
     }
 
     #[test]
@@ -594,19 +920,5 @@ mod tests {
             for_display("plain - 8.8.8.8 = Google"),
             "plain - 8.8.8.8 = Google"
         );
-    }
-
-    #[test]
-    fn a_new_run_keeps_the_readme_and_resets_the_rest() {
-        let mut s = state(true);
-        s.edited = Some(ReadmeData::default());
-        s.selected = vec![true, true, true];
-        s.dry_run = false;
-        s.apply_confirmed = true;
-        s.new_run();
-        assert!(s.edited.is_some());
-        assert_eq!(s.selected, [false, false, false]);
-        assert!(s.dry_run && !s.apply_confirmed);
-        assert_eq!(s.screen, Screen::Readme);
     }
 }

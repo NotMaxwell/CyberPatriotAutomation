@@ -14,7 +14,11 @@ mod app;
 mod backend;
 mod screens;
 mod screenshot;
+// The tabs that read most of these are being rebuilt; drop the allows with them.
+#[allow(dead_code)]
 mod state;
+#[allow(dead_code)]
+mod theme;
 
 #[cfg(target_os = "linux")]
 use pinnacle_linux::Linux as Host;
@@ -28,8 +32,8 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("PinnacleCyPat")
-            .with_inner_size([1100.0, 760.0])
-            .with_min_inner_size([760.0, 520.0]),
+            .with_inner_size([1240.0, 820.0])
+            .with_min_inner_size([960.0, 600.0]),
         ..Default::default()
     };
     eframe::run_native(

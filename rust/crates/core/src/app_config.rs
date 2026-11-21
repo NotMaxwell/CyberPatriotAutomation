@@ -304,6 +304,71 @@ pub async fn find_readme_file_reporting(attempts: &mut Vec<String>) -> Option<St
     None
 }
 
+/// One place a README might be, for the GUI's "README locations" picker.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadmeCandidate {
+    /// What is on disk: a shortcut, a launcher or the document itself.
+    pub location: String,
+    /// The document it leads to, when it could be followed.
+    pub resolved: Option<String>,
+    /// Why it could not be followed, when it could not.
+    pub note: Option<String>,
+}
+
+/// Every README location that exists, resolved, in the order discovery would
+/// try them.
+///
+/// [`find_readme_file_reporting`] stops at the first one that resolves, which
+/// is right for a scripted run and wrong for a person choosing: an image with a
+/// stale README on one desktop and the current one in `C:\CyberPatriot` should
+/// show both, not silently pick whichever is checked first. Locations that do
+/// not exist are left out - the picker is a list of choices, not a search log.
+pub async fn find_readme_candidates() -> Vec<ReadmeCandidate> {
+    let mut locations: Vec<PathBuf> = Vec::new();
+    for dir in readme_search_dirs() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut found: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| is_shortcut(path) && shortcut_name_looks_like_readme(path))
+            .collect();
+        found.sort();
+        locations.extend(found);
+    }
+    for path in default_readme_paths() {
+        let path = if path.contains('*') {
+            match expand_wildcard_path(&path) {
+                Some(p) => p,
+                None => continue,
+            }
+        } else {
+            path
+        };
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            locations.push(path);
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut candidates = Vec::new();
+    for path in locations {
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        let resolved = resolve_readme_candidate(&path).await;
+        let note = resolved.is_none().then(|| describe_unresolvable(&path));
+        candidates.push(ReadmeCandidate {
+            location: path.to_string_lossy().into_owned(),
+            resolved,
+            note,
+        });
+    }
+    candidates
+}
+
 /// Resolve one candidate path to a readable README document.
 ///
 /// `.url` and `.lnk` files are shortcuts and must be followed; anything else is
@@ -754,6 +819,28 @@ async fn resolve_shortcut_target(lnk_path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// Run against the real search directories of the machine running the
+    /// tests: whatever is found must exist, appear once, and either resolve or
+    /// say why not. (The dev container has no README, so this mostly proves
+    /// the empty case does not panic or list absent paths.)
+    #[tokio::test]
+    async fn candidates_exist_are_unique_and_explain_themselves() {
+        let found = find_readme_candidates().await;
+        let mut locations: Vec<&str> = found.iter().map(|c| c.location.as_str()).collect();
+        let total = locations.len();
+        locations.sort();
+        locations.dedup();
+        assert_eq!(locations.len(), total, "a location is listed twice");
+        for c in &found {
+            assert!(
+                Path::new(&c.location).exists(),
+                "{} does not exist",
+                c.location
+            );
+            assert!(c.resolved.is_some() != c.note.is_some(), "{c:?}");
+        }
+    }
     use super::*;
 
     /// The form an Ubuntu competition image actually ships: a launcher on the
