@@ -332,7 +332,11 @@ pub fn show(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
         .show(ui, |ui| {
             let (tone, text) = banner(kind, summary);
             theme::callout(ui, tone, |ui| {
-                ui.label(RichText::new(text).strong().color(tone.fg()));
+                ui.label(
+                    RichText::new(text)
+                        .family(theme::bold_family())
+                        .color(tone.fg()),
+                );
             });
             ui.add_space(theme::GAP);
 
@@ -379,7 +383,7 @@ fn empty_state(ui: &mut egui::Ui) -> Option<Action> {
             ui.label(
                 RichText::new("Run a dry run to see what would change")
                     .size(18.0)
-                    .strong(),
+                    .family(theme::bold_family()),
             );
             ui.label(theme::muted(
                 "A dry run reads this machine and reports every change it would make. It changes nothing.",
@@ -449,9 +453,21 @@ fn comparison_card(ui: &mut egui::Ui, rows: &[(&'static str, usize, usize)]) {
         .num_columns(3)
         .spacing([28.0, 6.0])
         .show(ui, |ui| {
-            ui.label(RichText::new("Outcome").strong().color(theme::MUTED));
-            ui.label(RichText::new("Dry run").strong().color(theme::MUTED));
-            ui.label(RichText::new("Real run").strong().color(theme::MUTED));
+            ui.label(
+                RichText::new("Outcome")
+                    .family(theme::bold_family())
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new("Dry run")
+                    .family(theme::bold_family())
+                    .color(theme::MUTED),
+            );
+            ui.label(
+                RichText::new("Real run")
+                    .family(theme::bold_family())
+                    .color(theme::MUTED),
+            );
             ui.end_row();
             for (label, dry, real) in rows {
                 ui.label(*label);
@@ -490,7 +506,12 @@ fn tasks_card(ui: &mut egui::Ui, record: &RunRecord, summary: &RunSummary, now: 
     ui.horizontal(|ui| {
         for (head, w) in heads.iter().zip(W) {
             cell(ui, w, |ui| {
-                ui.label(RichText::new(*head).strong().size(12.5).color(theme::MUTED));
+                ui.label(
+                    RichText::new(*head)
+                        .family(theme::bold_family())
+                        .size(12.5)
+                        .color(theme::MUTED),
+                );
             });
         }
     });
@@ -498,7 +519,10 @@ fn tasks_card(ui: &mut egui::Ui, record: &RunRecord, summary: &RunSummary, now: 
         ui.separator();
         ui.horizontal(|ui| {
             cell(ui, W[0], |ui| {
-                ui.add(egui::Label::new(RichText::new(&r.task_name).strong()).truncate());
+                ui.add(
+                    egui::Label::new(RichText::new(&r.task_name).family(theme::bold_family()))
+                        .truncate(),
+                );
             });
             cell(ui, W[1], |ui| {
                 if r.success {
@@ -605,7 +629,10 @@ fn ledger_row(ui: &mut egui::Ui, i: usize, f: &FixRecord, local: &mut Local, kin
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 theme::pill(ui, outcome_label(f.outcome, kind), outcome_tone(f.outcome));
-                ui.add(egui::Label::new(RichText::new(&f.target).strong()).truncate());
+                ui.add(
+                    egui::Label::new(RichText::new(&f.target).family(theme::bold_family()))
+                        .truncate(),
+                );
                 ui.label(theme::muted(&f.task));
             });
             if open {
