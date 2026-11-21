@@ -2022,6 +2022,7 @@ dependencies = [
  "owo-colors",
  "regex",
  "scraper",
+ "serde",
  "tokio",
  "uuid",
  "windows 0.59.0",

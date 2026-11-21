@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 /// Represents parsed data from a CyberPatriot README file.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReadmeData {
     pub title: String,
     pub operating_system: String,
@@ -32,6 +33,7 @@ impl ReadmeData {
 
 /// Represents an actionable item extracted from the README.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ActionableItem {
     pub item_type: ActionableItemType,
     pub description: String,
@@ -41,6 +43,7 @@ pub struct ActionableItem {
 
 /// Types of actionable items that can be extracted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ActionableItemType {
     CreateUser,
     CreateGroup,
@@ -59,6 +62,7 @@ pub enum ActionableItemType {
 
 /// Represents an authorized user from the README.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AuthorizedUser {
     pub username: String,
     pub password: Option<String>,
@@ -69,6 +73,7 @@ pub struct AuthorizedUser {
 
 /// Represents a software requirement from the README.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SoftwareRequirement {
     pub name: String,
     pub version: Option<String>,
@@ -91,6 +96,7 @@ impl Default for SoftwareRequirement {
 
 /// Represents a group that needs to be created.
 #[derive(Debug, Default, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GroupRequirement {
     pub group_name: String,
     pub members: Vec<String>,

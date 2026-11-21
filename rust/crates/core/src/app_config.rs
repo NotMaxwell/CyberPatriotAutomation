@@ -306,6 +306,7 @@ pub async fn find_readme_file_reporting(attempts: &mut Vec<String>) -> Option<St
 
 /// One place a README might be, for the GUI's "README locations" picker.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct ReadmeCandidate {
     /// What is on disk: a shortcut, a launcher or the document itself.
     pub location: String,

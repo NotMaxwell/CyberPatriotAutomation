@@ -32,6 +32,7 @@ indicatif.workspace = true
 owo-colors.workspace = true
 scraper.workspace = true
 ego-tree.workspace = true
+serde = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # Only for the one call in `ui::init` that turns on the console's
@@ -43,6 +44,8 @@ windows = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Cons
 # build: only the platform crates' dev-dependencies turn it on.
 [features]
 test-support = []
+# JSON for the README model, for the web UI. Off for every other build.
+serde = ["dep:serde"]
 
 [dev-dependencies]
 insta.workspace = true

@@ -492,19 +492,56 @@ fn report_hand_edits(parsed: Option<&ReadmeData>, edited: &ReadmeData) {
         }
     }
     if !any {
-        ui::markup_line("[dim]No list differs from the parsed README.[/]");
+        ui::markup_line("[dim]No field differs from the parsed README.[/]");
     }
     ui::write_line();
 }
 
-/// The lists a hand edit is compared on, one string per entry.
-fn readme_lists(data: &ReadmeData) -> [(&'static str, Vec<String>); 6] {
-    let names = |users: &[crate::models::AuthorizedUser]| {
-        users.iter().map(|u| u.username.clone()).collect::<Vec<_>>()
+/// Every field a hand edit can change, as one string per entry, so the log
+/// shows each difference as a removed and an added line.
+///
+/// Passwords are reduced to whether one is set and a short fingerprint: a
+/// README password changed by hand is worth seeing in the log, the password
+/// itself is not - the log is shared and pasted into help requests.
+fn readme_lists(data: &ReadmeData) -> [(&'static str, Vec<String>); 12] {
+    let people = |users: &[crate::models::AuthorizedUser]| {
+        users
+            .iter()
+            .map(|u| {
+                let mut flags = Vec::new();
+                if u.is_admin {
+                    flags.push("admin".to_string());
+                }
+                if u.is_primary_user {
+                    flags.push("primary".to_string());
+                }
+                if let Some(pw) = &u.password {
+                    flags.push(format!("password #{:04x}", fingerprint(pw)));
+                }
+                if let Some(notes) = u.notes.as_deref().filter(|n| !n.is_empty()) {
+                    flags.push(format!("notes: {notes}"));
+                }
+                if flags.is_empty() {
+                    u.username.clone()
+                } else {
+                    format!("{} ({})", u.username, flags.join(", "))
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let single = |s: &str| {
+        if s.is_empty() {
+            Vec::new()
+        } else {
+            vec![s.to_string()]
+        }
     };
     [
-        ("Administrators", names(&data.administrators)),
-        ("Users", names(&data.users)),
+        ("Title", single(&data.title)),
+        ("Operating system", single(&data.operating_system)),
+        ("Scenario", single(&data.scenario)),
+        ("Administrators", people(&data.administrators)),
+        ("Users", people(&data.users)),
         (
             "Groups",
             data.group_requirements
@@ -512,16 +549,46 @@ fn readme_lists(data: &ReadmeData) -> [(&'static str, Vec<String>); 6] {
                 .map(|g| format!("{}: {}", g.group_name, g.members.join(", ")))
                 .collect(),
         ),
+        ("Users to create", data.users_to_create.clone()),
         ("Critical services", data.critical_services.clone()),
+        ("Prohibited services", data.prohibited_services.clone()),
         (
             "Required software",
             data.required_software
                 .iter()
-                .map(|s| s.name.clone())
+                .map(|s| {
+                    let mut text = s.name.clone();
+                    if let Some(v) = s.version.as_deref().filter(|v| !v.is_empty()) {
+                        text.push_str(&format!(" {v}"));
+                    }
+                    if s.should_be_latest {
+                        text.push_str(" (latest)");
+                    }
+                    if !s.is_required {
+                        text.push_str(" (optional)");
+                    }
+                    if let Some(n) = s.notes.as_deref().filter(|n| !n.is_empty()) {
+                        text.push_str(&format!(" - {n}"));
+                    }
+                    text
+                })
                 .collect(),
         ),
         ("Prohibited software", data.prohibited_software.clone()),
+        ("Guidelines", data.guidelines.clone()),
     ]
+}
+
+/// A short, stable, non-reversible tag for a password in the log.
+fn fingerprint(secret: &str) -> u16 {
+    // FNV-1a folded to 16 bits: enough to see that two runs used the same or a
+    // different password, far too little to recover or brute-force it from.
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in secret.bytes() {
+        hash ^= u32::from(b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    ((hash >> 16) ^ (hash & 0xffff)) as u16
 }
 
 /// Read state, remediate, then verify - the pipeline every task follows.
@@ -1130,6 +1197,47 @@ mod tests {
         assert!(log.contains("Run cancelled"), "{log}");
         assert!(log.contains("TASK RESULTS"), "{log}");
         let _ = std::fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn every_editable_field_is_compared_and_passwords_never_logged() {
+        let user = |name: &str, pw: Option<&str>| crate::models::AuthorizedUser {
+            username: name.to_string(),
+            password: pw.map(str::to_string),
+            ..Default::default()
+        };
+        let before = ReadmeData {
+            title: "Round".to_string(),
+            users: vec![user("ann", Some("Secret-1"))],
+            ..Default::default()
+        };
+        let after = ReadmeData {
+            title: "Round 2".to_string(),
+            scenario: "New scenario".to_string(),
+            users: vec![user("ann", Some("Secret-2"))],
+            prohibited_services: vec!["telnet".to_string()],
+            guidelines: vec!["Do not change the clock".to_string()],
+            ..Default::default()
+        };
+        let (b, a) = (readme_lists(&before), readme_lists(&after));
+        let changed: Vec<&str> = b
+            .iter()
+            .zip(&a)
+            .filter(|((_, x), (_, y))| x != y)
+            .map(|((label, _), _)| *label)
+            .collect();
+        assert_eq!(
+            changed,
+            [
+                "Title",
+                "Scenario",
+                "Users",
+                "Prohibited services",
+                "Guidelines"
+            ]
+        );
+        let all: String = a.iter().flat_map(|(_, v)| v.clone()).collect();
+        assert!(!all.contains("Secret"), "a password reached the log: {all}");
     }
 
     #[tokio::test]

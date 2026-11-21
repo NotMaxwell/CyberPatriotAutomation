@@ -53,6 +53,8 @@ owo-colors = "4"
 scraper = "0.27.0"
 ego-tree = "0.11.0"
 insta = "1.48.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 # The shipping profile, at the workspace root because cargo only honours it here.
 # Measured on the win-x64 cross build: 2.50 MB with cargo's defaults for
