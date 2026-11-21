@@ -9,14 +9,14 @@
 //!
 //! Each supported operating system ships a crate (`pinnacle-windows`,
 //! `pinnacle-linux`) whose only public surface is a list of [`TaskSpec`]. The
-//! CLI and the interactive menu read that list and know nothing else about the
-//! platform: the flag, the help line, the menu entry and the constructor all
-//! come from the same row.
+//! CLI, the desktop GUI and the web UI read that list and know nothing else
+//! about the platform: the flag, the help line, the task-list entry and the
+//! constructor all come from the same row.
 //!
 //! That single-row rule is deliberate. Before this existed, adding a task meant
 //! editing a flag table in `main.rs`, a registration block a few hundred lines
-//! below it, and a menu table in `tui.rs` - three places for one fact, and they
-//! were free to disagree. A task that reached the CLI but not the menu was
+//! below it, and a table in the old terminal menu - three places for one fact,
+//! and they were free to disagree. A task that reached the CLI but not the menu was
 //! invisible to anyone who double-clicks `RUN.bat`, which is most users. Now
 //! that state is unrepresentable.
 
@@ -56,13 +56,13 @@ pub struct TaskSpec {
     pub short: &'static str,
     /// One line for `--help`.
     pub help: &'static str,
-    /// The name shown in the interactive menu.
+    /// The name shown in the GUI's and the web UI's task lists.
     pub label: &'static str,
-    /// The parenthetical shown after the label in the menu.
+    /// The short description shown under the label in those lists.
     pub detail: &'static str,
     /// Does this task do anything useful without a parsed README?
     ///
-    /// The menu warns when one of these is selected and no README was given,
+    /// The front ends disable these when no README was loaded,
     /// because the failure is silent otherwise: the task runs, finds no
     /// instructions, and reports success having done nothing.
     pub needs_readme: bool,
@@ -105,7 +105,7 @@ pub trait Platform {
     /// Can this process actually change the machine?
     ///
     /// Deliberately "can it write" rather than "is the token elevated": the
-    /// answer the menu wants is whether the run will be able to do anything,
+    /// answer a front end wants is whether the run will be able to do anything,
     /// and on Windows a token check would also have to account for UAC
     /// virtualisation to give it.
     fn is_privileged() -> bool;

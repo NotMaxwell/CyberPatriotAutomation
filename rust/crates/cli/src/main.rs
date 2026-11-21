@@ -558,7 +558,7 @@ mod tests {
     }
 
     /// The whole point of the platform table: a task that exists is a task the
-    /// argument parser accepts and the menu offers. Before it, those were three
+    /// argument parser accepts and the GUI and web UI list. Before it, those were three
     /// separate lists and a task could appear in one without the others.
     #[test]
     fn every_platform_task_is_accepted_by_the_validator() {

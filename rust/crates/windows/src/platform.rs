@@ -8,11 +8,11 @@
 //! Every Windows task, described once.
 //!
 //! This table is the single source of truth for the flag, the `--help` line,
-//! the menu entry and the constructor. It replaced three separate lists - a
-//! flag table in `main.rs`, a registration block below it, and a menu table in
-//! `tui.rs` - which were free to disagree, and did: a task could reach the CLI
-//! without reaching the menu, making it invisible to anyone who double-clicks
-//! `RUN.bat`.
+//! the GUI and web task-list entry and the constructor. It replaced three
+//! separate lists - a flag table in `main.rs`, a registration block below it,
+//! and a table in the old terminal menu - which were free to disagree, and did:
+//! a task could reach the CLI without reaching the menu, making it invisible to
+//! anyone who double-clicks `RUN.bat`.
 //!
 //! The order is the order a full run executes them, so the confirmation summary
 //! reads as the sequence that is about to happen.

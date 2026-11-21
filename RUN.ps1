@@ -4,12 +4,10 @@
 #
 #  Right-click and "Run with PowerShell" to use!
 #
-#  The menu this used to duplicate now lives inside the tool
-#  itself (--tui), so this script only checks the two things the
-#  tool cannot check for itself - that it is elevated, and that
-#  there is something to run it with - and then hands over.
-#  Keeping the task list in one place is what stops the script
-#  from offering a task the tool no longer has.
+#  It opens the desktop app, pinnacle-cypat-gui.exe, which walks
+#  through the README, a dry run and the real run. The script only
+#  checks the two things the app cannot check for itself - that it
+#  is elevated, and that there is something to run - then hands over.
 # ============================================================
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -47,46 +45,44 @@ if (-not (Test-Admin)) {
 Write-Success "Running with Administrator privileges"
 
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
-$published = Join-Path $scriptPath "publish-win-x64\pinnacle-cypat.exe"
-$release   = Join-Path $scriptPath "rust\target\release\pinnacle-cypat.exe"
+$published = Join-Path $scriptPath "publish-win-x64\pinnacle-cypat-gui.exe"
+$release   = Join-Path $scriptPath "rust\target\release\pinnacle-cypat-gui.exe"
 
 # The shipping artefact: one self-contained exe, no runtime to install.
 if (Test-Path $published) {
-    Write-Success "Using the published build"
-    Write-Host ""
-    & $published --tui
+    Write-Success "Opening the published app"
+    Start-Process -FilePath $published
+    exit 0
 }
-elseif (Test-Path $release) {
-    Write-Success "Using the local release build"
-    Write-Host ""
-    & $release --tui
+if (Test-Path $release) {
+    Write-Success "Opening the local release build"
+    Start-Process -FilePath $release
+    exit 0
 }
-else {
-    try {
-        $cargoVersion = cargo --version 2>$null
-        if ($LASTEXITCODE -ne 0) { throw }
-        Write-Success "Rust toolchain found: $cargoVersion"
-    }
-    catch {
-        Write-Failure "No build found, and Rust is not installed."
-        Write-Failure "Either copy a published pinnacle-cypat.exe into:"
-        Write-Host "       $(Join-Path $scriptPath 'publish-win-x64')" -ForegroundColor White
-        Write-Failure "or install Rust and re-run this script:"
-        Write-Host "       https://rustup.rs" -ForegroundColor White
-        Write-Host ""
-        Read-Host "Press Enter to exit"
-        exit 1
-    }
 
+try {
+    $cargoVersion = cargo --version 2>$null
+    if ($LASTEXITCODE -ne 0) { throw }
+    Write-Success "Rust toolchain found: $cargoVersion"
+}
+catch {
+    Write-Failure "No build found, and Rust is not installed."
+    Write-Failure "Either copy a published pinnacle-cypat-gui.exe into:"
+    Write-Host "       $(Join-Path $scriptPath 'publish-win-x64')" -ForegroundColor White
+    Write-Failure "or install Rust and re-run this script:"
+    Write-Host "       https://rustup.rs" -ForegroundColor White
     Write-Host ""
-    Write-Host "  Building (the first run takes a minute)..." -ForegroundColor Gray
-    Set-Location (Join-Path $scriptPath "rust")
-    cargo run --release -- --tui
+    Read-Host "Press Enter to exit"
+    exit 1
 }
 
 Write-Host ""
-Write-Host "  ========================================================" -ForegroundColor Cyan
-Write-Host "   Task Complete!" -ForegroundColor Green
-Write-Host "  ========================================================" -ForegroundColor Cyan
-Write-Host ""
-Read-Host "Press Enter to exit"
+Write-Host "  Building (the first run takes a few minutes)..." -ForegroundColor Gray
+Set-Location (Join-Path $scriptPath "rust")
+cargo build --release -p pinnacle-cypat-gui
+if ($LASTEXITCODE -ne 0) {
+    Write-Failure "The build failed; see the output above."
+    Read-Host "Press Enter to exit"
+    exit 1
+}
+Start-Process -FilePath $release

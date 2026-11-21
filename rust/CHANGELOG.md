@@ -10,6 +10,62 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.23.0
+
+Graphical front ends on both platforms, and the terminal menu removed.
+
+### Added
+
+- **Windows desktop app, `pinnacle-cypat-gui.exe`** (eframe/egui; Direct3D 12
+  through wgpu, with the WARP software rasteriser where there is no GPU
+  driver). Light theme in the system font. The workflow: on launch, a picker
+  of every README location found (plus a typed path, a file browser, or no
+  README) -> the README tab, where **every field is editable** -> the Run tab:
+  choose tasks, **dry run**, then **real run**, which unlocks only after a
+  finished, uncancelled dry run of the same selection and README and asks for
+  a confirmation with a forensics tick -> a live monitor -> Results (dry vs
+  real, outcome tiles, task table, searchable ledger, copy summary, open log).
+  A "Do by hand" checklist from the README stays in the sidebar. The exe asks
+  for elevation; with UAC off, Windows starts it elevated without a prompt,
+  and the status pill says which.
+- **Linux web UI, `pinnacle-cypat --web [--port N]`**: the same workflow in a
+  browser. Served on 127.0.0.1 only, behind a per-run token with Host and
+  Origin checks and a strict Content-Security-Policy; live updates over
+  Server-Sent Events; opens in the invoking user's browser under sudo. It
+  never exits in the middle of a run. The binary stays static musl
+  (4,080,640 bytes, +287 KB).
+- `pinnacle_core::engine` streams events to every front end, and
+  `pinnacle_core::session` holds the rules the GUI and web UI share - above
+  all the real-run gate - so they cannot disagree.
+- `app_config::find_readme_candidates` lists every README location, where
+  discovery stops at the first; `pinnacle_core::files` backs both file
+  browsers.
+- The run log's hand-edit section covers every editable field. README
+  passwords appear only as a 16-bit fingerprint.
+
+### Changed
+
+- **A bare launch opens a front end.** Windows: `pinnacle-cypat-gui.exe`
+  when it sits beside the CLI. Linux: the web UI when there is a desktop
+  session (including a sudo user's). Over SSH or from a script it still
+  prints help and runs nothing.
+- `RUN.bat` and `RUN.ps1` open the desktop app; `RUN.sh` opens the web UI.
+
+### Removed
+
+- **The terminal menu (`--tui`, `-i`)**. The GUI and the web UI cover
+  everything it did. Its task-table test moved to `main.rs`.
+
+### Tested
+
+510 tests pass. In the dev container: a full dry run driven from the desktop
+GUI (under Xvfb) and from the web UI (real server, Playwright) wrote the same
+run log as the CLI for the same plan, with every file under `/etc` unchanged.
+The web UI's token, Host, Origin, method, content-type and body-size checks
+were exercised with curl. The desktop app was launched on Windows by the
+maintainer (it ran; no UAC prompt appeared). Not yet run on a competition
+image.
+
 ## 1.22.0
 
 Linux items from a real practice round's scoring report, and the start of the

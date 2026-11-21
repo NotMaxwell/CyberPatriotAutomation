@@ -1,18 +1,15 @@
-@echo off
 :: ============================================================
 ::  PinnacleCyPat - Easy Run Script
 ::  Author: Maxwell McCormick
 ::
 ::  Just double-click this file to run the tool!
 ::
-::  The menu this used to duplicate now lives inside the tool
-::  itself (--tui), so this script only checks the two things
-::  the tool cannot check for itself - that it is elevated, and
-::  that there is something to run - and then hands over.
-::  Keeping the task list in one place is what stops the script
-::  from offering a task the tool no longer has.
+::  It opens the desktop app, pinnacle-cypat-gui.exe, which walks
+::  through the README, a dry run and the real run. The script only
+::  checks the two things the app cannot check for itself - that it
+::  is elevated, and that there is something to run - then hands over.
 :: ============================================================
-
+@echo off
 title PinnacleCyPat
 color 0A
 cls
@@ -36,28 +33,26 @@ if %errorLevel% neq 0 (
 
 echo  [+] Running with Administrator privileges
 
-:: The shipping artefact. It is a single self-contained exe with no
-:: runtime to install, which is the whole point of shipping it.
-if exist "%~dp0publish-win-x64\pinnacle-cypat.exe" (
-    echo  [+] Using the published build
-    echo.
-    "%~dp0publish-win-x64\pinnacle-cypat.exe" --tui
-    goto done
+:: The shipping artefact. A single self-contained exe with no runtime to
+:: install, which is the whole point of shipping it.
+if exist "%~dp0publish-win-x64\pinnacle-cypat-gui.exe" (
+    echo  [+] Opening the published app
+    start "" "%~dp0publish-win-x64\pinnacle-cypat-gui.exe"
+    exit /b 0
 )
 
 :: A local release build, for anyone running from a clone.
-if exist "%~dp0rust\target\release\pinnacle-cypat.exe" (
-    echo  [+] Using the local release build
-    echo.
-    "%~dp0rust\target\release\pinnacle-cypat.exe" --tui
-    goto done
+if exist "%~dp0rust\target\release\pinnacle-cypat-gui.exe" (
+    echo  [+] Opening the local release build
+    start "" "%~dp0rust\target\release\pinnacle-cypat-gui.exe"
+    exit /b 0
 )
 
 :: Nothing built. Fall back to cargo if the toolchain is here.
 cargo --version >nul 2>&1
 if %errorLevel% neq 0 (
     echo  [!] No build found, and Rust is not installed.
-    echo  [!] Either copy a published pinnacle-cypat.exe into:
+    echo  [!] Either copy a published pinnacle-cypat-gui.exe into:
     echo         %~dp0publish-win-x64\
     echo  [!] or install Rust from https://rustup.rs and re-run this script.
     echo.
@@ -65,16 +60,14 @@ if %errorLevel% neq 0 (
     exit /b 1
 )
 
-echo  [+] Rust toolchain found - building (first run takes a minute)
+echo  [+] Rust toolchain found - building (first run takes a few minutes)
 echo.
 
 cd /d "%~dp0rust"
-cargo run --release -- --tui
-
-:done
-echo.
-echo  ========================================================
-echo   Task Complete!
-echo  ========================================================
-echo.
-pause
+cargo build --release -p pinnacle-cypat-gui
+if %errorLevel% neq 0 (
+    echo  [!] The build failed; see the output above.
+    pause
+    exit /b 1
+)
+start "" "%~dp0rust\target\release\pinnacle-cypat-gui.exe"

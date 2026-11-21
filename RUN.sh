@@ -4,7 +4,7 @@
 #  Copyright 2026 Maxwell McCormick
 #  SPDX-License-Identifier: Apache-2.0
 #
-#  Usage:  ./RUN.sh            opens the menu
+#  Usage:  ./RUN.sh            opens the web interface in your browser
 #          ./RUN.sh --all -d   any arguments go straight to the tool
 #
 #  Like RUN.bat it only checks what the tool cannot check for itself - that it
@@ -14,7 +14,9 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 args=("$@")
-[ ${#args[@]} -eq 0 ] && args=(--tui)
+# The web UI, served on 127.0.0.1 only and opened in the invoking user's
+# browser; the tool picks that user from SUDO_USER, which sudo sets below.
+[ ${#args[@]} -eq 0 ] && args=(--web)
 
 find_binary() {
     local candidate
