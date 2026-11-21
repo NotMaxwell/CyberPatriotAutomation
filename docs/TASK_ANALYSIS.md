@@ -88,6 +88,8 @@
 | `CLAUDE.md` | AI assistant instructions (Claude) |
 | `.github/copilot-instructions.md` | GitHub Copilot instructions |
 | `TASK_ANALYSIS.md` | This file - task roadmap |
+| `STIG_ROADMAP.md` | Planned: DISA STIG traceability and gap-filling |
+| `AI_SESSION_ROADMAP.md` | Planned: session manager and opt-in AI advisor |
 | `LICENSE` | Apache License 2.0 |
 
 ---
@@ -135,6 +137,19 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 - [ ] Process analysis with Process Explorer
 - [ ] Network monitoring with TCPView
 - [ ] Registry analysis for persistence mechanisms
+
+### STIG Alignment — see [STIG_ROADMAP.md](STIG_ROADMAP.md)
+- [ ] S1: STIG importer (DISA XCCDF → `docs/stig/<os>.csv`, one status per rule)
+- [ ] S2: STIG IDs on knowledge-table entries and in the remediation ledger, with table tests
+- [ ] S3: `--stig-report` audit-only task
+- [ ] S4: Close gaps — Windows 11, Ubuntu 22.04 STIG on Mint 21, Server 2019/2022, Windows 10
+
+### AI-Assisted Session Manager — see [AI_SESSION_ROADMAP.md](AI_SESSION_ROADMAP.md)
+- [ ] A1: Session state across runs (`session.json`, `--resume`, manual checklist) — no AI
+- [ ] A2: Score feedback loop from the local scoring report — no AI
+- [ ] A3: `Advisor` trait, Anthropic provider over rustls, redaction, `NullAdvisor`
+- [ ] A4: Advisor prompts — classify Manual directives, prioritise, explain failures
+- [ ] A5: Advisor panel in GUI / web UI / TUI, every suggestion confirmed by a person
 
 ---
 
