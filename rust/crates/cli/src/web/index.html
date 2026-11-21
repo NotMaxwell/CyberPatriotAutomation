@@ -292,7 +292,7 @@ const ui = {
   pickPath: null, pickSel: null, browser: null,
   draft: null, draftSig: null, dirty: false, dv: 0, newKey: null,
   search: "", filter: "all", expanded: new Set(), shown: 100,
-  outStick: true, toastSig: null, toastHidden: false, snapAt: 0,
+  outStick: true, toastSig: null, toastHidden: false, snapAt: 0, showPasswords: false,
 };
 
 async function post(path, body) {
@@ -583,8 +583,11 @@ function textField(label, obj, key, o) {
     : h("input", { type: "text", id, value: obj[key] || "", oninput: (e) => { obj[key] = e.target.value; dirtyMark(); } });
   return h("div", { class: o.wide ? "wide" : "" }, h("label", { class: "lbl", for: id }, label), control);
 }
-function cellInput(obj, key, label, nullable, nf) {
-  return h("input", { type: "text", "aria-label": label, value: obj[key] || "", "data-nf": nf ? "1" : null,
+function cellInput(obj, key, label, nullable, nf, secret) {
+  // README passwords are masked like the desktop GUI's, so a glance at the
+  // screen (or a screenshot in a help request) does not leak them.
+  return h("input", { type: secret && !ui.showPasswords ? "password" : "text", autocomplete: secret ? "off" : null,
+    "aria-label": label, value: obj[key] || "", "data-nf": nf ? "1" : null,
     oninput: (e) => { obj[key] = nullable && e.target.value === "" ? null : e.target.value; dirtyMark(); } });
 }
 function cellCheck(obj, key, label) {
@@ -621,10 +624,13 @@ function stringList(list, label, key, area) {
 }
 function people(title, lead, list, key, isAdmin) {
   const blank = () => ({ username: "", password: null, is_admin: isAdmin, is_primary_user: false, notes: null });
-  return editCard(title + " (" + list.length + ")", lead, tableEditor(
+  return editCard(title + " (" + list.length + ")", lead,
+    h("label", { class: "small" }, h("input", { type: "checkbox", checked: !!ui.showPasswords,
+      onchange: (e) => { ui.showPasswords = e.target.checked; ui.dv++; render(); } }), " Show passwords"),
+    tableEditor(
     [["Username"], ["Password"], ["Admin", 1], ["Primary", 1], ["Notes"]], list, blank,
     (u, i, nf) => [
-      h("td", {}, cellInput(u, "username", "Username", false, nf)), h("td", {}, cellInput(u, "password", "Password", true)),
+      h("td", {}, cellInput(u, "username", "Username", false, nf)), h("td", {}, cellInput(u, "password", "Password", true, false, true)),
       h("td", { class: "c" }, cellCheck(u, "is_admin", "Administrator")), h("td", { class: "c" }, cellCheck(u, "is_primary_user", "Primary user")),
       h("td", {}, cellInput(u, "notes", "Notes", true)),
     ], "Add " + (isAdmin ? "administrator" : "user"), key));

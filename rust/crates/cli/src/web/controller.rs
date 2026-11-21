@@ -122,6 +122,15 @@ impl<P: Platform + 'static> Controller<P> {
         self.running.load(Ordering::SeqCst) || self.lock().active.is_some()
     }
 
+    /// Is a run still doing work? Narrower than [`Self::run_active`]: the
+    /// engine writes the run log *before* it sends `Finished`, so once the
+    /// session has no active run there is nothing left to lose, even while the
+    /// task is still being joined. Quitting waits on this; waiting on the join
+    /// as well made a quit sent just after a run finished hang for seconds.
+    pub fn run_in_progress(&self) -> bool {
+        self.lock().active.is_some()
+    }
+
     pub fn stream_opened(self: &Arc<Self>) -> StreamGuard<P> {
         self.streams().open += 1;
         StreamGuard {
@@ -161,9 +170,9 @@ impl<P: Platform + 'static> Controller<P> {
         }
     }
 
-    /// Wait until no run is going.
+    /// Wait until no run is doing work.
     pub async fn wait_idle(&self) {
-        while self.run_active() {
+        while self.run_in_progress() {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
     }

@@ -82,7 +82,7 @@ pub async fn serve<P: Platform + 'static>(port: Option<u16>) -> std::io::Result<
 /// and its summary and run log are written when it ends. A second Ctrl+C
 /// leaves at once for whoever really means it.
 async fn finish_run<P: Platform + 'static>(ctl: &Arc<Controller<P>>, reason: &str) {
-    if !ctl.run_active() {
+    if !ctl.run_in_progress() {
         println!("{reason}; stopping.");
         return;
     }
