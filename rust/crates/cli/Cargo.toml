@@ -18,9 +18,15 @@ name = "pinnacle-cypat"
 path = "src/main.rs"
 
 [dependencies]
-pinnacle-core.workspace = true
-tokio.workspace = true
+# `serde` for the web UI's JSON: the README model and the file listing.
+pinnacle-core = { workspace = true, features = ["serde"] }
+# `net` and `signal` for the web UI's loopback server and its Ctrl+C.
+tokio = { workspace = true, features = ["net", "signal"] }
 indicatif.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# The web UI's per-run token. Already in the build through pinnacle-core.
+uuid.workspace = true
 
 # The platform crates are cfg-gated dependencies, so a Windows build never
 # compiles the Linux tasks and a Linux build never compiles the Win32 bindings.
@@ -32,3 +38,4 @@ pinnacle-linux.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true }
+async-trait.workspace = true

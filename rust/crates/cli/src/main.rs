@@ -20,6 +20,7 @@ use pinnacle_core::ui;
 use tokio::sync::mpsc;
 
 mod tui;
+mod web;
 
 // The platform this binary was built for. Everything below is written against
 // `Host::tasks()` and knows nothing else about the operating system - which is
@@ -66,6 +67,16 @@ const GLOBAL_FLAGS: &[(&str, &str, &str)] = &[
     ("--help", "-h", "Show this help and exit"),
     ("--tui", "-i", "Open the interactive menu"),
     (
+        "--web",
+        "",
+        "Open the app in a browser, served from 127.0.0.1",
+    ),
+    (
+        "--port <n>",
+        "",
+        "With --web, listen on port <n> instead of a random one",
+    ),
+    (
         "--version",
         "-V",
         "Print the version and build date, then exit",
@@ -100,7 +111,7 @@ const GLOBAL_FLAGS: &[(&str, &str, &str)] = &[
 ];
 
 /// Flags that consume the following argument as their value.
-const VALUE_FLAGS: &[&str] = &["--readme", "-r", "--log"];
+const VALUE_FLAGS: &[&str] = &["--readme", "-r", "--log", "--port"];
 
 /// The first argument that is not a flag this tool accepts, if any.
 fn first_unknown_argument(args: &[String]) -> Option<String> {
@@ -180,6 +191,35 @@ async fn run_automation() {
     // Help before anything else, and before the run log opens.
     if has_flag(&cli_args, &["--help", "-h", "-?", "/?"]) {
         print_help();
+        return;
+    }
+
+    // The web UI owns the whole session: everything below is the command-line
+    // run, which it replaces. The arguments are still validated first, so a
+    // typo next to --web is reported rather than ignored.
+    if has_flag(&cli_args, &["--web"]) {
+        if let Some(unknown) = first_unknown_argument(&cli_args) {
+            ui::markup_line(&format!(
+                "[red]Unrecognised argument: {}[/]",
+                ui::escape(&unknown)
+            ));
+            std::process::exit(2);
+        }
+        let port = match extract_argument(&cli_args, &["--port"]).map(|p| p.parse::<u16>()) {
+            None => None,
+            Some(Ok(port)) => Some(port),
+            Some(Err(_)) => {
+                ui::markup_line("[red]--port needs a number from 0 to 65535.[/]");
+                std::process::exit(2);
+            }
+        };
+        if let Err(e) = web::serve::<Host>(port).await {
+            ui::markup_line(&format!(
+                "[red]Could not start the web interface: {}[/]",
+                ui::escape(&e.to_string())
+            ));
+            std::process::exit(1);
+        }
         return;
     }
 
