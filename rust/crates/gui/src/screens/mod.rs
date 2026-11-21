@@ -16,6 +16,7 @@
 //! elsewhere. It never touches the backend, which is what keeps a tab testable
 //! without a running engine. Build with [`crate::theme`]'s components.
 
+pub mod file_browser;
 pub mod readme;
 pub mod results;
 pub mod run;
