@@ -116,8 +116,10 @@ UI share `pinnacle_core::session` (`AppState`, `Action`, `real_run_gate`) and
 `pinnacle_core::files`. Keep run logic in the engine and rules about *when* a run is
 allowed in `session`; a rule implemented in only one front end is a rule the other
 one lacks. The real run must stay locked until a finished, uncancelled dry run of
-the same selection and README. The GUI crate builds on Windows only, so a Linux
-`cargo test` proves nothing about it; the web UI is covered by tests in `web/`.
+the same selection and README. The GUI crate also builds on Linux (glow renderer,
+development only) so its tests run there and its screens can be screenshotted under
+Xvfb with the hooks in `app.rs`; what Linux cannot check is the Windows renderer
+(wgpu/WARP) and the elevation manifest. The web UI is covered by tests in `web/`.
 
 ## Coding Standards
 
