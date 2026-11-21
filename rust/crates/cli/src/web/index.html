@@ -1,4 +1,1071 @@
 <!doctype html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>PinnacleCyPat</title>
-<p>Placeholder: the web UI page is added separately.</p>
+<style>
+:root {
+  --bg: #F4F6FA; --surface: #FFFFFF; --sidebar: #ECEFF5; --border: #DDE2EA;
+  --text: #1B2333; --muted: #646E80;
+  --accent: #1D4ED8; --accent-soft: #E6EEFD;
+  --success: #166534; --success-soft: #E5F6EA;
+  --warning: #B45309; --warning-soft: #FDF2E1;
+  --danger: #C52222; --danger-soft: #FCE8E8;
+  --neutral-soft: #EEF1F6; --hover: #E3E8F1; --code: #F1F4F9;
+  --radius: 10px;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 14.5px/1.45 system-ui, "Segoe UI", Inter, Cantarell, sans-serif;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+h1, h2, h3, p { margin: 0; }
+.muted { color: var(--muted); }
+.small { font-size: 12.5px; }
+.bold { font-weight: 600; }
+.mono { font-family: var(--mono); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+header.top {
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 14px 20px; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+header.top .name { font-size: 19px; font-weight: 700; }
+header.top .ver { color: var(--muted); font-size: 12.5px; }
+header.top .pills { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+footer.status {
+  background: var(--surface); border-top: 1px solid var(--border);
+  padding: 10px 20px; color: var(--muted); font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.offline { background: var(--danger); color: #fff; padding: 8px 20px; font-weight: 600; text-align: center; }
+
+.shell { display: grid; grid-template-columns: 220px 1fr; min-height: 0; flex: 1 1 auto; }
+header.top, footer.status, .offline { flex: none; }
+aside.side { background: var(--sidebar); border-right: 1px solid var(--border); padding: 14px 12px; overflow: auto; }
+main.main { overflow: auto; padding: 20px 24px 28px; min-width: 0; }
+.page { max-width: 1040px; margin: 0 auto; }
+.page > * + *, .slot > * + *, .stack > * + * { margin-top: 12px; }
+.slot { display: block; }
+.slot:empty { display: none; }
+.page-title { font-size: 25px; font-weight: 700; margin-bottom: 2px; }
+.page-sub { color: var(--muted); margin-bottom: 4px; overflow-wrap: anywhere; }
+
+.tabbtn {
+  display: flex; width: 100%; align-items: center; justify-content: space-between;
+  padding: 11px 12px; border: 0; border-radius: 8px; background: transparent;
+  font-weight: 600; cursor: pointer; text-align: left; margin-bottom: 4px;
+}
+.tabbtn:hover { background: var(--hover); }
+.tabbtn[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.side hr { border: 0; border-top: 1px solid var(--border); margin: 14px 0 12px; }
+.side .hand-head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; }
+.check { display: flex; gap: 8px; align-items: flex-start; padding: 3px 0; font-size: 13.5px; cursor: pointer; }
+.check input { margin-top: 3px; flex: none; }
+.check.done span { color: var(--muted); text-decoration: line-through; }
+
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.card > * + * { margin-top: 10px; }
+.card h2 { font-size: 17px; font-weight: 650; }
+.card .lead { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.row.top { align-items: flex-start; flex-wrap: nowrap; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.spacer { margin-left: auto; }
+.pill {
+  display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--neutral-soft); color: var(--muted); white-space: nowrap;
+}
+.pill.accent { background: var(--accent-soft); color: var(--accent); }
+.pill.success { background: var(--success-soft); color: var(--success); }
+.pill.warning { background: var(--warning-soft); color: var(--warning); }
+.pill.danger { background: var(--danger-soft); color: var(--danger); }
+.pill.fixed { min-width: 84px; text-align: center; }
+.tabbtn .pill { font-size: 12px; }
+
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 7px 14px; cursor: pointer; white-space: nowrap; }
+.btn:hover:not(:disabled) { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: #1a44bd; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; font-weight: 600; }
+.btn.danger:hover:not(:disabled) { background: #a81d1d; }
+.btn.small { padding: 3px 10px; font-size: 12.5px; }
+.btn.link { border-color: transparent; background: transparent; color: var(--muted); padding: 3px 8px; font-size: 12.5px; }
+.btn.link:hover:not(:disabled) { background: var(--danger-soft); color: var(--danger); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.callout { border-radius: 8px; padding: 10px 14px; border: 1px solid; }
+.callout.info { background: var(--accent-soft); border-color: #c4d4f8; color: var(--accent); font-weight: 600; }
+.callout.success { background: var(--success-soft); border-color: #bfe3ca; color: var(--success); font-weight: 600; }
+.callout.warning { background: var(--warning-soft); border-color: #f1d3a6; color: var(--warning); }
+.callout.danger { background: var(--danger-soft); border-color: #f2bcbc; color: var(--danger); }
+.callout .t { font-weight: 700; margin-bottom: 2px; }
+
+.tiles { display: flex; gap: 10px; flex-wrap: wrap; }
+.tile { background: var(--neutral-soft); border-radius: 8px; padding: 10px 14px; min-width: 100px; }
+.tile .v { font-size: 22px; font-weight: 700; line-height: 1.2; }
+.tile .l { color: var(--muted); font-size: 12.5px; }
+.tile.accent { background: var(--accent-soft); } .tile.accent .v { color: var(--accent); }
+.tile.success { background: var(--success-soft); } .tile.success .v { color: var(--success); }
+.tile.danger { background: var(--danger-soft); } .tile.danger .v { color: var(--danger); }
+.tile.warning { background: var(--warning-soft); } .tile.warning .v { color: var(--warning); }
+
+.group { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.group.manual { background: var(--warning-soft); border-color: #f1d3a6; }
+.group.manual > h3 { color: var(--warning); }
+.group.auto > h3 { color: var(--success); }
+.group h3 { font-size: 14.5px; font-weight: 650; }
+.group > * + * { margin-top: 8px; }
+.directive .subj { font-weight: 650; }
+.directive .det { color: var(--muted); font-size: 12.5px; }
+
+input[type=text], input[type=search], textarea {
+  width: 100%; background: #F8F9FC; border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; min-width: 0;
+}
+input[type=text]:focus, input[type=search]:focus, textarea:focus { background: #fff; border-color: var(--accent); outline: none; box-shadow: 0 0 0 2px var(--accent-soft); }
+textarea { resize: vertical; }
+label.lbl { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: 3px; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fields .wide { grid-column: 1 / -1; }
+
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-size: 12.5px; color: var(--muted); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 6px 8px; vertical-align: middle; }
+table.ed td { padding: 4px 6px; }
+table.ed td.c, table.ed th.c { text-align: center; width: 1%; }
+table.tasks tr.main td { border-top: 1px solid var(--border); padding-top: 10px; padding-bottom: 2px; }
+table.tasks tr.msg td { padding-top: 0; padding-bottom: 8px; color: var(--muted); }
+
+.list-row { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { display: inline-flex; align-items: center; gap: 4px; background: var(--neutral-soft); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
+.chip button { border: 0; background: transparent; cursor: pointer; color: var(--muted); border-radius: 999px; width: 20px; height: 20px; line-height: 1; }
+.chip button:hover { background: var(--danger-soft); color: var(--danger); }
+.chip.filter { padding: 4px 12px; cursor: pointer; border: 1px solid transparent; font-weight: 600; color: var(--muted); }
+.chip.filter:hover:not(:disabled) { background: var(--hover); }
+.chip.filter:disabled { opacity: .45; cursor: not-allowed; }
+.chip.filter[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: #c4d4f8; }
+
+.stepper { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.stepper .dot { width: 24px; height: 24px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 13px; background: var(--neutral-soft); color: var(--muted); }
+.stepper .step { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.stepper .step.cur { color: var(--text); font-weight: 650; }
+.stepper .step.cur .dot { background: var(--accent); color: #fff; }
+.stepper .step.done .dot { background: var(--success); color: #fff; }
+.stepper .line { width: 28px; height: 1px; background: var(--border); }
+
+.taskgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; }
+.taskitem { padding: 6px 0; }
+.taskitem.off { opacity: .55; }
+.taskitem .detail { margin-left: 26px; color: var(--muted); font-size: 12.5px; }
+.taskitem label { display: flex; gap: 8px; align-items: center; font-weight: 600; cursor: pointer; flex-wrap: wrap; }
+.taskitem.off label { cursor: not-allowed; }
+.taskitem input { width: 16px; height: 16px; margin: 0; }
+.cmd { background: var(--code); border-radius: 6px; padding: 7px 10px; font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; flex: 1 1 300px; }
+
+.bar { background: #F8F9FC; border-radius: 999px; height: 24px; overflow: hidden; border: 1px solid var(--border); }
+.bar > div { height: 100%; background: var(--accent); color: #fff; font-size: 12.5px; font-weight: 600; padding: 3px 12px; white-space: nowrap; min-width: 24px; transition: width .25s; }
+.bar.danger > div { background: var(--danger); }
+.runrow { display: grid; grid-template-columns: 92px 1fr; gap: 10px; padding: 5px 0; align-items: start; }
+.runrow .nm { font-weight: 650; }
+.runrow .msg { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+pre.out {
+  margin: 0; background: #F8F9FC; border: 1px solid var(--border); border-radius: 6px;
+  padding: 10px; max-height: 300px; overflow: auto; font: 12.5px/1.45 var(--mono);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+pre.out .sec { font-weight: 700; color: var(--accent); display: block; margin-top: 6px; }
+
+.ledger-row { border-top: 1px solid var(--border); }
+.ledger-row > button {
+  display: grid; grid-template-columns: 110px 190px 1fr 18px; gap: 10px; align-items: center;
+  width: 100%; text-align: left; background: transparent; border: 0; padding: 8px 4px; cursor: pointer;
+}
+.ledger-row > button:hover { background: #F6F8FB; }
+.ledger-row .tgt { overflow-wrap: anywhere; }
+.ledger-body { margin: 0; padding: 4px 8px 12px 124px; display: grid; grid-template-columns: 80px 1fr; gap: 4px 10px; font-size: 13.5px; }
+.ledger-body dt { color: var(--muted); font-weight: 600; }
+.ledger-body dd { margin: 0; overflow-wrap: anywhere; }
+
+.scrim { position: fixed; inset: 0; background: rgba(27,35,51,.45); display: grid; place-items: center; padding: 16px; z-index: 50; }
+.scrim.over { z-index: 60; }
+.modal {
+  background: var(--surface); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; padding: 22px;
+}
+.modal.wide { width: min(720px, 100%); }
+.modal > * + * { margin-top: 12px; }
+.modal h2 { font-size: 20px; font-weight: 700; }
+.cand { display: block; width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+.cand:hover:not(:disabled) { background: #F6F8FB; }
+.cand[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.cand:disabled { opacity: .6; cursor: not-allowed; }
+.cands { display: grid; gap: 8px; max-height: 240px; overflow: auto; padding: 2px; }
+.fb-list { border: 1px solid var(--border); border-radius: 8px; height: 300px; overflow: auto; }
+.fb-item { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #EEF1F6; }
+.fb-item:hover { background: #F6F8FB; }
+.fb-item[aria-selected="true"] { background: var(--accent-soft); }
+.fb-item.readme .nm { font-weight: 650; color: var(--accent); }
+.fb-item .ic { width: 18px; text-align: center; flex: none; }
+.fb-item .nm { overflow-wrap: anywhere; }
+
+.savebar {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 14px; box-shadow: 0 -4px 14px rgba(27,35,51,.07);
+}
+.slot.sticky { position: sticky; bottom: 0; z-index: 5; }
+.toast {
+  position: fixed; right: 20px; bottom: 56px; background: var(--surface); border: 1px solid var(--text);
+  border-radius: 10px; padding: 11px 16px; font-weight: 650; z-index: 80; box-shadow: 0 6px 20px rgba(0,0,0,.15);
+}
+.toast.success { color: var(--success); }
+.toast.fail { color: var(--danger); }
+[hidden] { display: none !important; }
+
+@media (max-width: 1100px) {
+  .fields { grid-template-columns: 1fr; }
+  .shell { grid-template-columns: 190px 1fr; }
+  main.main { padding: 16px; }
+  .ledger-row > button { grid-template-columns: 100px 1fr 18px; }
+  .ledger-row > button .tk { display: none; }
+  .ledger-body { padding-left: 12px; }
+}
+</style>
+</head>
+<body>
+<div id="offline" class="offline" role="alert" hidden>Disconnected — is pinnacle-cypat still running?</div>
+<header class="top" id="top"></header>
+<div class="shell">
+  <aside class="side" id="side" aria-label="Navigation"></aside>
+  <main class="main" id="main"></main>
+</div>
+<footer class="status" id="status"></footer>
+<div id="modals"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script>
+"use strict";
+// ---------- plumbing ----------
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+try { history.replaceState(null, "", location.pathname); } catch (e) { /* keep going */ }
+const tq = (extra) => "t=" + encodeURIComponent(TOKEN) + (extra ? "&" + extra : "");
+
+// DOM builder: every string becomes a text node, never markup (README text is untrusted).
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") e.className = v;
+    else if (k === "style") e.style.cssText = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "value" || k === "checked" || k === "disabled" || k === "hidden") e[k] = v;
+    else if (v === true) e.setAttribute(k, "");
+    else e.setAttribute(k, String(v));
+  }
+  const add = (c) => {
+    if (c === null || c === undefined || c === false) return;
+    if (Array.isArray(c)) c.forEach(add);
+    else if (c instanceof Node) e.appendChild(c);
+    else e.appendChild(document.createTextNode(String(c)));
+  };
+  kids.forEach(add);
+  return e;
+}
+const fill = (el, ...kids) => el.replaceChildren(...h('div', {}, ...kids).childNodes);
+let uid = 0;
+const nid = (p) => p + "-" + (++uid);
+const clone = (o) => JSON.parse(JSON.stringify(o));
+const J = (o) => JSON.stringify(o);
+const noElapsed = (o) => JSON.stringify(o, (k, v) => (k === "elapsed_secs" ? undefined : v));
+const fmtDur = (s) => { s = Math.max(0, Math.floor(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+const pill = (text, tone, cls, extra) => h("span", Object.assign({ class: "pill " + (tone || "") + (cls ? " " + cls : "") }, extra || {}), text);
+const kindTitle = (k) => (k === "real" ? "Real run" : "Dry run");
+
+let snap = null;
+const ui = {
+  tab: null, connected: true, localError: null,
+  pickPath: null, pickSel: null, browser: null,
+  draft: null, draftSig: null, dirty: false, dv: 0, newKey: null,
+  search: "", filter: "all", expanded: new Set(), shown: 100,
+  outStick: true, toastSig: null, toastHidden: false, snapAt: 0,
+};
+
+async function post(path, body) {
+  const r = await fetch(path + "?" + tq(), {
+    method: "POST", headers: { "Content-Type": "application/json", "X-Pinnacle-Token": TOKEN },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+async function act(action) {
+  let ok = false;
+  try {
+    const r = await post("/api/action", action);
+    ok = !(r && r.ok === false);
+    ui.localError = ok ? null : (r.error || "The action was refused.");
+    if (!ok) render();
+  } catch (e) {
+    ui.localError = "Could not reach pinnacle-cypat: " + e.message;
+    render();
+  }
+  await refresh();
+  return ok;
+}
+async function refresh() {
+  try {
+    const r = await fetch("/api/state?" + tq(), { headers: { "X-Pinnacle-Token": TOKEN } });
+    if (r.ok) apply(await r.json());
+  } catch (e) { /* the event stream reports connectivity */ }
+}
+
+// ---------- event stream ----------
+let es = null, backoff = 1000;
+function connect() {
+  es = new EventSource("/api/events?" + tq());
+  es.addEventListener("state", (ev) => { try { apply(JSON.parse(ev.data)); } catch (e) { console.warn(e); } });
+  es.onopen = () => { backoff = 1000; ui.connected = true; document.getElementById("offline").hidden = true; };
+  es.onerror = () => {
+    ui.connected = false; document.getElementById("offline").hidden = false;
+    es.close();
+    setTimeout(connect, backoff);
+    backoff = Math.min(backoff * 2, 10000);
+  };
+}
+
+// ---------- snapshot handling ----------
+function apply(s) {
+  const prev = snap;
+  snap = s;
+  ui.snapAt = performance.now();
+  ui.connected = true; document.getElementById("offline").hidden = true;
+  if (ui.tab === null) ui.tab = s.tab || "readme";
+  if (prev) {
+    if (!prev.active && s.active) ui.tab = "run";
+    if (prev.active && !s.active && s.latest_finished) { ui.tab = "results"; ui.filter = "all"; ui.expanded.clear(); }
+  }
+  const ts = s.toast ? J(s.toast) : null;
+  if (ts !== ui.toastSig) {
+    ui.toastSig = ts; ui.toastHidden = false;
+    if (ts) setTimeout(() => { if (ui.toastSig === ts) { ui.toastHidden = true; renderToast(); } }, 4500);
+  }
+  if (s.locations_open && ui.pickPath === null) ui.pickPath = s.readme_path || "";
+  if (!s.locations_open) { ui.pickPath = null; ui.pickSel = null; ui.browser = null; }
+  render();
+}
+function setTab(t) { ui.tab = t; render(); post("/api/action", { type: "set_tab", tab: t }).catch(() => {}); }
+
+// ---------- slots: rebuild a region only when its inputs change ----------
+function slot(parent, key, sig, build) {
+  parent._s = parent._s || new Map();
+  let s = parent._s.get(key);
+  if (!s) { s = { el: h("div", { class: "slot" + (key === "save" ? " sticky" : "") }), sig: undefined }; parent._s.set(key, s); }
+  if (s.sig !== sig) {
+    s.sig = sig;
+    s.el.replaceChildren(...[].concat(build()).filter(Boolean));
+    s.el.querySelectorAll("[data-nf]").forEach((n) => { n.focus(); n.removeAttribute("data-nf"); });
+  }
+  return s.el;
+}
+function slots(parent, list) {
+  const els = list.map(([k, sig, build]) => slot(parent, k, sig, build));
+  els.forEach((e, i) => { if (parent.children[i] !== e) parent.insertBefore(e, parent.children[i] || null); });
+  while (parent.children.length > els.length) parent.lastChild.remove();
+}
+
+// ---------- derived ----------
+const rd = () => (snap && snap.readme ? snap.readme.effective : null);
+const hasReadme = () => !!rd();
+const rosterEmpty = () => { const d = rd(); return !!d && (d.administrators || []).length === 0 && (d.users || []).length === 0; };
+const runOf = (k) => (snap ? snap[k] : null);
+const activeRun = () => (snap && snap.active ? snap[snap.active] : null);
+const counts = (run) => {
+  const c = { fixed: 0, already_ok: 0, skipped: 0, failed: 0, unverified: 0 };
+  for (const f of (run && run.summary ? run.summary.fixes : [])) {
+    if (f.outcome === "fixed") c.fixed++;
+    else if (f.outcome === "already_ok") c.already_ok++;
+    else if (f.outcome === "failed") c.failed++;
+    else if (f.outcome === "unverified") c.unverified++;
+    else c.skipped++;
+  }
+  return c;
+};
+const liveElapsed = (r) => r.elapsed_secs + (r.finished ? 0 : (performance.now() - ui.snapAt) / 1000);
+
+// ---------- render root ----------
+function render() {
+  if (!snap) return;
+  renderTop(); renderSide(); renderMain(); renderStatus(); renderModals(); renderToast();
+}
+
+function renderTop() {
+  const el = document.getElementById("top");
+  const sig = J([snap.version, snap.privileged, snap.privileged_role, snap.active, !!snap.readme, snap.readme && snap.readme.edited, snap.inspecting]);
+  if (el._sig === sig) return; el._sig = sig;
+  const pills = [];
+  pills.push(snap.privileged
+    ? pill("Running as " + snap.privileged_role, "success")
+    : pill("Not " + snap.privileged_role + " — preview only", "warning", "", { title: snap.elevation_hint || "" }));
+  if (snap.readme && snap.readme.edited) pills.push(pill("README edited", "warning"));
+  else if (snap.readme) pills.push(pill("README loaded", "success"));
+  else if (snap.inspecting) pills.push(pill("Parsing README", "accent"));
+  else pills.push(pill("No README", "warning"));
+  pills.push(snap.active === "real" ? pill("Real run in progress", "danger")
+    : snap.active === "preview" ? pill("Dry run in progress", "accent") : pill("Idle", ""));
+  el.replaceChildren(h("span", { class: "name" }, "PinnacleCyPat"), h("span", { class: "ver" }, snap.version || ""), h("div", { class: "pills" }, pills));
+}
+
+function tabBadge(t) {
+  if (t === "readme") return snap.readme && snap.readme.effective ? (snap.readme.edited ? ["edited", "warning"] : ["ok", "success"]) : null;
+  if (t === "run") { const r = activeRun(); return r ? [r.progress[0] + "/" + r.progress[1], "accent"] : null; }
+  const k = snap.latest_finished; const r = k && snap[k];
+  if (!r) return null;
+  const failed = r.summary ? r.summary.results.filter((x) => !x.success).length : 0;
+  return failed ? [failed + " failed", "danger"] : ["done", "success"];
+}
+
+function renderSide() {
+  const el = document.getElementById("side");
+  const sig = J([ui.tab, tabBadge("readme"), tabBadge("run"), tabBadge("results"), snap.manual, snap.hand_done]);
+  if (el._sig === sig) return; el._sig = sig;
+  const tab = (id, label) => {
+    const b = tabBadge(id);
+    return h("button", { class: "tabbtn", "aria-current": ui.tab === id ? "page" : null, onclick: () => setTab(id) },
+      h("span", {}, label), b ? pill(b[0], b[1]) : null);
+  };
+  const manual = snap.manual || [];
+  const hd = snap.hand_done || [];
+  const done = hd.filter(Boolean).length;
+  el.replaceChildren(
+    h("nav", {}, tab("readme", "README"), tab("run", "Run"), tab("results", "Results")),
+    h("hr"),
+    h("div", { class: "hand-head" }, "Do by hand", manual.length ? pill(done + "/" + manual.length, done === manual.length ? "success" : "warning") : null),
+    manual.length === 0
+      ? h("p", { class: "muted small" }, "Load a README to see what it asks for by hand.")
+      : h("div", {}, manual.map((m, i) => {
+        const id = nid("hd");
+        return h("label", { class: "check" + (hd[i] ? " done" : ""), for: id, title: m.detail || "" },
+          h("input", { type: "checkbox", id, checked: !!hd[i], onchange: (e) => act({ type: "set_hand_done", index: i, on: e.target.checked }) }),
+          h("span", {}, m.subject));
+      })));
+}
+
+function renderStatus() {
+  const el = document.getElementById("status");
+  let t;
+  const r = activeRun();
+  if (r) {
+    const cur = (r.rows || []).find((x) => !["waiting", "done", "failed"].includes(x.status));
+    t = kindTitle(snap.active) + " - " + r.progress[0] + " of " + r.progress[1] + " tasks" + (cur ? " - " + cur.name : "") + " - " + fmtDur(liveElapsed(r));
+  } else if (snap.discovering) t = "Looking for the README...";
+  else if (snap.inspecting) t = "Parsing the README...";
+  else if (snap.readme && snap.readme.source) t = "README: " + snap.readme.source;
+  else t = "No README loaded";
+  if (el.textContent !== t) el.textContent = t;
+}
+setInterval(() => {
+  if (!snap) return;
+  document.querySelectorAll("[data-elapsed]").forEach((n) => {
+    const r = runOf(n.dataset.elapsed); if (r) n.textContent = fmtDur(liveElapsed(r));
+  });
+  if (activeRun()) renderStatus();
+}, 500);
+
+function renderToast() {
+  const el = document.getElementById("toast");
+  const t = snap && snap.toast;
+  if (!t || ui.toastHidden) { el.hidden = true; return; }
+  el.hidden = false; el.textContent = t.text; el.className = "toast " + (t.success ? "success" : "fail");
+}
+
+// ---------- main ----------
+function pageTitle(title, sub) {
+  return h("div", {}, h("h1", { class: "page-title" }, title), sub ? h("p", { class: "page-sub" }, sub) : null);
+}
+function errorBanners() {
+  const out = [];
+  if (snap.error) out.push(h("div", { class: "callout danger row", role: "alert" },
+    h("span", { class: "grow" }, snap.error),
+    h("button", { class: "btn small", onclick: () => act({ type: "dismiss_error" }) }, "Dismiss")));
+  if (ui.localError) out.push(h("div", { class: "callout danger row", role: "alert" },
+    h("span", { class: "grow" }, ui.localError),
+    h("button", { class: "btn small", onclick: () => { ui.localError = null; render(); } }, "Dismiss")));
+  return out;
+}
+function renderMain() {
+  const main = document.getElementById("main");
+  if (!main._page) { main._page = h("div", { class: "page" }); main.appendChild(main._page); }
+  const page = main._page;
+  if (page._tab !== ui.tab) { page._tab = ui.tab; page._s = null; page.replaceChildren(); main.scrollTop = 0; }
+  const err = ["err", J([snap.error, ui.localError]), errorBanners];
+  if (ui.tab === "readme") readmeTab(page, err);
+  else if (ui.tab === "run") runTab(page, err);
+  else resultsTab(page, err);
+}
+
+// ---------- README tab ----------
+function dirGroups(dirs) {
+  const manual = dirs.filter((d) => d.handling === "manual").sort((a, b) => /forensic/i.test(b.subject) - /forensic/i.test(a.subject));
+  return [manual, dirs.filter((d) => d.handling === "automated"), dirs.filter((d) => d.handling === "not_touched")];
+}
+function readmeTab(page, err) {
+  const R = snap.readme;
+  const eff = R && R.effective;
+  // The local draft follows the server's effective data; typing never rebuilds the editors.
+  const dsig = J([R && R.edited, eff]);
+  if (ui.draftSig !== dsig) { ui.draftSig = dsig; ui.draft = eff ? clone(eff) : null; ui.dirty = false; ui.dv++; }
+  slots(page, [
+    err,
+    ["title", J([R && R.source]), () => pageTitle("README", R && R.source ? "Read from " + R.source : "No README loaded")],
+    ["head", J([R && R.source, eff && [eff.title, eff.operating_system, eff.administrators.length, eff.users.length, eff.group_requirements.length, eff.critical_services.length, eff.prohibited_software.length], snap.inspecting, R && R.attempts]), readmeHead],
+    ["roster", J([rosterEmpty()]), () => (rosterEmpty() ? h("div", { class: "callout danger" }, h("div", { class: "t" }, "The run cannot continue"),
+      "No administrators or users were found in the README. An empty roster makes every account look unauthorised, so the tool would flag all of them. Add the authorised accounts below, or choose a different README.") : null)],
+    ["dirs", J([R && R.directives]), () => (R ? directivesCard(R.directives || []) : null)],
+    ["edit", J([ui.dv, !!eff]), () => (eff ? editors() : null)],
+    ["save", J([ui.dirty, R && R.edited, rosterEmpty(), !!eff, snap.inspecting]), saveBar],
+  ]);
+}
+function readmeHead() {
+  const R = snap.readme, d = R && R.effective;
+  if (snap.inspecting && !d) return h("div", { class: "card" }, "Reading the README...");
+  if (!d) {
+    return h("div", { class: "card" },
+      h("h2", {}, "No README loaded"),
+      h("p", { class: "lead" }, "The README is how the tool knows who belongs on this machine."),
+      h("p", {}, "Without it, tasks that need the roster are off. You can still run the rest."),
+      (R && R.attempts && R.attempts.length) ? h("ul", { class: "muted small" }, R.attempts.map((a) => h("li", {}, a))) : null,
+      h("div", {}, h("button", { class: "btn primary", onclick: () => act({ type: "discover" }) }, "Choose README")));
+  }
+  const tile = (v, l) => h("div", { class: "tile" }, h("div", { class: "v" }, v), h("div", { class: "l" }, l));
+  return h("div", { class: "card" },
+    h("div", { class: "row top" },
+      h("div", { class: "grow" },
+        h("h2", { style: "font-size:19px" }, d.title || "(untitled README)"),
+        h("p", { class: "muted", style: "overflow-wrap:anywhere" }, [d.operating_system, R.source].filter(Boolean).join("  |  "))),
+      h("button", { class: "btn", onclick: () => act({ type: "discover" }) }, "Change README")),
+    h("div", { class: "tiles" },
+      tile(d.administrators.length, "Administrators"), tile(d.users.length, "Users"),
+      tile(d.group_requirements.length, "Groups"), tile(d.critical_services.length, "Critical services"),
+      tile(d.prohibited_software.length, "Prohibited software")));
+}
+function directivesCard(dirs) {
+  if (!dirs.length) return null;
+  const [manual, auto, left] = dirGroups(dirs);
+  const grp = (cls, title, sub, items) => items.length === 0 ? null :
+    h("div", { class: "group " + cls }, h("h3", {}, title + " (" + items.length + ")"), h("p", { class: "muted" }, sub),
+      items.map((d) => h("div", { class: "directive" },
+        h("div", { class: "subj" }, d.subject), h("div", {}, d.sentence), d.detail ? h("div", { class: "det" }, d.detail) : null)));
+  return h("div", { class: "card stack" },
+    h("h2", {}, "What this round asks for"),
+    h("p", { class: "lead" }, "The README's own sentences, sorted by who does the work."),
+    grp("manual", "Do these by hand", "The tool cannot do these for you.", manual),
+    grp("auto", "Handled by the tool", "Automated: the matching task does this.", auto),
+    grp("", "Left alone on purpose", "Not touched: doing nothing is the safe choice.", left));
+}
+
+// editors, all bound to ui.draft
+function dirtyMark() {
+  if (ui.dirty) return;
+  ui.dirty = true;
+  const page = document.getElementById("main")._page;
+  slot(page, "save", J([ui.dirty, snap.readme && snap.readme.edited, rosterEmpty(), !!rd(), snap.inspecting]), saveBar);
+}
+function restructure(key) { ui.newKey = key || null; ui.dv++; dirtyMark(); render(); }
+function textField(label, obj, key, o) {
+  const id = nid("f");
+  o = o || {};
+  const control = o.area
+    ? h("textarea", { id, rows: o.rows || 3, oninput: (e) => { obj[key] = e.target.value; dirtyMark(); } }, obj[key] || "")
+    : h("input", { type: "text", id, value: obj[key] || "", oninput: (e) => { obj[key] = e.target.value; dirtyMark(); } });
+  return h("div", { class: o.wide ? "wide" : "" }, h("label", { class: "lbl", for: id }, label), control);
+}
+function cellInput(obj, key, label, nullable, nf) {
+  return h("input", { type: "text", "aria-label": label, value: obj[key] || "", "data-nf": nf ? "1" : null,
+    oninput: (e) => { obj[key] = nullable && e.target.value === "" ? null : e.target.value; dirtyMark(); } });
+}
+function cellCheck(obj, key, label) {
+  return h("input", { type: "checkbox", "aria-label": label, checked: !!obj[key], onchange: (e) => { obj[key] = e.target.checked; dirtyMark(); } });
+}
+const removeBtn = (label, fn) => h("button", { class: "btn link", "aria-label": label, title: label, onclick: fn }, "Remove");
+const editCard = (title, lead, ...body) => h("div", { class: "card" }, h("h2", {}, title), lead ? h("p", { class: "lead" }, lead) : null, ...body);
+function newIdx(key) {
+  const i = ui.newKey && ui.newKey.startsWith(key + ":") ? +ui.newKey.split(":")[1] : -1;
+  if (i >= 0) ui.newKey = null;
+  return i;
+}
+function tableEditor(cols, list, makeRow, rowFn, addLabel, key) {
+  const nf = newIdx(key);
+  return [
+    list.length === 0 ? h("p", { class: "muted small" }, "None.") :
+      h("div", { style: "overflow-x:auto" }, h("table", { class: "ed" },
+        h("thead", {}, h("tr", {}, cols.map((c) => h("th", { class: c[1] ? "c" : "" }, c[0])), h("th", {}))),
+        h("tbody", {}, list.map((it, i) => h("tr", {}, rowFn(it, i, i === nf),
+          h("td", {}, removeBtn("Remove " + key + " row " + (i + 1), () => { list.splice(i, 1); restructure(); }))))))),
+    h("div", {}, h("button", { class: "btn small", onclick: () => { list.push(makeRow()); restructure(key + ":" + (list.length - 1)); } }, addLabel)),
+  ];
+}
+function stringList(list, label, key, area) {
+  const nf = newIdx(key);
+  return [
+    list.length === 0 ? h("p", { class: "muted small" }, "None.") : null,
+    list.map((v, i) => h("div", { class: "list-row" },
+      area ? h("textarea", { rows: 2, "aria-label": label + " " + (i + 1), "data-nf": i === nf ? "1" : null, oninput: (e) => { list[i] = e.target.value; dirtyMark(); } }, v)
+        : h("input", { type: "text", "aria-label": label + " " + (i + 1), value: v, "data-nf": i === nf ? "1" : null, oninput: (e) => { list[i] = e.target.value; dirtyMark(); } }),
+      removeBtn("Remove " + label + " " + (i + 1), () => { list.splice(i, 1); restructure(); }))),
+    h("div", {}, h("button", { class: "btn small", onclick: () => { list.push(""); restructure(key + ":" + (list.length - 1)); } }, "Add " + label.toLowerCase())),
+  ];
+}
+function people(title, lead, list, key, isAdmin) {
+  const blank = () => ({ username: "", password: null, is_admin: isAdmin, is_primary_user: false, notes: null });
+  return editCard(title + " (" + list.length + ")", lead, tableEditor(
+    [["Username"], ["Password"], ["Admin", 1], ["Primary", 1], ["Notes"]], list, blank,
+    (u, i, nf) => [
+      h("td", {}, cellInput(u, "username", "Username", false, nf)), h("td", {}, cellInput(u, "password", "Password", true)),
+      h("td", { class: "c" }, cellCheck(u, "is_admin", "Administrator")), h("td", { class: "c" }, cellCheck(u, "is_primary_user", "Primary user")),
+      h("td", {}, cellInput(u, "notes", "Notes", true)),
+    ], "Add " + (isAdmin ? "administrator" : "user"), key));
+}
+function groupsEditor(list) {
+  const nf = newIdx("groups");
+  return editCard("Groups (" + list.length + ")", "Groups that must exist, and who belongs to them.",
+    list.length === 0 ? h("p", { class: "muted small" }, "None.") : null,
+    list.map((g, gi) => {
+      const addId = nid("gm");
+      const chips = h("div", { class: "chips" });
+      const drawChips = () => chips.replaceChildren(...(g.members.length === 0 ? [h("span", { class: "muted small" }, "No members")] :
+        g.members.map((m, mi) => h("span", { class: "chip" }, m,
+          h("button", { "aria-label": "Remove " + m + " from " + (g.group_name || "group"), onclick: () => { g.members.splice(mi, 1); drawChips(); dirtyMark(); } }, "×")))));
+      drawChips();
+      const add = h("input", { type: "text", id: addId, placeholder: "add a member", style: "max-width:220px",
+        onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); addBtn.click(); } } });
+      const addBtn = h("button", { class: "btn small", onclick: () => { const v = add.value.trim(); if (v) { g.members.push(v); add.value = ""; drawChips(); dirtyMark(); } add.focus(); } }, "Add member");
+      return h("div", { class: "group" },
+        h("div", { class: "row" },
+          h("div", { class: "grow" },
+            h("input", { type: "text", "aria-label": "Group name", placeholder: "Group name", value: g.group_name || "", "data-nf": gi === nf ? "1" : null, style: "font-weight:600", oninput: (e) => { g.group_name = e.target.value; dirtyMark(); } })),
+          removeBtn("Remove group " + (g.group_name || gi + 1), () => { list.splice(gi, 1); restructure(); })),
+        chips, h("div", { class: "row" }, h("label", { class: "small muted", for: addId }, "Member"), add, addBtn));
+    }),
+    h("div", {}, h("button", { class: "btn small", onclick: () => { list.push({ group_name: "", members: [] }); restructure("groups:" + (list.length - 1)); } }, "Add group")));
+}
+function editors() {
+  const d = ui.draft;
+  return h("div", { class: "stack" },
+    editCard("Round details", "Everything below is local until you press Save edits.",
+      h("div", { class: "fields" },
+        textField("Title", d, "title"), textField("Operating system", d, "operating_system"),
+        textField("Scenario", d, "scenario", { area: true, rows: 4, wide: true }))),
+    people("Administrators", "Accounts that must exist and keep administrator rights.", d.administrators, "administrators", true),
+    people("Users", "Authorised standard accounts. Anyone else is flagged.", d.users, "users", false),
+    editCard("Required software (" + d.required_software.length + ")", "Software the README says must be installed.", tableEditor(
+      [["Name"], ["Version"], ["Latest", 1], ["Required", 1], ["Notes"]], d.required_software,
+      () => ({ name: "", version: null, should_be_latest: false, is_required: true, notes: null }),
+      (s, i, nf) => [
+        h("td", {}, cellInput(s, "name", "Software name", false, nf)), h("td", {}, cellInput(s, "version", "Version", true)),
+        h("td", { class: "c" }, cellCheck(s, "should_be_latest", "Should be latest")), h("td", { class: "c" }, cellCheck(s, "is_required", "Required")),
+        h("td", {}, cellInput(s, "notes", "Notes", true)),
+      ], "Add software", "software")),
+    editCard("Prohibited software (" + d.prohibited_software.length + ")", "Packages the README says must not be present.", stringList(d.prohibited_software, "Prohibited software", "prohibsw")),
+    editCard("Critical services (" + d.critical_services.length + ")", "Services that must keep running.", stringList(d.critical_services, "Critical service", "critsvc")),
+    editCard("Prohibited services (" + d.prohibited_services.length + ")", "Services that must be stopped and disabled.", stringList(d.prohibited_services, "Prohibited service", "prohibsvc")),
+    groupsEditor(d.group_requirements),
+    editCard("Users to create (" + d.users_to_create.length + ")", "Accounts the README asks you to add.", stringList(d.users_to_create, "User to create", "tocreate")),
+    editCard("Guidelines (" + d.guidelines.length + ")", "Other rules the README states.", stringList(d.guidelines, "Guideline", "guidelines", true)));
+}
+function saveBar() {
+  const R = snap.readme;
+  if (!R || !R.effective) return null;
+  const blockedReason = snap.inspecting ? "Still reading the README." : ui.dirty ? "Save or discard your edits first." : rosterEmpty() ? "No administrators or users." : null;
+  return h("div", { class: "savebar" }, h("div", { class: "row" },
+    h("button", { class: "btn primary", disabled: !ui.dirty, onclick: saveEdits }, "Save edits"),
+    ui.dirty ? h("button", { class: "btn", onclick: () => { ui.draftSig = null; render(); } }, "Discard changes") : null,
+    h("button", { class: "btn", disabled: !R.edited, onclick: () => act({ type: "revert_readme" }) }, "Revert to parsed"),
+    ui.dirty ? pill("Unsaved changes", "warning") : null,
+    R.edited && !ui.dirty ? h("span", { class: "small", style: "color:var(--warning)" }, "Edited by hand — the run log records the difference") : null,
+    h("span", { class: "spacer" }),
+    blockedReason ? h("span", { class: "muted small" }, blockedReason) : null,
+    h("button", { class: "btn primary", disabled: !!blockedReason, onclick: () => setTab("run") }, "Continue to Run")));
+}
+async function saveEdits() {
+  const d = clone(ui.draft);
+  const nul = (o, k) => { if (o[k] === "" || o[k] === undefined) o[k] = null; };
+  [...d.administrators, ...d.users].forEach((u) => { nul(u, "password"); nul(u, "notes"); });
+  d.required_software.forEach((s) => { nul(s, "version"); nul(s, "notes"); });
+  // Blank rows left by "Add" are noise, not data.
+  ["prohibited_software", "critical_services", "prohibited_services", "users_to_create", "guidelines"].forEach((k) => { d[k] = d[k].filter((x) => x.trim() !== ""); });
+  d.group_requirements.forEach((g) => { g.members = g.members.filter((m) => m.trim() !== ""); });
+  d.group_requirements = d.group_requirements.filter((g) => g.group_name.trim() !== "");
+  d.administrators = d.administrators.filter((u) => u.username.trim() !== "");
+  d.users = d.users.filter((u) => u.username.trim() !== "");
+  d.required_software = d.required_software.filter((s) => s.name.trim() !== "");
+  if (await act({ type: "set_readme", data: d })) { ui.draftSig = null; render(); }
+}
+
+// ---------- Run tab ----------
+function statusPill(s) {
+  return { waiting: ["Waiting", ""], reading: ["Reading", "accent"], executing: ["Applying", "accent"], verifying: ["Verifying", "accent"], done: ["Done", "success"], failed: ["Failed", "danger"] }[s] || [s, ""];
+}
+function runTab(page, err) {
+  const run = activeRun();
+  const mode = run ? "monitor" : "setup";
+  if (page._mode !== mode) { page._mode = mode; page._s = null; page.replaceChildren(); document.getElementById("main").scrollTop = 0; ui.outStick = true; }
+  if (run) {
+    slots(page, [
+      err,
+      ["mon", noElapsed([snap.active, run.progress, run.cancel_requested]), () => monitor(run)],
+      ["tasks", J([run.rows]), () => monitorTasks(run)],
+      ["out", J([run.output]), () => outputCard(run)],
+    ]);
+    const pre = page.querySelector("pre.out");
+    if (pre && ui.outStick) pre.scrollTop = pre.scrollHeight;
+    return;
+  }
+  slots(page, [
+    err,
+    ["title", "t", () => pageTitle("Run", "Choose what to check, preview it, then apply it. Nothing changes until a real run.")],
+    ["step", J([stepNo()]), () => h("div", { class: "card" }, h("h2", {}, "Workflow"), stepper(stepNo()))],
+    ["sel", J([snap.tasks]), taskCard],
+    ["go", J([snap.gate, snap.tasks.map((t) => t.selected), snap.preview && snap.preview.finished, snap.preview && snap.preview.summary && counts(snap.preview), snap.command_line]), goCard],
+  ]);
+}
+function stepNo() {
+  if (snap.real && snap.real.finished) return 4;
+  if (snap.preview && snap.preview.finished && snap.preview.summary && !snap.preview.summary.cancelled) return 3;
+  return 1;
+}
+function stepper(cur) {
+  const steps = ["Select tasks", "Dry run", "Real run", "Results"];
+  const out = [];
+  steps.forEach((s, i) => {
+    const n = i + 1;
+    out.push(h("span", { class: "step " + (n < cur ? "done" : n === cur ? "cur" : "") }, h("span", { class: "dot" }, String(n)), s));
+    if (n < steps.length) out.push(h("span", { class: "line" }));
+  });
+  return h("div", { class: "stepper" }, out);
+}
+function taskCard() {
+  const tasks = snap.tasks, sel = tasks.filter((t) => t.selected).length;
+  return h("div", { class: "card" },
+    h("h2", {}, "Tasks"),
+    h("p", { class: "lead" }, "Tasks that need the README are available once one is loaded."),
+    h("div", { class: "row" },
+      h("button", { class: "btn", onclick: () => act({ type: "select_all", on: true }) }, "Select all"),
+      h("button", { class: "btn", onclick: () => act({ type: "select_all", on: false }) }, "Select none"),
+      h("span", { class: "muted" }, sel + " of " + tasks.length + " selected")),
+    h("div", { class: "taskgrid" }, tasks.map((t) => {
+      const id = nid("task");
+      return h("div", { class: "taskitem" + (t.enabled ? "" : " off") },
+        h("label", { for: id, title: t.disabled_reason || "" },
+          h("input", { type: "checkbox", id, checked: t.selected, disabled: !t.enabled, onchange: (e) => act({ type: "set_selected", index: t.index, on: e.target.checked }) }),
+          t.label, t.concurrent ? pill("runs alongside", "") : null),
+        h("div", { class: "detail" }, t.enabled ? t.detail : (t.disabled_reason || t.detail)));
+    })));
+}
+function copyBtn(text) {
+  return h("button", { class: "btn small", onclick: async (e) => {
+    const b = e.currentTarget;
+    try { await navigator.clipboard.writeText(text); b.textContent = "Copied"; } catch (x) { b.textContent = "Copy failed"; }
+    setTimeout(() => { b.textContent = "Copy"; }, 1500);
+  } }, "Copy");
+}
+function goCard() {
+  const sel = snap.tasks.filter((t) => t.selected).length;
+  const blocked = sel === 0 ? "Select at least one task." : null;
+  const p = snap.preview, ps = p && p.summary;
+  const c = ps && !ps.cancelled ? counts(p) : null;
+  const gate = snap.gate || { ok: false, reason: "" };
+  const cmds = snap.command_line || {};
+  return h("div", { class: "card" },
+    h("h2", {}, "Run"),
+    h("div", { class: "row" },
+      h("button", { class: "btn primary", disabled: !!blocked, onclick: () => act({ type: "start_preview" }) }, "Start dry run"),
+      blocked ? h("span", { class: "muted" }, blocked) : null),
+    h("p", { class: "muted" }, "Changes nothing. Shows exactly what a real run would do."),
+    c ? h("div", { class: "row" },
+      h("div", { class: "tile accent" }, h("div", { class: "v" }, c.skipped), h("div", { class: "l" }, "would change")),
+      h("div", { class: "tile success" }, h("div", { class: "v" }, c.already_ok), h("div", { class: "l" }, "already OK")),
+      h("div", { class: "tile" + (c.failed + c.unverified ? " danger" : "") }, h("div", { class: "v" }, c.failed + c.unverified), h("div", { class: "l" }, "failed findings")),
+      h("button", { class: "btn", onclick: async () => { await act({ type: "set_results_kind", kind: "preview" }); setTab("results"); } }, "View dry-run results")) : null,
+    h("hr", { style: "border:0;border-top:1px solid var(--border);width:100%" }),
+    h("div", { class: "row" },
+      h("button", { class: "btn danger", disabled: !gate.ok, onclick: () => act({ type: "open_apply" }) }, "Run for real..."),
+      h("span", { class: "muted" }, gate.ok ? "Changes this machine. You confirm on the next screen." : (gate.reason || ""))),
+    h("div", {}, h("div", { class: "muted small", style: "margin-bottom:4px" }, "Equivalent command"),
+      h("div", { class: "row", style: "align-items:flex-start" }, h("div", { class: "cmd" }, cmds.preview || ""), copyBtn(cmds.preview || ""))),
+    gate.ok && cmds.real ? h("div", {}, h("div", { class: "muted small", style: "margin-bottom:4px" }, "Real run command"),
+      h("div", { class: "row", style: "align-items:flex-start" }, h("div", { class: "cmd" }, cmds.real), copyBtn(cmds.real))) : null);
+}
+function monitor(run) {
+  const [done, total] = run.progress;
+  const real = snap.active === "real";
+  return h("div", { class: "card" },
+    h("div", { class: "row" },
+      h("h2", { style: "font-size:21px;color:" + (real ? "var(--danger)" : "var(--accent)") }, kindTitle(snap.active)),
+      pill(fmtDur(liveElapsed(run)), "", "", { "data-elapsed": snap.active }),
+      h("span", { class: "spacer" }),
+      h("button", { class: "btn", disabled: run.cancel_requested, onclick: () => act({ type: "cancel" }) }, "Cancel")),
+    h("div", { class: "bar" + (real ? " danger" : ""), role: "progressbar", "aria-valuemin": 0, "aria-valuemax": total, "aria-valuenow": done },
+      h("div", { style: "width:" + (total ? Math.max(done / total * 100, 0) : 0) + "%" }, done + " of " + total + " tasks")),
+    run.cancel_requested ? h("p", { style: "color:var(--warning)" }, "Stopping after the current task - nothing is interrupted mid-change") : null);
+}
+function taskRow(r) {
+  const [t, tone] = statusPill(r.status);
+  return h("div", { class: "runrow" }, pill(t, tone, "fixed"),
+    h("div", {}, h("span", { class: "nm" }, r.name), r.secs != null ? h("span", { class: "muted" }, "  " + fmtDur(r.secs)) : null,
+      r.message ? h("div", { class: "msg" }, r.message) : null));
+}
+function monitorTasks(run) {
+  const main = run.rows.filter((r) => !r.concurrent), side = run.rows.filter((r) => r.concurrent);
+  return h("div", { class: "card" }, h("h2", {}, "Tasks"), main.map(taskRow),
+    side.length ? [h("div", { class: "bold", style: "margin-top:10px" }, "Independent audits (run alongside)"), side.map(taskRow)] : null);
+}
+function outputCard(run) {
+  const pre = h("pre", { class: "out", tabindex: 0, "aria-label": "Live output", onscroll: () => { ui.outStick = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20; } },
+    run.output.map((l) => l.section ? h("span", { class: "sec" }, l.text) : h("span", {}, l.text + "\n")));
+  return h("div", { class: "card" }, h("h2", {}, "Live output"), pre);
+}
+
+// ---------- Results tab ----------
+const OUT = { fixed: ["Fixed", "success"], already_ok: ["Already OK", "accent"], failed: ["Failed", "danger"], unverified: ["Unverified", "warning"], skipped: ["Skipped", ""] };
+const outLabel = (o, kind) => (o === "skipped" && kind === "preview" ? ["Would change", ""] : OUT[o] || [o, ""]);
+function resultsTab(page, err) {
+  const kind = snap.results_kind;
+  const run = runOf(kind);
+  const ok = !!(run && run.summary);
+  slots(page, [
+    err,
+    ["title", J([ok]), () => pageTitle("Results", ok ? "What the run did, task by task, with the proof for every change." : "Nothing has run yet.")],
+    ["toggle", J([kind, !!(snap.preview && snap.preview.summary), !!(snap.real && snap.real.summary)]), resultsToggle],
+    ["body", noElapsed([kind, run && run.summary, run && run.elapsed_secs, !!(snap.preview && snap.preview.summary), snap.real && snap.real.summary]), () => (ok ? resultsBody(run, kind) : emptyResults())],
+    ["ledger", J([kind, run && run.summary && run.summary.fixes]), () => (ok ? ledger(run, kind) : null)],
+  ]);
+}
+function emptyResults() {
+  return h("div", { class: "card" }, h("h2", {}, "Run a dry run to see what would change"),
+    h("p", { class: "muted" }, "A dry run reads this machine and reports every change it would make. It changes nothing."),
+    h("div", {}, h("button", { class: "btn primary", onclick: () => setTab("run") }, "Go to Run")));
+}
+function resultsToggle() {
+  if (!(snap.preview && snap.preview.summary) && !(snap.real && snap.real.summary)) return null;
+  const mk = (k, label) => h("button", { class: "chip filter", "aria-pressed": String(snap.results_kind === k), disabled: !(snap[k] && snap[k].summary), onclick: () => act({ type: "set_results_kind", kind: k }) }, label);
+  return h("div", { class: "chips" }, mk("preview", "Dry run"), mk("real", "Real run"));
+}
+function summaryText(run, kind) {
+  const s = run.summary, c = counts(run);
+  const L = [kindTitle(kind) + " summary", "Time: " + fmtDur(run.elapsed_secs),
+    "Tasks succeeded: " + s.results.filter((r) => r.success).length + "/" + s.results.length,
+    "Fixed: " + c.fixed, "Already OK: " + c.already_ok, (kind === "preview" ? "Would change: " : "Skipped: ") + c.skipped, "Failed: " + c.failed, "Unverified: " + c.unverified];
+  if (s.cancelled) L.push("The run was cancelled.");
+  for (const f of s.fixes) if (f.outcome === "failed" || f.outcome === "unverified") L.push((f.outcome === "failed" ? "FAILED " : "UNVERIFIED ") + f.target + " (" + f.task + "): " + f.evidence);
+  if (s.log_path) L.push("", "Run log: " + s.log_path);
+  return L.join("\n");
+}
+function resultsBody(run, kind) {
+  const s = run.summary, c = counts(run);
+  const okTasks = s.results.filter((r) => r.success).length;
+  let banner;
+  if (s.log_error) banner = h("div", { class: "callout danger" }, "The run log could not be written: " + s.log_error);
+  else if (s.cancelled) banner = h("div", { class: "callout warning" }, "This run was cancelled: tasks after the stop point did not run.");
+  else if (kind === "preview") banner = h("div", { class: "callout info" }, "Dry run - nothing was changed. " + (c.skipped ? c.skipped + " changes would be made." : "No changes would be made."));
+  else if (c.failed + c.unverified) banner = h("div", { class: "callout warning" }, "Real run finished with " + c.failed + " failed and " + c.unverified + " unverified. Check them below.");
+  else banner = h("div", { class: "callout success" }, "Real run complete. " + c.fixed + " fixed, " + c.already_ok + " already correct, nothing failed.");
+  const tile = (l, v, tone) => h("div", { class: "tile " + (tone || "") }, h("div", { class: "v" }, v), h("div", { class: "l" }, l));
+  const tiles = h("div", { class: "tiles" },
+    tile("Fixed", c.fixed, c.fixed ? "success" : ""), tile("Already OK", c.already_ok, "accent"),
+    tile(kind === "preview" ? "Would change" : "Skipped", c.skipped, ""), tile("Failed", c.failed, c.failed ? "danger" : ""),
+    tile("Unverified", c.unverified, c.unverified ? "warning" : ""), tile("Tasks succeeded", okTasks + "/" + s.results.length, okTasks === s.results.length ? "success" : "warning"),
+    tile("Total time", fmtDur(run.elapsed_secs), ""));
+  const actions = h("div", { class: "row" },
+    s.log_path ? h("button", { class: "btn", onclick: () => window.open("/api/log?kind=" + kind + "&" + tq(), "_blank", "noopener") }, "Open run log") : null,
+    h("button", { class: "btn", onclick: async (e) => {
+      const b = e.currentTarget;
+      try { await navigator.clipboard.writeText(summaryText(run, kind)); b.textContent = "Copied"; } catch (x) { b.textContent = "Copy failed"; }
+      setTimeout(() => { b.textContent = "Copy summary"; }, 1500);
+    } }, "Copy summary"),
+    kind === "preview" ? h("button", { class: "btn primary", onclick: () => setTab("run") }, "Back to Run") : null,
+    h("span", { class: "spacer" }),
+    s.log_path ? h("span", { class: "muted small mono", style: "overflow-wrap:anywhere" }, s.log_path) : null);
+  const out = [banner, tiles, actions];
+  if (snap.preview && snap.preview.summary && snap.real && snap.real.summary) out.push(compare());
+  out.push(tasksTable(run));
+  return out;
+}
+function compare() {
+  const a = counts(snap.preview), b = counts(snap.real);
+  const rows = [["Failed", a.failed, b.failed], ["Unverified", a.unverified, b.unverified], ["Fixed", a.fixed, b.fixed], ["Already OK", a.already_ok, b.already_ok], ["Skipped / would change", a.skipped, b.skipped]];
+  return h("div", { class: "card" }, h("h2", {}, "Dry run vs real run"), h("p", { class: "lead" }, "The dry run's prediction beside what the real run did."),
+    h("table", {}, h("thead", {}, h("tr", {}, h("th", {}, "Outcome"), h("th", {}, "Dry run"), h("th", {}, "Real run"))),
+      h("tbody", {}, rows.map((r) => h("tr", {}, h("td", {}, r[0]), h("td", {}, r[1]), h("td", {}, r[2]))))));
+}
+function tasksTable(run) {
+  return h("div", { class: "card" }, h("h2", {}, "Tasks"),
+    h("div", { style: "overflow-x:auto" }, h("table", { class: "tasks" },
+      h("thead", {}, h("tr", {}, ["Task", "Result", "Verified", "Tried / ok / skip", "Confidence"].map((x) => h("th", {}, x)))),
+      h("tbody", {}, run.summary.results.map((r) => [
+        h("tr", { class: "main" }, h("td", { class: "bold" }, r.task), h("td", {}, r.success ? pill("Success", "success") : pill("Failed", "danger")),
+          h("td", {}, r.verified ? pill("Yes", "success") : pill("No", "warning")), h("td", {}, r.attempted + " / " + r.succeeded + " / " + r.skipped),
+          h("td", {}, r.confidence + "%")),
+        h("tr", { class: "msg" }, h("td", { colspan: 5 }, r.message || "", r.error_details ? h("div", { style: "color:var(--danger)" }, r.error_details) : null)),
+      ])))));
+}
+function ledger(run, kind) {
+  const fixes = run.summary.fixes;
+  const c = counts(run);
+  const filters = [["all", "All", fixes.length], ["failed", "Failed", c.failed], ["unverified", "Unverified", c.unverified], ["fixed", "Fixed", c.fixed], ["already_ok", "Already OK", c.already_ok], ["skipped", kind === "preview" ? "Would change" : "Skipped", c.skipped]];
+  const sid = nid("search");
+  const dyn = h("div", { class: "stack" });
+  // Only this inner region redraws while typing, so the search box keeps focus.
+  const draw = () => {
+    const q = ui.search.trim().toLowerCase();
+    const vis = fixes.map((f, i) => [f, i]).filter(([f]) => (ui.filter === "all" || f.outcome === ui.filter) &&
+      (!q || [f.target, f.intent, f.evidence, f.task, f.action, f.before].some((x) => x && String(x).toLowerCase().includes(q))));
+    fill(dyn,
+      h("div", { class: "chips" }, filters.map(([k, l, n]) => h("button", { class: "chip filter", "aria-pressed": String(ui.filter === k), onclick: () => { ui.filter = k; ui.shown = 100; draw(); } }, l + "  " + n))),
+      vis.length === 0 ? h("p", { class: "muted" }, "Nothing matches.") : null,
+      h("div", {}, vis.slice(0, ui.shown).map(([f, i]) => {
+        const open = ui.expanded.has(i), [lab, tone] = outLabel(f.outcome, kind), bid = nid("lr");
+        return h("div", { class: "ledger-row" },
+          h("button", { id: bid, "aria-expanded": String(open), onclick: () => { open ? ui.expanded.delete(i) : ui.expanded.add(i); draw(); const n = document.getElementById(bid); if (n) n.focus(); } },
+            pill(lab, tone, "fixed"), h("span", { class: "bold tk" }, f.task), h("span", { class: "tgt" }, f.target), h("span", { class: "muted", "aria-hidden": "true" }, open ? "▾" : "▸")),
+          open ? h("dl", { class: "ledger-body" },
+            h("dt", {}, "Task"), h("dd", {}, f.task), h("dt", {}, "Wanted"), h("dd", {}, f.intent),
+            f.before != null ? [h("dt", {}, "Before"), h("dd", {}, f.before)] : null,
+            h("dt", {}, "Action"), h("dd", {}, f.action), h("dt", {}, "Evidence"), h("dd", {}, f.evidence)) : null);
+      })),
+      vis.length > ui.shown ? h("div", {}, h("button", { class: "btn", onclick: () => { ui.shown += 200; draw(); } }, "Show more (" + (vis.length - ui.shown) + " left)")) : null);
+  };
+  draw();
+  return h("div", { class: "card" }, h("h2", {}, "Changes and proof"),
+    h("p", { class: "lead" }, "Each record says what was wanted, what was there, what was done, and how it was checked."),
+    fixes.length === 0 ? h("p", { class: "muted" }, "No changes were recorded.") : [
+      h("div", {}, h("label", { class: "lbl", for: sid }, "Search"),
+        h("input", { type: "search", id: sid, placeholder: "Search target, intent, evidence or task", value: ui.search, oninput: (e) => { ui.search = e.target.value; ui.shown = 100; draw(); } })),
+      dyn]);
+}
+
+// ---------- modals ----------
+function renderModals() {
+  slots(document.getElementById("modals"), [
+    ["picker", J([snap.locations_open, snap.candidates, snap.discovering, ui.pickSel, snap.inspecting]), pickerModal],
+    ["apply", J([snap.apply_dialog_open, snap.apply_confirmed, snap.gate, snap.tasks.map((t) => t.selected && t.label), snap.readme && snap.readme.source]), applyModal],
+    ["browser", J([ui.browser]), browserModal],
+  ]);
+}
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !snap) return;
+  if (ui.browser) { ui.browser = null; render(); }
+  else if (snap.apply_dialog_open) act({ type: "close_apply" });
+});
+function dialog(over, label, ...kids) {
+  return h("div", { class: "scrim" + (over ? " over" : "") },
+    h("div", { class: "modal" + (over ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-label": label }, ...kids));
+}
+function pickerModal() {
+  if (!snap.locations_open) return null;
+  const cands = snap.candidates || [];
+  const pathId = nid("path");
+  const use = h("button", { class: "btn primary", disabled: !(ui.pickPath || "").trim() || snap.inspecting, onclick: () => act({ type: "use_readme", path: ui.pickPath.trim() }) }, "Use this README");
+  const input = h("input", { type: "text", id: pathId, value: ui.pickPath || "", placeholder: "path to a .html, .url or .desktop file", style: "flex:1 1 260px; width:auto",
+    oninput: (e) => { ui.pickPath = e.target.value; ui.pickSel = null; use.disabled = !e.target.value.trim(); },
+    onkeydown: (e) => { if (e.key === "Enter" && !use.disabled) use.click(); } });
+  const card = (c, i) => {
+    const ok = !!c.resolved;
+    return h("button", { class: "cand", "aria-pressed": String(ui.pickSel === i), disabled: !ok,
+      onclick: () => { ui.pickSel = i; ui.pickPath = c.resolved; input.value = c.resolved; use.disabled = false; render(); },
+      ondblclick: () => ok && act({ type: "use_readme", path: c.resolved }) },
+      h("div", { class: "bold", style: "overflow-wrap:anywhere" }, c.location),
+      c.resolved && c.resolved !== c.location ? h("div", { class: "muted small", style: "overflow-wrap:anywhere" }, "opens " + c.resolved) : null,
+      !ok ? h("div", { class: "small", style: "color:var(--warning)" }, c.note || "could not be followed") : (c.note ? h("div", { class: "muted small" }, c.note) : null));
+  };
+  return dialog(false, "Choose the README",
+    h("h2", {}, "Choose the README"),
+    h("p", { class: "muted" }, "The round's README says who may be on the machine and what must stay running."),
+    snap.discovering ? h("div", { class: "callout info" }, "Looking in C:\\CyberPatriot, /opt/CyberPatriot and every Desktop...") :
+      cands.length === 0 ? h("div", {}, h("div", { class: "bold" }, "No README was found"), h("p", { class: "muted" }, "Enter its path below, or browse for it.")) :
+        h("div", {}, h("div", { class: "bold", style: "margin-bottom:6px" }, "Found " + cands.length), h("div", { class: "cands" }, cands.map(card))),
+    h("div", {}, h("label", { class: "bold", for: pathId, style: "display:block;margin-bottom:6px" }, "Or enter a path by hand"),
+      h("div", { class: "row" }, input, h("button", { class: "btn", onclick: () => openBrowser((ui.pickPath || "").includes("/") ? (ui.pickPath || "").replace(/[^/]*$/, "") : null) }, "file browser"))),
+    h("div", { class: "row" }, use,
+      h("button", { class: "btn", disabled: snap.discovering, onclick: () => act({ type: "discover" }) }, "Search again"),
+      h("button", { class: "btn", onclick: () => act({ type: "continue_without_readme" }) }, "Continue without README")));
+}
+function applyModal() {
+  if (!snap.apply_dialog_open) return null;
+  const names = snap.tasks.filter((t) => t.selected).map((t) => t.label);
+  const cid = nid("conf");
+  const can = snap.gate.ok && snap.apply_confirmed;
+  const src = snap.readme && snap.readme.source;
+  return dialog(false, "Run for real?",
+    h("h2", { style: "color:var(--danger)" }, "Run for real?"),
+    h("div", { class: "callout danger" }, "This changes the machine and most changes cannot be undone: accounts are deleted, passwords reset, packages purged, services masked, files deleted."),
+    h("div", { class: "bold" }, "Tasks that will run"), h("p", {}, names.join(", ")),
+    h("p", { class: "muted small", style: "overflow-wrap:anywhere" }, "README in use: " + (src || "none")),
+    snap.gate.ok ? h("p", { class: "muted small" }, "Matches the dry run you just reviewed.") : h("p", { class: "small", style: "color:var(--danger)" }, snap.gate.reason),
+    h("label", { class: "check", for: cid, style: "font-size:14.5px" },
+      h("input", { type: "checkbox", id: cid, checked: snap.apply_confirmed, onchange: (e) => act({ type: "set_apply_confirmed", on: e.target.checked }) }),
+      h("span", {}, "I have answered the forensics questions and I want to change this machine")),
+    h("div", { class: "row" },
+      h("button", { class: "btn", onclick: () => act({ type: "close_apply" }) }, "Cancel"),
+      h("button", { class: "btn danger", disabled: !can, onclick: () => act({ type: "start_real" }) }, "Apply changes")));
+}
+
+// ---------- file browser ----------
+function openBrowser(path) {
+  ui.browser = { loading: true, path: path || "", readmeOnly: false, sel: null, listing: null, roots: [], error: null };
+  render();
+  loadDir(path);
+}
+async function loadDir(path) {
+  const b = ui.browser; if (!b) return;
+  b.loading = true;
+  try {
+    const q = (path ? "path=" + encodeURIComponent(path) + "&" : "") + (b.readmeOnly ? "readme_only=1&" : "");
+    const r = await fetch("/api/ls?" + q + tq(), { headers: { "X-Pinnacle-Token": TOKEN } });
+    const j = await r.json();
+    if (ui.browser !== b) return;
+    if (j.error && path && !b.listing) { b.loading = false; return loadDir(null); }
+    if (j.error) { b.error = j.error; if (path) b.path = path; }
+    else { b.listing = j; b.roots = j.roots || b.roots; b.path = j.path; b.sel = null; b.error = null; }
+  } catch (e) { b.error = "Could not list that folder: " + e.message; }
+  b.loading = false;
+  render();
+}
+function pickFile(p) { ui.pickPath = p; ui.pickSel = null; ui.browser = null; render(); }
+function browserModal() {
+  const b = ui.browser; if (!b) return null;
+  const L = b.listing, pid = nid("bp"), tid = nid("ro");
+  const pathInput = h("input", { type: "text", id: pid, value: b.path || "", "aria-label": "Folder path", onkeydown: (e) => { if (e.key === "Enter") loadDir(e.target.value.trim()); } });
+  const entries = L ? L.entries : [];
+  const selEntry = b.sel != null ? entries[b.sel] : null;
+  const item = (en, i) => h("button", { class: "fb-item" + (en.readme_like ? " readme" : ""), role: "option", "aria-selected": String(b.sel === i),
+    onclick: () => { if (en.is_dir) loadDir(en.path); else { b.sel = i; render(); } },
+    ondblclick: () => { if (!en.is_dir) pickFile(en.path); } },
+    h("span", { class: "ic", "aria-hidden": "true" }, en.is_dir ? "▸" : en.readme_like ? "●" : "·"),
+    h("span", { class: "nm" }, en.name + (en.is_dir ? "/" : "")), en.readme_like ? pill("README", "accent") : null);
+  return dialog(true, "Browse for the README",
+    h("h2", {}, "Browse for the README"),
+    h("div", { class: "row" },
+      h("button", { class: "btn", disabled: !(L && L.parent), onclick: () => loadDir(L.parent) }, "↑ Parent"),
+      h("div", { class: "grow" }, pathInput), h("button", { class: "btn", onclick: () => loadDir(pathInput.value.trim()) }, "Go")),
+    b.roots && b.roots.length ? h("div", { class: "chips" }, h("span", { class: "muted small" }, "Locations"), b.roots.map((r) => h("button", { class: "chip filter", onclick: () => loadDir(r) }, r))) : null,
+    h("label", { class: "check", for: tid, style: "padding:0" },
+      h("input", { type: "checkbox", id: tid, checked: b.readmeOnly, onchange: (e) => { b.readmeOnly = e.target.checked; loadDir(b.path); } }), h("span", {}, "Show only README files")),
+    b.error ? h("div", { class: "callout danger", role: "alert" }, b.error) : null,
+    h("div", { class: "fb-list", role: "listbox", "aria-label": "Folder contents" },
+      b.loading && !L ? h("p", { class: "muted", style: "padding:10px" }, "Loading...") : entries.length === 0 ? h("p", { class: "muted", style: "padding:10px" }, "Nothing to show here.") : entries.map(item)),
+    h("div", { class: "row" },
+      h("span", { class: "muted small grow", style: "overflow-wrap:anywhere" }, selEntry ? selEntry.path : "Double-click a file, or select it and press Select."),
+      h("button", { class: "btn", onclick: () => { ui.browser = null; render(); } }, "Cancel"),
+      h("button", { class: "btn primary", disabled: !selEntry, onclick: () => selEntry && pickFile(selEntry.path) }, "Select")));
+}
+
+// ---------- boot ----------
+refresh();
+connect();
+</script>
+</body>
+</html>
