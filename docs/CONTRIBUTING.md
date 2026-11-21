@@ -352,17 +352,17 @@ TaskSpec {
     flag: "--my-task",
     short: "-x",
     help: "What this task does",          // --help
-    label: "My New Task",                 // the menu
-    detail: "what it changes, briefly",   // the menu
+    label: "My New Task",                 // shown in the GUI and web task lists
+    detail: "what it changes, briefly",   // shown in the GUI and web task lists
     needs_readme: false,
     concurrency: Sequential,
     build: plain!(MyNewTask),             // or with_readme!(MyNewTask)
 },
 ```
 
-That is the whole registration. The flag, the help text, the menu entry and the
+That is the whole registration. The flag, the help text, the GUI and web task-list entry and the
 constructor all come from this row, so there is no way to add a task the CLI
-accepts but the menu does not offer — which used to be three separate lists,
+accepts but the GUI and web UI do not offer — which used to be three separate lists,
 free to disagree, and they did.
 
 Two rules for the row:

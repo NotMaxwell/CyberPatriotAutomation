@@ -14,7 +14,7 @@ several are the kind of mistake that is easy to reintroduce.
 > on and carries only that platform's tasks: Win32 and `net`/`secedit`/`netsh`
 > on Windows, `/etc` and systemd and `apt` on Linux. Everything above the
 > platform line — the README parser, the remediation ledger, the run log, the
-> CLI and the menu — is shared and identical.
+> CLI, the GUI and the web UI — is shared and identical.
 >
 > The split is a Cargo workspace rather than `#[cfg]` branches inside one crate,
 > deliberately: two implementations kept in one place drift silently, which is
@@ -24,14 +24,14 @@ several are the kind of mistake that is easy to reintroduce.
 ## Build & test
 
 ```bash
-./scripts/check.sh         # fmt, clippy, 395 tests, and the Windows type-check
+./scripts/check.sh         # fmt, clippy, 510 tests, and the Windows type-check
 ```
 
 Or by hand:
 
 ```bash
 cd rust
-cargo test --workspace     # 395 tests
+cargo test --workspace     # 510 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -201,7 +201,8 @@ wrong file — pass `--readme` explicitly.
 
 | Flag | Effect |
 |------|--------|
-| `-i`, `--tui` | Open the interactive menu |
+| `--web` | Open the web UI in a browser, served from `127.0.0.1` |
+| `--port <n>` | With `--web`, listen on port `<n>` instead of a random one |
 | `-r`, `--readme <file>` | Parse this README |
 | `-R`, `--auto-readme` | Locate the README automatically (desktop shortcut first) |
 | `--parse-readme` | Parse and display the README, then exit — makes no changes |
@@ -228,8 +229,8 @@ Add `-h`, `--help`, `-?` or `/?` to print this table and exit.
 
 > [!IMPORTANT]
 > **Running everything must be asked for: pass `--all`.** A bare invocation opens
-> the interactive menu at a real terminal, and prints this help otherwise. Either
-> way it changes nothing on its own. It used to mean "run every task", so
+> a front end (the GUI on Windows, the web UI on Linux in a desktop session), and
+> prints this help otherwise. Either way it changes nothing on its own. It used to mean "run every task", so
 > double-clicking the executable — or running it to see what it did — began a
 > full destructive run against the machine.
 >
@@ -246,45 +247,41 @@ Add `-h`, `--help`, `-?` or `/?` to print this table and exit.
 
 > [!NOTE]
 > Every task now has its own flag. The five that once ran only under `--all` -
-> software management and the four audits - were given flags so the interactive
-> menu could offer them individually. The independent audits still run
+> software management and the four audits - were given flags so the GUI and
+> web task lists could offer them individually. The independent audits still run
 > concurrently with each other when selected.
 
-### The interactive menu
+### The front ends
 
-`--tui`, or just running the executable with no arguments at a terminal — which
-is what double-clicking it does.
+A bare launch (no arguments) opens a front end; it never starts a run.
 
-```
-What would you like to do?
-  1  Inspect the README only  (read-only, changes nothing)
-  2  Preview every task  (dry run, changes nothing)
-  3  Run every task  (applies changes)
-  4  Choose individual tasks
-  5  Quit
-```
+- **Windows:** `pinnacle-cypat-gui.exe`, if it is next to the CLI exe
+  (`crates/gui`, eframe/egui with the wgpu renderer and a WARP software
+  fallback). It opens on a picker listing every README found, then README, Run
+  and Results tabs. Every parsed field is editable; edits are recorded in the
+  run log, with passwords as a fingerprint only. A real run unlocks only after a
+  finished, uncancelled dry run of the same task selection and README, and then
+  asks for confirmation. Its manifest requests Administrator.
+- **Linux:** `--web [--port N]` (`crates/cli/src/web/`), or a bare launch when
+  there is a desktop session. A small HTTP server on `127.0.0.1` with a per-run
+  token, `Host` and `Origin` checks, a CSP and server-sent events for live
+  updates; same workflow and editing, plus a file browser. It exits on Ctrl+C,
+  the page's quit, or after 120 seconds idle with no run, and never mid-run. The
+  binary stays static musl, which is why the Linux front end is a page and not
+  a window.
 
-It asks which README to use, which tasks to run and whether to preview or apply,
-then shows a summary and waits for an explicit yes. The default answer is **no**
-for a run that applies changes and **yes** for a preview, so pressing enter
-without reading is always the harmless choice. Declining exits without changing
-anything.
+Neither front end runs tasks itself. Both drive `pinnacle_core::engine` — a
+`RunPlan` in, a stream of `RunEvent`s out — which is also what the CLI consumes.
+The pipeline holds every ordering guarantee the run depends on (the README parsed
+before user management, critical services protected before insecure ones are
+disabled, the independent audits concurrent and the rest not), and a second copy
+of that logic would be free to drift. Because every front end goes through it,
+the run log is the same whichever one a run came from. The state machine and the
+real-run gate shared by the GUI and web UI live in `pinnacle_core::session`; the
+file browsers' directory listing in `pinnacle_core::files`.
 
-Prompts are numbered rather than arrow-driven, so this needs no raw terminal mode
-and no extra dependency.
-
-The menu **builds a command line** and hands it to the normal run pipeline rather
-than driving tasks itself. The pipeline holds every ordering guarantee the run
-depends on — the README parsed before user management, critical services
-protected before insecure ones are disabled, the independent audits concurrent
-and the rest not — and a second copy of that logic would be free to drift. It
-also means the log's `Command:` line records exactly what a menu-driven run did,
-so it can be repeated non-interactively.
-
-Choosing "continue without a README" names the tasks that will then decline to
-act *before* the run starts, rather than reporting it part-way through once other
-tasks have already made changes. Not being Administrator is reported up front for
-the same reason.
+The task list in both comes from `Host::tasks()`, so a task appears in each from
+its one `TaskSpec` row. Tasks that need a README are flagged when none is loaded.
 
 ### Software updates
 
@@ -355,16 +352,17 @@ behavioural change and record it in [CHANGELOG.md](CHANGELOG.md).
 
 ## Layout
 
-A Cargo workspace of four crates. `pinnacle-core` holds everything that does not
+A Cargo workspace of five crates. `pinnacle-core` holds everything that does not
 name an operating system; each platform crate implements
 `pinnacle_core::platform::Platform` and is selected by one `cfg` in the binary.
 
 | Crate | Holds |
 |---|---|
-| `crates/core` | `platform.rs` (the seam), `task.rs`, `readme_parser.rs`, `html.rs`, `remediation.rs`, `run_log.rs`, `app_config.rs`, `command.rs`, `ui.rs`, `software_matching.rs`, `models/`, the README corpus |
+| `crates/core` | `platform.rs` (the seam), `task.rs`, `readme_parser.rs`, `html.rs`, `remediation.rs`, `run_log.rs`, `app_config.rs`, `command.rs`, `ui.rs`, `software_matching.rs`, `engine.rs` (run pipeline as an event stream), `session.rs` (shared GUI/web state), `files.rs` (file-browser listing), `models/`, the README corpus |
 | `crates/windows` | `native/` (Win32), `{account,policy,registry,service}_ops.rs`, `knowledge.rs`, `chocolatey.rs`, `tasks/` — fifteen tasks |
 | `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — fifteen tasks |
-| `crates/cli` | `main.rs` (flags and the run pipeline), `tui.rs` (the menu) |
+| `crates/gui` | `app.rs`, `screens/`, `theme.rs` — the Windows desktop GUI (`pinnacle-cypat-gui`) |
+| `crates/cli` | `main.rs` (flags, bare-launch front end), `web/` (the Linux web UI) |
 
 Where the C# port's files ended up:
 
@@ -376,7 +374,7 @@ Where the C# port's files ended up:
 | `Core/Utilities/ReadmeParser.cs` | `crates/core/src/readme_parser.rs` |
 | `Core/Models/` | `crates/core/src/models/` |
 | `Core/Tasks/` | `crates/windows/src/tasks/` |
-| `Core/Tui.cs` | `crates/cli/src/tui.rs` |
+| `Core/Tui.cs` | *(replaced by `crates/gui` and `crates/cli/src/web/`)* |
 | Spectre.Console | `crates/core/src/ui.rs` |
 | *(new)* | `crates/core/src/run_log.rs` — run log and remediation ledger |
 | *(new)* | `crates/core/src/platform.rs` — the per-OS task table |

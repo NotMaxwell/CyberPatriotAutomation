@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-395-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-510-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -21,14 +21,17 @@ checklist, and tells you exactly what it changed.
 
 ## Quick start
 
-**Easiest:** double-click `RUN.bat`. It checks for Administrator, then opens the
-built-in menu. On Linux, `./RUN.sh` does the same: it re-runs itself under
-`sudo` if needed and passes any arguments straight to the tool.
+**Easiest.** On **Windows**, double-click `RUN.bat`, or `pinnacle-cypat-gui.exe`
+directly. It opens the desktop GUI (see [The GUI](#the-gui)). On **Linux**, run
+`./RUN.sh`, or `sudo ./pinnacle-cypat --web`. It opens the web UI in your browser
+(see [The web UI](#the-web-ui)). `RUN.sh` re-runs itself under `sudo` if needed
+and defaults to `--web`; any arguments you give it go straight to the tool.
 
 **From a terminal:**
 
 ```powershell
-PinnacleCyPat.exe --tui          # guided menu — pick README, tasks, preview/apply
+pinnacle-cypat-gui.exe           # Windows: the desktop GUI
+sudo ./pinnacle-cypat --web      # Linux: the web UI (add --port 8080 to pin the port)
 ```
 
 **Straight to the point:**
@@ -51,32 +54,74 @@ PinnacleCyPat.exe --auto-readme --all
 
 ---
 
-## The menu
+## The GUI
 
-`--tui`, or just launching the executable with no arguments at a terminal.
+Windows. `pinnacle-cypat-gui.exe`, which `RUN.bat` launches. It sits next to the
+CLI exe and drives the same engine, so a GUI run writes the same run log as
+`pinnacle-cypat.exe --all`.
 
-```
-╭──────────────────────────────────────────────────────╮
-│  PinnacleCyPat                                       │
-│  v1.8.0 (build 2026-08-22)                           │
-│  Windows security hardening for CyberPatriot images  │
-╰──────────────────────────────────────────────────────╯
+The workflow is the order the decisions should be made in:
 
-What would you like to do?
-> Inspect the README only  (read-only, changes nothing)
-  Preview every task  (dry run, changes nothing)
-  Run every task  (applies changes)
-  Choose individual tasks
-  Quit
-```
+1. **README locations.** On launch it finds every README on the machine and lists
+   them, so you pick the right one rather than trusting a guess. You can also
+   type a path, browse for a file, or continue without a README.
+2. **README tab.** What the parser extracted: administrators, users, groups,
+   services, software. **Every field is editable**, because a bad parse is
+   better fixed on screen than by re-running. Edits are recorded in the run log
+   as a difference from the parsed version; passwords appear there only as a
+   fingerprint, never in the clear. The "Do by hand" checklist in the sidebar
+   lists what the README asks for that the tool will not do, forensics
+   questions first.
+3. **Run tab.** Tick the tasks, then **dry run**. A dry run never writes.
+4. **Real run.** The button unlocks only after a dry run of the *same* task
+   selection and the *same* README has finished without being cancelled. Change
+   either and it locks again. It then opens a confirmation dialog, where you
+   tick that you have answered the forensics questions before it starts.
+5. **Live monitor.** Per-task status, elapsed time and output as it happens.
+   Cancel stops between tasks, never mid-write.
+6. **Results tab.** A dry/real toggle, statistics, a comparison of the two, a
+   searchable ledger of every change and its proof, copy-summary, and a button to
+   open the run log.
 
-It asks which README to use, which tasks to run, and whether to preview or apply
-— then shows a summary and waits for an explicit yes. The default answer is **no**
-for a run that applies changes and **yes** for a preview, so pressing enter
-without reading is always the harmless choice.
+The window is a light theme with the system font. It renders through
+wgpu (Direct3D 12), falling back to the WARP software renderer on a VM with no
+GPU driver.
 
-The menu builds a command line and hands it to the normal run pipeline, so the
-run log records exactly what it did and you can repeat it non-interactively.
+**Administrator.** The executable's manifest requests it. If UAC is off, Windows
+starts it elevated without asking. Either way the pill at the top right says
+whether the GUI is elevated, and the real run stays locked if it is not.
+
+---
+
+## The web UI
+
+Linux. `pinnacle-cypat --web [--port N]`, which `RUN.sh` runs by default. The
+screens and rules are the GUI's: README picker with a file browser, editable
+README, tasks, dry run, gated real run, live monitor, results.
+
+Why a browser rather than a window: the shipped binary is static musl and cannot
+load X11, Wayland or GL, and Ubuntu's Wayland session refuses a window opened by
+root. A browser running as you, talking to this process running as root, has
+neither problem.
+
+It makes root changes, so the server is locked down:
+
+- **Loopback only** (`127.0.0.1`). The URL it prints carries a **per-run token**,
+  required on every request.
+- The `Host` header is checked (DNS rebinding) and so is `Origin` on every POST
+  (cross-site requests). A Content-Security-Policy is set on every page.
+- Live updates arrive over server-sent events.
+
+It exits on Ctrl+C, on the page's **Quit** button, or after **120 seconds with no
+page connected and no run in progress**. It never exits in the middle of a run: a
+quit during one cancels it after the current task, and a second Ctrl+C leaves
+immediately.
+
+A **bare launch** (no arguments) opens a front end rather than doing anything
+destructive. On Windows that is the GUI, if `pinnacle-cypat-gui.exe` is next to
+the CLI exe; on Linux it is the web UI when there is a desktop session
+(`DISPLAY`, `WAYLAND_DISPLAY`, or a `sudo` from a user with one). Otherwise it
+prints help.
 
 ---
 
@@ -257,7 +302,8 @@ These are the same on both platforms:
 | Flag | Short | Effect |
 |---|---|---|
 | `--help` | `-h` | Show the flag table and exit |
-| `--tui` | `-i` | Open the interactive menu |
+| `--web` | | Open the web UI in a browser, served from `127.0.0.1` (Linux) |
+| `--port <n>` | | With `--web`, listen on port `<n>` instead of a random one |
 | `--version` | `-V` | Print version and build date, then exit |
 | `--readme <path>` | `-r` | Read the competition README at `<path>` |
 | `--auto-readme` | `-R` | Find the README automatically |
@@ -296,8 +342,9 @@ exists on both, the spelling matches:
 
 > [!IMPORTANT]
 > **Running everything must be asked for: pass `--all`.** A bare invocation opens
-> the menu at a terminal, and prints help otherwise. It used to mean "run every
-> task", so double-clicking the executable began a full destructive run.
+> a front end if one is available (see [The web UI](#the-web-ui)), and prints
+> help otherwise. It used to mean "run every task", so double-clicking the
+> executable began a full destructive run.
 >
 > An **unrecognised** argument is rejected with exit code 2 and changes nothing.
 > It used to be ignored — and because "no task flag" meant "run everything", a
@@ -358,7 +405,7 @@ in one. [The archive README](archive/csharp/README.md) has the full reasoning.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 395 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 510 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
                         # -> publish-linux-x64/pinnacle-cypat
 ```
@@ -405,12 +452,13 @@ Details in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#11-build-test-publish).
 
 ## Project layout
 
-`rust/` is a Cargo workspace of four crates, split so that adding an operating
+`rust/` is a Cargo workspace of five crates, split so that adding an operating
 system is additive rather than a set of `#[cfg]` branches through every task.
 
 ```
 PinnacleCyPat/
-├── RUN.bat / RUN.ps1              Double-click launchers → the built-in menu
+├── RUN.bat / RUN.ps1              Windows launchers → the desktop GUI
+├── RUN.sh                         Linux launcher → the web UI
 ├── LICENSE                        Apache License 2.0
 ├── NOTICE                         Attribution, trademark, third-party components
 ├── rust/
@@ -421,6 +469,9 @@ PinnacleCyPat/
 │       │   ├── readme_parser.rs   README prose -> ReadmeData
 │       │   ├── remediation.rs     Prove-and-record wrapper for every change
 │       │   ├── run_log.rs         Transcript, diagnostics, remediation ledger
+│       │   ├── engine.rs          RunPlan in, RunEvent stream out
+│       │   ├── session.rs         AppState, Action, real_run_gate (GUI and web)
+│       │   ├── files.rs           Directory listing for both file browsers
 │       │   ├── models/            Data models
 │       │   └── tests/corpus/      README fixtures — add real ones here
 │       ├── windows/               pinnacle-windows — the fifteen Windows tasks
@@ -432,9 +483,13 @@ PinnacleCyPat/
 │       │   ├── systemd_ops.rs     Proved systemctl operations
 │       │   ├── user_ops.rs        /etc/passwd, shadow, group
 │       │   └── apt.rs             Package installs and upgrades
+│       ├── gui/                   pinnacle-cypat-gui — the Windows desktop GUI
+│       │   ├── app.rs             Layout, actions, dialogs, screenshot hooks
+│       │   ├── screens/           README, Run, Results, file browser
+│       │   └── theme.rs           Light theme
 │       └── cli/                   pinnacle-cypat — the binary
-│           ├── main.rs            Flag parsing and the run pipeline
-│           └── tui.rs             Interactive menu
+│           ├── main.rs            Flag parsing, bare-launch front end
+│           └── web/               The Linux web UI: server, api, controller, index.html
 ├── archive/csharp/                The retired C# port, frozen
 ├── scripts/                       check.sh / check.ps1 / publish.sh
 └── docs/
@@ -446,7 +501,34 @@ PinnacleCyPat/
 
 The CLI names no operating system: it reads the platform crate's task table,
 which is selected by one `cfg` at compile time. Adding a task is one row in that
-table, which is also what supplies its `--help` line and its menu entry.
+table, which is also what supplies its `--help` line and its entry in the GUI and web
+task lists.
+
+---
+
+## For developers
+
+The core is OS-agnostic: `pinnacle-core` holds the README parser, the remediation
+ledger, the run log and `engine`, which takes a `RunPlan` and emits a stream of
+`RunEvent`s. The platform crates (`windows`, `linux`) hold the tasks and are the
+only code that names an OS. There are three thin front ends over the one engine:
+the CLI, the Windows GUI and the Linux web UI. The last two share their state
+machine and the real-run gate through `pinnacle_core::session`.
+
+The rules that matter:
+
+- **Every write proves itself.** A change goes through `remediation::apply`,
+  which reads the state back and records that as evidence.
+- **A dry run never writes.** Every task honours it.
+- **The README drives decisions.** Nothing is deleted or disabled on a guess.
+
+```bash
+./scripts/check.sh            # fmt, clippy, 510 tests, Windows type-check
+cd rust && cargo test --workspace
+```
+
+The GUI crate builds on Windows only (the web UI is the Linux front end). Start
+with [docs/CLAUDE.md](docs/CLAUDE.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ---
 

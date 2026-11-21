@@ -59,7 +59,7 @@
 
 | Suite | Tests | Covers |
 |-------|------:|--------|
-| `src/**` unit tests | 95 | tables, matching, HTML, command, config, TUI |
+| `src/**` unit tests | 95 | tables, matching, HTML, command, config, engine, session |
 | `main.rs` | 7 | flag parsing and the unknown-argument check |
 | `tests/readme_parser_tests.rs` | 20 | parser behaviour, case by case |
 | `tests/tasks_tests.rs` | 26 | task construction and dry-run |

@@ -28,7 +28,7 @@ The full reference — every task, why it exists, what it changes and how — is
 
 ## Architecture
 
-`rust/` is a Cargo workspace of four crates. The split is along the line that
+`rust/` is a Cargo workspace of five crates. The split is along the line that
 already existed in the code, and it is what makes a second operating system
 additive rather than a set of `#[cfg]` branches threaded through every task.
 
@@ -40,6 +40,9 @@ rust/
     │   ├── platform.rs                  the seam: TaskSpec, Concurrency, Platform
     │   ├── task.rs                      the Task trait and impl_task_meta!
     │   ├── readme_parser.rs · html.rs   README prose -> ReadmeData
+    │   ├── engine.rs                    RunPlan in, RunEvent stream out (CLI, GUI, web)
+    │   ├── session.rs                   AppState, Action, real_run_gate (GUI and web)
+    │   ├── files.rs                     directory listing for both file browsers
     │   ├── readme_services.rs           service-name matching, table as a parameter
     │   ├── remediation.rs               prove-and-record wrapper for every change
     │   ├── run_log.rs                   transcript, diagnostics, remediation ledger
@@ -59,9 +62,11 @@ rust/
     │   ├── user_ops.rs                  /etc/passwd, shadow, group; useradd, chage
     │   ├── apt.rs · knowledge.rs · readme_services.rs
     │   └── tasks/
+    ├── gui/           pinnacle-cypat-gui — Windows desktop GUI (eframe/egui)
+    │   └── app.rs · screens/ · theme.rs · state.rs · backend.rs
     └── cli/           pinnacle-cypat    — the binary
-        ├── main.rs                      argument parsing and the run pipeline
-        └── tui.rs                       the interactive menu
+        ├── main.rs                      argument parsing; bare launch opens a front end
+        └── web/                         Linux web UI: server, api, controller, index.html
 ```
 
 **Which crate does a change belong in?** If it names Windows or Linux, it is not
@@ -89,18 +94,30 @@ pub trait Platform {
 }
 ```
 
-`TaskSpec` describes one task **once**: flag, short flag, `--help` line, menu
-label, menu detail, whether it needs a README, whether it may run concurrently,
-and how to construct it. `main.rs` and `tui.rs` name no operating system — they
-read `Host::tasks()`, where `Host` is selected by one `cfg` at the top of
-`main.rs`.
+`TaskSpec` describes one task **once**: flag, short flag, `--help` line,
+label and detail (shown in the GUI and web task lists), whether it needs a README,
+whether it may run concurrently, and how to construct it. `main.rs` and the web UI
+name no operating system — they read `Host::tasks()`, where `Host` is selected by
+one `cfg` at the top of `main.rs`. The GUI reads the same table.
 
 This replaced three hand-maintained lists that were free to disagree, and did: a
-task could reach the CLI without reaching the menu, making it invisible to
-anyone who double-clicks `RUN.bat`. **Adding a task is now one row.**
+task could reach the CLI without reaching the old terminal menu, making it
+invisible to anyone who double-clicks `RUN.bat`. **Adding a task is now one row.**
 
 A task with no counterpart on the other platform simply has no row there —
 Group Policy has none on Linux. Do not add a stub that reports success.
+
+## Front ends
+
+There are three, all thin: the CLI, the Windows GUI (`crates/gui`) and the Linux
+web UI (`crates/cli/src/web/`, `--web`). None runs tasks itself. Each builds a
+`RunPlan` and displays the `RunEvent`s from `pinnacle_core::engine`; the GUI and web
+UI share `pinnacle_core::session` (`AppState`, `Action`, `real_run_gate`) and
+`pinnacle_core::files`. Keep run logic in the engine and rules about *when* a run is
+allowed in `session`; a rule implemented in only one front end is a rule the other
+one lacks. The real run must stay locked until a finished, uncancelled dry run of
+the same selection and README. The GUI crate builds on Windows only, so a Linux
+`cargo test` proves nothing about it; the web UI is covered by tests in `web/`.
 
 ## Coding Standards
 
@@ -262,7 +279,8 @@ cargo test group_members              # by name
 
 **One row, in one file.** Add a `TaskSpec` to the platform's `platform.rs` —
 `crates/windows/src/platform.rs` or `crates/linux/src/platform.rs` — and the
-flag, the `--help` line, the menu entry and the constructor all come from it.
+flag, the `--help` line, its entry in the GUI and web task lists and the
+constructor all come from it.
 
 1. Create the task file in `crates/<platform>/src/tasks/` and register the
    module in that directory's `mod.rs`
@@ -272,9 +290,11 @@ flag, the `--help` line, the menu entry and the constructor all come from it.
 4. Write tests
 5. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
 
-There is nothing to change in `main.rs` or `tui.rs`, and there is no way to add
-a task that the CLI accepts but the menu does not offer — two tests in
-`main.rs` pin that.
+There is nothing to change in `main.rs`, the GUI or the web UI: the task lists are
+built from `Host::tasks()`, so there is no way to add a task that the CLI accepts
+but the GUI and web UI do not offer. Tests in `main.rs` pin that
+(`every_platform_task_is_accepted_by_the_validator`,
+`the_task_table_is_well_formed_for_every_front_end`).
 
 **Keep the flag consistent across platforms.** If Windows spells it
 `--password-policy` / `-p`, Linux does too. A run log from a Linux round should

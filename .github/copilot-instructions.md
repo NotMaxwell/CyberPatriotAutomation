@@ -20,7 +20,8 @@ do not suggest publishing to crates.io — the crates are deliberately marked
 | `crates/core` | README parser, remediation ledger, run log, models, console, the `Task` trait, the platform seam | **Nothing here may name an operating system** |
 | `crates/windows` | Win32 `native/`, `*_ops.rs`, `knowledge.rs`, `chocolatey.rs`, fifteen tasks | Windows only |
 | `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, fifteen tasks | Linux only |
-| `crates/cli` | `main.rs`, `tui.rs` | Names no OS; reads `Host::tasks()` |
+| `crates/cli` | `main.rs`, `web/` (Linux web UI) | Names no OS; reads `Host::tasks()` |
+| `crates/gui` | Windows desktop GUI (eframe/egui) | Windows only; reads `Host::tasks()` |
 
 **Do not suggest `#[cfg(windows)] / #[cfg(unix)]` arms of the same function**
 where a platform crate would do. Two implementations sitting next to each other
@@ -77,11 +78,11 @@ the run log automatically; do not add separate logging calls.
 1. Create the task under `crates/<platform>/src/tasks/`, register it in that
    directory's `mod.rs`
 2. Add one `TaskSpec` row to that crate's `platform.rs` — it supplies the flag,
-   the `--help` line, the menu label and the constructor
+   the `--help` line, the GUI/web label and the constructor
 3. Add tests
 4. Update `README.md`, `docs/ARCHITECTURE.md` and `docs/TASK_ANALYSIS.md`
 
-Nothing changes in `main.rs` or `tui.rs`. Keep the flag spelling identical to the
+Nothing changes in `main.rs`, the GUI or the web UI. Keep the flag spelling identical to the
 other platform's where the concept exists; a test enforces it. If there is no
 counterpart — Group Policy on Linux — leave the row out rather than adding a stub
 that reports success.

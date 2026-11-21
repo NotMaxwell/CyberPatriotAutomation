@@ -38,7 +38,7 @@ is the short version — start there if you only want to run the thing.
   - [5.10 Directives — what this round does differently](#510-directives--what-this-round-does-differently)
 - [6. Native layer](#6-native-layer)
 - [7. Models](#7-models)
-- [8. The interactive menu](#8-the-interactive-menu)
+- [8. The GUI and the web UI](#8-the-gui-and-the-web-ui)
 - [9. Reporting and the run log](#9-reporting-and-the-run-log)
 - [10. Safety design](#10-safety-design)
 - [11. Build, test, publish](#11-build-test-publish)
@@ -71,7 +71,7 @@ Every run is the same five phases.
 ```
   argv  ──▶  ①  Parse and validate flags
              │      unknown flag       → exit 2, nothing runs
-             │      no task named      → help (or the menu), nothing runs
+             │      no task named      → front end (GUI / web UI) or help; nothing runs
              │
              ▼
              ②  Locate and parse the README
@@ -170,6 +170,9 @@ rust/
     │   │   ├── platform.rs        the seam: TaskSpec, Concurrency, Platform
     │   │   ├── task.rs            the Task trait and impl_task_meta!
     │   │   ├── readme_parser.rs   README prose -> ReadmeData
+    │   │   ├── engine.rs          RunPlan in, RunEvent stream out
+    │   │   ├── session.rs         AppState, Action, real_run_gate (GUI and web)
+    │   │   ├── files.rs           directory listing for both file browsers
     │   │   ├── html.rs            HTML structure, via html5ever
     │   │   ├── readme_services.rs "is this service critical?", table as a parameter
     │   │   ├── remediation.rs     prove-and-record wrapper for every change
@@ -200,10 +203,12 @@ rust/
     │       ├── knowledge.rs       sysctl and sshd settings, units, packages
     │       ├── readme_services.rs the unit-name table
     │       └── tasks/
+    ├── gui/                       pinnacle-cypat-gui - the Windows desktop GUI
+    │   └── src/                   app.rs, screens/, theme.rs, backend.rs
     └── cli/                       pinnacle-cypat - the binary
         └── src/
-            ├── main.rs            argument parsing and the run pipeline
-            └── tui.rs             the interactive menu
+            ├── main.rs            argument parsing; bare launch opens a front end
+            └── web/               the Linux web UI: server, api, controller, index.html
 ```
 
 **Why a workspace rather than `#[cfg]` inside one crate.** Two implementations
@@ -233,19 +238,20 @@ pub trait Platform {
 ```
 
 and `TaskSpec` describes one task **once**: its flag, its short flag, its
-`--help` line, its menu label and detail, whether it needs a README, whether it
+`--help` line, its GUI/web label and detail, whether it needs a README, whether it
 may run concurrently, and how to construct it.
 
 That single-row rule closed a known wart. Adding a task used to mean editing a
 flag table in `main.rs`, a registration block a few hundred lines below it, and a
-menu table in `tui.rs` — three places for one fact, free to disagree, and they
-did: a task could reach the CLI without reaching the menu, which made it
+menu table in the old `tui.rs` — three places for one fact, free to disagree, and
+they did: a task could reach the CLI without reaching the menu, which made it
 invisible to anyone who double-clicks `RUN.bat`. That state is now
 unrepresentable, and two tests pin it (`every_platform_task_is_accepted_by_the_validator`,
 `no_task_flag_shadows_a_global_one`).
 
-`main.rs` and `tui.rs` name no operating system. They read `Host::tasks()`, where
-`Host` is selected by one `cfg` at the top of `main.rs`.
+`main.rs` and the web UI name no operating system, and the GUI, which only builds
+for Windows, reads the same table. They read `Host::tasks()`, where `Host` is
+selected by one `cfg` at the top of `main.rs` (and of the GUI's `main.rs`).
 
 ---
 
@@ -1750,81 +1756,129 @@ per-item counts were reported.
 
 ---
 
-## 8. The interactive menu
+## 8. The GUI and the web UI
 
-`rust/crates/cli/src/tui.rs` — `--tui`, `-i`
+A bare launch opens a front end instead of running anything: on Windows,
+`pinnacle-cypat-gui.exe` if it sits next to the CLI exe; on Linux, the web UI when
+there is a desktop session (`DISPLAY`, `WAYLAND_DISPLAY`, or a `sudo` from a user
+whose `/run/user/<uid>/bus` exists — `sudo` strips `DISPLAY`, so that is the usual
+case); otherwise help. See `open_front_end` and `has_desktop_session` in `main.rs`.
+An earlier terminal menu (`--tui`) was removed once both front ends covered what it
+did.
 
-A guided menu for people who would rather not memorise flags. It opens when
-`--tui` is passed, and also on a **bare launch at a real terminal** — which is
-what double-clicking the executable does.
-
-> Redirected streams mean a script or a pipe, where a prompt would block forever
-> waiting for an answer that never comes, so the bare-launch behaviour is gated
-> on both stdin and stdout being a terminal.
-
-**The flow:**
+### 8.1 The shared engine and session
 
 ```
-  banner + version + Administrator check
-      │
-      ▼
-  What would you like to do?
-      ├─ Inspect the README only   (read-only)
-      ├─ Preview every task        (dry run)
-      ├─ Run every task            (applies changes)
-      ├─ Choose individual tasks
-      └─ Quit
-      │
-      ▼
-  Which README?   auto-discover │ type a path or URL │ continue without one
-      │
-      ▼
-  [if choosing]  which tasks, then preview or apply
-      │
-      ▼
-  warn if a chosen task needs the README that was declined
-      │
-      ▼
-  summary table + explicit confirmation   ── declining exits, changing nothing
-      │
-      ▼
-  hand the assembled command line to the normal run pipeline
+  CLI ───────┐
+  GUI ───────┼──▶  engine::run(RunPlan) ──▶ stream of RunEvent ──▶ front end draws it
+  web UI ────┘            │
+                          └─▶ run log (every line recorded as it is emitted)
 ```
 
-**It builds arguments; it does not run tasks.**
+- `pinnacle_core::engine` is the run pipeline of §2 behind an event stream. A
+  `RunPlan` names the README, the tasks, dry run or real, and optionally an edited
+  `ReadmeData`; console output becomes `RunEvent::Line`. The CLI, GUI and web UI
+  are all consumers, so the run log a GUI run writes is the one a CLI run writes.
+  The pipeline used to live in `main.rs` and print straight to the terminal, which
+  left a second front end the choice of duplicating it or scraping stdout.
+- `pinnacle_core::session` holds `AppState`, `Action` and `real_run_gate`. The GUI
+  and the web UI share one state machine and one definition of when a real run is
+  allowed; only the drawing differs.
+- `pinnacle_core::files` lists one directory at a time for both file browsers,
+  folders first, README-like files marked, hidden entries left out. One listing
+  means "which files look like a README" is decided once.
+- `app_config::find_readme_candidates` returns every README found, for the picker.
+- The `serde` feature of core exists for the web UI's JSON and is off for every
+  other build.
 
-> The command line is the single execution path, and every ordering guarantee the
-> run depends on lives there. A menu that drove the tasks directly would be a
-> second copy of that logic, free to drift from the first. It also means the run
-> log's `Command:` line records exactly what a menu-driven run did, so it can be
-> repeated non-interactively.
+Neither front end runs tasks itself, for the same reason the old menu did not: the
+pipeline holds every ordering guarantee the run depends on, and a second copy would
+drift.
 
-**Safety details:**
+### 8.2 The workflow
 
-- The confirmation's **default answer is No for apply and Yes for preview**, so
-  pressing enter without reading can only ever be the harmless choice.
-- Applying prints an explicit warning about deleting files, removing accounts and
-  disabling services.
-- Choosing "continue without a README" names the tasks that will then decline to
-  act, *before* the run starts — otherwise the run reports "No README data
-  provided" part-way through, by which point other tasks have already made
-  changes.
-- Not being Administrator (or root) is reported up front, because the failure
-  mode otherwise is a long run in which every change is denied, which reads as
-  the tool not working. Which privilege that is, and how it is checked, comes
-  from the platform: a machine-policy write probe on Windows, the effective uid
-  on Linux.
+Both front ends follow one sequence:
 
-**Presentation.** Numbered prompts — no raw terminal mode, no extra dependency —
-where entering nothing keeps all tasks selected. The list of tasks, their labels
-and which of them need a README all come from `Host::tasks()` (§3.1), so the
-menu on a Linux build offers the Linux tasks with no code in common beyond the
-prompt itself.
+```
+  README locations   every README found │ type a path │ browse │ continue without
+        │
+        ▼
+  README tab         everything parsed, every field editable;
+        │            edits go in the run log (passwords as a fingerprint only)
+        ▼
+  Run tab            select tasks ─▶ dry run ─▶ real run
+        │                                         ▲
+        │            locked until a dry run of the SAME selection and README has
+        │            finished and was not cancelled; then a confirmation with an
+        │            "I have answered the forensics questions" tick
+        ▼
+  live monitor       per-task status, output, cancel between tasks
+        ▼
+  Results tab        dry/real toggle, stats, comparison, searchable ledger,
+                     copy summary, open the run log
+```
 
-Adding the menu is also what prompted giving `--software-management`,
-`--shared-folders`, `--hosts-file`, `--dns-settings` and `--scheduled-tasks`
-their own flags. They previously ran only under `--all`, so the menu could not
-have offered them individually.
+A sidebar "Do by hand" checklist lists what the README asks for that the tool will
+not do, forensics questions first.
+
+**The real-run gate** (`AppState::real_run_gate`) refuses, with a reason shown
+beside the disabled button, when: the process is not running as the privileged
+role; a run is in progress; there was no dry run, or it has not finished, or it was
+cancelled; the task selection changed since; or the README (including edits)
+changed since. Starting the run additionally requires the confirmation tick. The
+reason: the dry run is the only look the competitor gets at what a real run will
+do, so the real run must be the one that was previewed.
+
+**Editing.** Because the run uses the edited data instead of re-parsing, a bad parse
+can be fixed on screen. The log records that the data was edited and how it
+differs from the parse, so a log still explains its own run.
+
+### 8.3 The Windows GUI
+
+`rust/crates/gui` — `pinnacle-cypat-gui.exe`, a separate binary because the GUI
+subsystem removes the console the CLI needs. eframe/egui 0.37 on the **wgpu**
+renderer (Direct3D 12) with WARP, Windows' software renderer, as the fallback:
+`glow` would get only OpenGL 1.1 on a VM's basic display adapter. Light theme
+(`theme.rs`), system font. The embedded manifest requests Administrator. If UAC is
+off, Windows starts the process elevated without a prompt, so the top-right pill
+shows whether the process is actually elevated.
+
+Layout, dialogs and the carrying out of `Action`s are in `app.rs`. Because a GUI
+nobody can look at is checked by screenshot, the top of `app.rs` documents a set of
+`PINNACLE_GUI_*` environment hooks that drive the app to a given state and save a
+PNG. No hook can start a real run.
+
+### 8.4 The Linux web UI
+
+`--web [--port N]`, in `rust/crates/cli/src/web/`: `server.rs` (HTTP), `api.rs`
+(the JSON contract), `controller.rs` (owns the session and the run),
+`index.html` (the page, embedded with `include_str!`). It is a page and not a
+window because the shipping binary is static musl, which cannot load X11, Wayland
+or GL, and because Ubuntu's Wayland session refuses a window opened by root. The
+server is hand-rolled on tokio's `TcpListener`, so the binary stays static musl
+and gains no framework.
+
+It makes root changes, so the request checks matter more than the routing:
+
+| Guard | What it prevents |
+|---|---|
+| Binds `127.0.0.1` only | anyone off the machine reaching a root-capable port |
+| Random per-run token on every request | any web page in the browser reaching loopback |
+| `Host` header check | DNS rebinding turning a hostile domain into `127.0.0.1` |
+| `Origin` check on POST | a cross-site form post |
+| Content-Security-Policy | script and connections from anywhere but the page's own origin |
+
+Live updates are server-sent events, throttled to a few snapshots a second. The
+server exits on Ctrl+C, on the page's quit, or after 120 seconds with no page
+connected and no run; it never exits mid-run (a quit during one cancels it after
+the current task, and a second Ctrl+C leaves at once).
+
+**The task list.** Both front ends list tasks from `Host::tasks()`. Tasks that need
+a README are flagged when none is loaded, because the failure is otherwise silent:
+the task runs, finds no instructions, and reports success having done nothing.
+`--software-management`, `--shared-folders`, `--hosts-file`, `--dns-settings` and
+`--scheduled-tasks` have their own flags so every task can be chosen individually;
+they previously ran only under `--all`.
 
 ---
 
@@ -1861,7 +1915,7 @@ actually went wrong.
 
 | Guard | What it prevents |
 |---|---|
-| **Bare launch does nothing destructive** | "No task flag" used to mean "run every task", so double-clicking the executable began a full destructive run. It now opens the menu, or prints help. |
+| **Bare launch does nothing destructive** | "No task flag" used to mean "run every task", so double-clicking the executable began a full destructive run. It now opens a front end (the GUI or the web UI), or prints help. |
 | **Unknown arguments are rejected (exit 2)** | Combined with the above, a typo — or `--help`, which was not a flag — started that same run. |
 | **Empty authorised set aborts user deletion** | A README that failed to parse would otherwise delete every account on the image. |
 | **Critical ∩ prohibited = ∅** | Enforced in the parser *and* when the service lists are built. Disabling a scored critical service is the costliest available mistake. |
@@ -1874,7 +1928,7 @@ actually went wrong.
 | **Every generated password is logged** | They are the only way back into the accounts. |
 | **DNS is reported, never changed** | Replacing a resolver can disconnect the machine from the scoring engine. |
 
-**The recommended sequence** — and the order the menu presents:
+**The recommended sequence** — and the order the GUI and web UI present:
 
 ```
 1.  --auto-readme --parse-readme      read-only; confirms the README parsed
