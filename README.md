@@ -527,7 +527,8 @@ The rules that matter:
 cd rust && cargo test --workspace
 ```
 
-The GUI crate builds on Windows only (the web UI is the Linux front end). Start
+The GUI ships for Windows (the web UI is the Linux front end), but the crate also
+builds and runs its tests on Linux for development. Start
 with [docs/CLAUDE.md](docs/CLAUDE.md) and [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ---
