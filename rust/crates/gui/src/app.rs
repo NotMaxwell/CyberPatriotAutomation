@@ -272,7 +272,7 @@ impl<P: Platform + 'static> App<P> {
             ui.label(
                 RichText::new("PinnacleCyPat")
                     .size(18.0)
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::TEXT),
             );
             ui.label(theme::muted(app_config::version_string()).size(12.0));
@@ -316,7 +316,7 @@ impl<P: Platform + 'static> App<P> {
             let text = RichText::new(tab.title())
                 .size(15.0)
                 .color(if selected { theme::ACCENT } else { theme::TEXT })
-                .strong();
+                .family(theme::bold_family());
             let fill = if selected {
                 theme::ACCENT_SOFT
             } else {
@@ -393,7 +393,7 @@ impl<P: Platform + 'static> App<P> {
             .collect();
         let done = self.state.hand_done.iter().filter(|d| **d).count();
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Do by hand").strong());
+            ui.label(RichText::new("Do by hand").family(theme::bold_family()));
             if !items.is_empty() {
                 theme::pill(
                     ui,
@@ -476,7 +476,11 @@ impl<P: Platform + 'static> App<P> {
                     .inner_margin(egui::Margin::symmetric(16, 12))
                     .shadow(ctx.global_style().visuals.popup_shadow)
                     .show(ui, |ui| {
-                        ui.label(RichText::new(&toast.text).color(tone.fg()).strong());
+                        ui.label(
+                            RichText::new(&toast.text)
+                                .color(tone.fg())
+                                .family(theme::bold_family()),
+                        );
                     });
             });
     }

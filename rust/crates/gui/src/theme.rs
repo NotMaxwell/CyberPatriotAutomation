@@ -35,8 +35,94 @@ pub const DANGER_SOFT: Color32 = Color32::from_rgb(0xFC, 0xE8, 0xE8);
 pub const RADIUS: u8 = 10;
 pub const GAP: f32 = 12.0;
 
+/// The family name for the bold face, when one was found.
+pub const BOLD: &str = "bold";
+
+/// Regular and bold UI fonts to try, in order: the platform's own first.
+///
+/// Loaded from the operating system at run time rather than bundled: Segoe UI
+/// may not be redistributed, a bundled pair would add hundreds of kilobytes to
+/// a binary that ships to a competition image, and the system face is what the
+/// rest of the desktop already looks like. egui's built-in font is the
+/// fallback, and has no bold - `strong()` only changes its colour, which is why
+/// titles looked thin without this.
+const FONT_PAIRS: &[(&str, &str)] = &[
+    (
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\seguisb.ttf",
+    ),
+    (
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\segoeuib.ttf",
+    ),
+    (
+        "/usr/share/fonts/opentype/inter/Inter-Regular.otf",
+        "/usr/share/fonts/opentype/inter/Inter-SemiBold.otf",
+    ),
+    (
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-M.ttf",
+    ),
+    (
+        "/usr/share/fonts/opentype/cantarell/Cantarell-Regular.otf",
+        "/usr/share/fonts/opentype/cantarell/Cantarell-Bold.otf",
+    ),
+    (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ),
+];
+
+/// Which pair to load: the first whose two files both exist.
+pub fn pick_fonts(exists: impl Fn(&str) -> bool) -> Option<(&'static str, &'static str)> {
+    FONT_PAIRS
+        .iter()
+        .copied()
+        .find(|(regular, bold)| exists(regular) && exists(bold))
+}
+
+static HAS_BOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn install_fonts(ctx: &egui::Context) -> bool {
+    let Some((regular, bold)) = pick_fonts(|p| std::path::Path::new(p).is_file()) else {
+        return false;
+    };
+    let (Ok(regular), Ok(bold)) = (std::fs::read(regular), std::fs::read(bold)) else {
+        return false;
+    };
+    let mut fonts = egui::FontDefinitions::default();
+    fonts
+        .font_data
+        .insert("ui".into(), egui::FontData::from_owned(regular).into());
+    fonts
+        .font_data
+        .insert("ui-bold".into(), egui::FontData::from_owned(bold).into());
+    // In front of egui's own font, which stays behind as the fallback for any
+    // glyph the system face lacks.
+    let proportional = fonts.families.entry(FontFamily::Proportional).or_default();
+    proportional.insert(0, "ui".into());
+    let mut bold_chain = vec!["ui-bold".to_string()];
+    bold_chain.extend(proportional.iter().cloned());
+    fonts
+        .families
+        .insert(FontFamily::Name(BOLD.into()), bold_chain);
+    ctx.set_fonts(fonts);
+    true
+}
+
+/// The bold face if one was loaded, otherwise the regular one. Use as
+/// `RichText::new(..).family(theme::bold_family())`; `strong()` does not bold.
+pub fn bold_family() -> FontFamily {
+    if HAS_BOLD.load(std::sync::atomic::Ordering::Relaxed) {
+        FontFamily::Name(BOLD.into())
+    } else {
+        FontFamily::Proportional
+    }
+}
+
 /// Install the theme. Call once, at start-up.
 pub fn apply(ctx: &egui::Context) {
+    HAS_BOLD.store(install_fonts(ctx), std::sync::atomic::Ordering::Relaxed);
     ctx.set_theme(egui::Theme::Light);
     ctx.all_styles_mut(|style| {
         style.text_styles = [
@@ -188,7 +274,7 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, tone: Tone) -> egui::Res
                 RichText::new(text.into())
                     .size(12.0)
                     .color(tone.fg())
-                    .strong(),
+                    .family(bold_family()),
             )
         })
         .inner
@@ -196,7 +282,12 @@ pub fn pill(ui: &mut egui::Ui, text: impl Into<String>, tone: Tone) -> egui::Res
 
 /// A card heading with an optional one-line explanation under it.
 pub fn section(ui: &mut egui::Ui, title: &str, subtitle: Option<&str>) {
-    ui.label(RichText::new(title).size(16.5).strong().color(TEXT));
+    ui.label(
+        RichText::new(title)
+            .size(16.5)
+            .family(bold_family())
+            .color(TEXT),
+    );
     if let Some(sub) = subtitle {
         ui.label(RichText::new(sub).size(13.0).color(MUTED));
     }
@@ -205,7 +296,12 @@ pub fn section(ui: &mut egui::Ui, title: &str, subtitle: Option<&str>) {
 
 /// The page title at the top of a tab.
 pub fn page_title(ui: &mut egui::Ui, title: &str, subtitle: &str) {
-    ui.label(RichText::new(title).size(24.0).strong().color(TEXT));
+    ui.label(
+        RichText::new(title)
+            .size(24.0)
+            .family(bold_family())
+            .color(TEXT),
+    );
     ui.label(RichText::new(subtitle).size(13.5).color(MUTED));
     ui.add_space(GAP);
 }
@@ -219,7 +315,7 @@ fn filled(text: &str, fill: Color32) -> egui::Button<'static> {
     egui::Button::new(
         RichText::new(text.to_string())
             .color(Color32::WHITE)
-            .strong(),
+            .family(bold_family()),
     )
     .fill(fill)
     .stroke(Stroke::NONE)
@@ -257,7 +353,7 @@ pub fn stat(ui: &mut egui::Ui, label: &str, value: impl Into<String>, tone: Tone
                 ui.label(
                     RichText::new(value.into())
                         .size(22.0)
-                        .strong()
+                        .family(bold_family())
                         .color(tone.fg()),
                 );
                 ui.label(RichText::new(label).size(12.0).color(MUTED));
@@ -274,6 +370,15 @@ pub fn duration(d: std::time::Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_complete_font_pair_wins_and_none_falls_back() {
+        assert_eq!(pick_fonts(|_| false), None);
+        let pair = pick_fonts(|p| p.contains("dejavu") || p.contains("inter")).unwrap();
+        assert!(pair.0.contains("Inter"), "Inter is preferred over DejaVu");
+        // A regular face without its bold is skipped, not half-loaded.
+        assert_eq!(pick_fonts(|p| p.ends_with("segoeui.ttf")), None);
+    }
 
     #[test]
     fn durations_read_as_minutes_and_seconds() {

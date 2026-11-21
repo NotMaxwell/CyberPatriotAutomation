@@ -64,7 +64,11 @@ pub fn locations_dialog(ui: &mut egui::Ui, state: &mut AppState) -> Option<Actio
     let mut action = None;
     let modal = egui::Modal::new(egui::Id::unique("readme-locations")).show(ui.ctx(), |ui| {
         ui.set_width(560.0);
-        ui.label(RichText::new("Choose the README").size(20.0).strong());
+        ui.label(
+            RichText::new("Choose the README")
+                .size(20.0)
+                .family(theme::bold_family()),
+        );
         ui.label(theme::muted(
             "The round's README says who may be on the machine and what must stay running.",
         ));
@@ -82,7 +86,7 @@ pub fn locations_dialog(ui: &mut egui::Ui, state: &mut AppState) -> Option<Actio
         }
 
         ui.add_space(theme::GAP);
-        ui.label(RichText::new("Or enter a path by hand").strong());
+        ui.label(RichText::new("Or enter a path by hand").family(theme::bold_family()));
         ui.add(
             egui::TextEdit::singleline(&mut state.readme_path)
                 .hint_text("path to a .html, .url or .desktop file")
@@ -124,7 +128,7 @@ fn candidate_list(ui: &mut egui::Ui, state: &mut AppState) {
         theme::callout(ui, Tone::Warning, |ui| {
             ui.label(
                 RichText::new("No README was found")
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::WARNING),
             );
             ui.label(theme::muted(
@@ -177,7 +181,7 @@ fn candidate_card(ui: &mut egui::Ui, index: usize, c: &ReadmeCandidate, current:
             ui.set_width(ui.available_width());
             ui.label(
                 RichText::new(file_name(&c.location))
-                    .strong()
+                    .family(theme::bold_family())
                     .size(15.0)
                     .color(name_colour),
             );
@@ -291,7 +295,11 @@ fn summary_card(ui: &mut egui::Ui, state: &AppState) -> Option<Action> {
     theme::card(ui, |ui| {
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(or_dash(&data.title)).size(18.0).strong());
+                ui.label(
+                    RichText::new(or_dash(&data.title))
+                        .size(18.0)
+                        .family(theme::bold_family()),
+                );
                 ui.label(theme::muted(format!(
                     "{}  |  {}",
                     or_dash(&data.operating_system),
@@ -332,7 +340,7 @@ fn directives_section(ui: &mut egui::Ui, directives: &[Directive]) {
         theme::callout(ui, Tone::Warning, |ui| {
             ui.label(
                 RichText::new(format!("Do these by hand ({})", manual.len()))
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::WARNING),
             );
             ui.label(theme::muted("The tool cannot do these for you."));
@@ -360,20 +368,22 @@ fn directive_group(ui: &mut egui::Ui, title: &str, note: &str, items: &[&Directi
     if items.is_empty() {
         return;
     }
-    egui::CollapsingHeader::new(RichText::new(format!("{title} ({})", items.len())).strong())
-        .id_salt(title)
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.label(theme::muted(note));
-            for d in items {
-                directive_row(ui, d);
-            }
-        });
+    egui::CollapsingHeader::new(
+        RichText::new(format!("{title} ({})", items.len())).family(theme::bold_family()),
+    )
+    .id_salt(title)
+    .default_open(false)
+    .show(ui, |ui| {
+        ui.label(theme::muted(note));
+        for d in items {
+            directive_row(ui, d);
+        }
+    });
 }
 
 fn directive_row(ui: &mut egui::Ui, d: &Directive) {
     ui.add_space(4.0);
-    ui.label(RichText::new(d.subject).strong());
+    ui.label(RichText::new(d.subject).family(theme::bold_family()));
     ui.label(&d.sentence);
     ui.label(
         RichText::new(d.handling.detail())
@@ -459,7 +469,7 @@ fn footer(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
                 ui.label(
                     RichText::new("Edited by hand - the run log records the difference")
                         .color(theme::WARNING)
-                        .strong(),
+                        .family(theme::bold_family()),
                 );
                 if ui
                     .add(theme::secondary_button("Revert to parsed"))
@@ -476,7 +486,7 @@ fn footer(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
         theme::callout(ui, Tone::Danger, |ui| {
             ui.label(
                 RichText::new("The run cannot continue")
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::DANGER),
             );
             ui.label(reason);
