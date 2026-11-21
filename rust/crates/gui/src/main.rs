@@ -14,10 +14,7 @@ mod app;
 mod backend;
 mod screens;
 mod screenshot;
-// The tabs that read most of these are being rebuilt; drop the allows with them.
-#[allow(dead_code)]
 mod state;
-#[allow(dead_code)]
 mod theme;
 
 #[cfg(target_os = "linux")]

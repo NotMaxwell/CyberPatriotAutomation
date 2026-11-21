@@ -20,6 +20,7 @@
 //! | `PINNACLE_GUI_TAB=<readme\|run\|results>` | open that tab once the README is in |
 //! | `PINNACLE_GUI_DRY_RUN=1` | start a dry run once the README is in; capture after it finishes |
 //! | `PINNACLE_GUI_STAY=run` | stay on the Run tab after a run finishes |
+//! | `PINNACLE_GUI_MIDRUN=<seconds>` | with the dry-run hook, capture this long into the run instead of after it |
 //! | `PINNACLE_GUI_SHOW=apply` | after the dry run, open the real-run confirmation (never starts it) |
 //! | `PINNACLE_GUI_SCREENSHOT=<png>` | save a screenshot once the app has settled, then exit |
 //!
@@ -46,6 +47,7 @@ struct Hooks {
     dry_run: bool,
     stay_on_run: bool,
     show_apply: bool,
+    midrun: Option<std::time::Duration>,
     /// The hooked state has been reached; nothing more to drive.
     done: bool,
 }
@@ -63,6 +65,9 @@ impl Hooks {
             dry_run: var("PINNACLE_GUI_DRY_RUN").is_some_and(|v| v == "1"),
             stay_on_run: var("PINNACLE_GUI_STAY").is_some_and(|v| v == "run"),
             show_apply: var("PINNACLE_GUI_SHOW").is_some_and(|v| v == "apply"),
+            midrun: var("PINNACLE_GUI_MIDRUN")
+                .and_then(|v| v.parse().ok())
+                .map(std::time::Duration::from_secs),
             done: false,
         }
     }
@@ -260,6 +265,9 @@ impl<P: Platform + 'static> App<P> {
 
     /// Nothing still in flight: what a screenshot should wait for.
     fn settled(&self) -> bool {
+        if let (Some(after), Some(run)) = (self.hooks.midrun, self.state.active_record()) {
+            return run.elapsed(Instant::now()) >= after;
+        }
         self.discovery.is_none()
             && self.inspection.is_none()
             && self.events.is_none()

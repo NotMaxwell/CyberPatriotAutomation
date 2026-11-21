@@ -190,7 +190,7 @@ fn stepper(ui: &mut egui::Ui, current: usize) {
             );
             let mut t = RichText::new(*label).color(text);
             if n == current {
-                t = t.strong();
+                t = t.family(theme::bold_family());
             }
             ui.label(t);
             if n < STEPS.len() {
@@ -251,7 +251,10 @@ fn task_row(ui: &mut egui::Ui, state: &mut AppState, i: usize) {
     ui.horizontal(|ui| {
         let r = ui
             .add_enabled_ui(blocked.is_none(), |ui| {
-                ui.checkbox(&mut state.selected[i], RichText::new(spec.label).strong())
+                ui.checkbox(
+                    &mut state.selected[i],
+                    RichText::new(spec.label).family(theme::bold_family()),
+                )
             })
             .inner;
         if let Some(reason) = blocked {
@@ -380,7 +383,7 @@ fn monitoring(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
             ui.label(
                 RichText::new(run.kind.title())
                     .size(20.0)
-                    .strong()
+                    .family(theme::bold_family())
                     .color(tone.fg()),
             );
             theme::pill(ui, theme::duration(run.elapsed(now)), Tone::Neutral);
@@ -422,7 +425,9 @@ fn monitoring(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
         }
         if !alongside.is_empty() {
             ui.add_space(6.0);
-            ui.label(RichText::new("Independent audits (run alongside)").strong());
+            ui.label(
+                RichText::new("Independent audits (run alongside)").family(theme::bold_family()),
+            );
             for row in alongside {
                 task_status_row(ui, row, now);
             }
@@ -431,9 +436,13 @@ fn monitoring(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
     ui.add_space(theme::GAP);
 
     theme::card(ui, |ui| {
-        egui::CollapsingHeader::new(RichText::new("Live output").size(16.5).strong())
-            .default_open(true)
-            .show(ui, |ui| output_view(ui, &run.output));
+        egui::CollapsingHeader::new(
+            RichText::new("Live output")
+                .size(16.5)
+                .family(theme::bold_family()),
+        )
+        .default_open(true)
+        .show(ui, |ui| output_view(ui, &run.output));
     });
     ui.add_space(theme::GAP);
     action
@@ -452,7 +461,7 @@ fn task_status_row(ui: &mut egui::Ui, row: &TaskRow, now: Instant) {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 1.0;
             ui.horizontal(|ui| {
-                ui.label(RichText::new(&row.name).strong());
+                ui.label(RichText::new(&row.name).family(theme::bold_family()));
                 if let Some(t) = row.time(now) {
                     ui.label(theme::muted(theme::duration(t)));
                 }
@@ -490,7 +499,7 @@ fn output_view(ui: &mut egui::Ui, lines: &[OutputLine]) {
                             }
                             OutputLine::Section(t) => {
                                 ui.add_space(4.0);
-                                ui.label(RichText::new(t).monospace().strong());
+                                ui.label(RichText::new(t).monospace().family(theme::bold_family()));
                             }
                         }
                     }
@@ -517,7 +526,7 @@ pub fn apply_dialog(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
             ui.label(
                 RichText::new("Run for real?")
                     .size(20.0)
-                    .strong()
+                    .family(theme::bold_family())
                     .color(theme::DANGER),
             );
             ui.add_space(6.0);
@@ -531,7 +540,7 @@ pub fn apply_dialog(ui: &mut egui::Ui, state: &mut AppState) -> Option<Action> {
                 );
             });
             ui.add_space(8.0);
-            ui.label(RichText::new("Tasks that will run").strong());
+            ui.label(RichText::new("Tasks that will run").family(theme::bold_family()));
             let names: Vec<&str> = state.selected_specs().iter().map(|s| s.label).collect();
             egui::ScrollArea::vertical()
                 .max_height(110.0)
