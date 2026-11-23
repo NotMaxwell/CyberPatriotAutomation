@@ -8,6 +8,7 @@ use pinnacle_core::Task;
 use pinnacle_core::command;
 use pinnacle_core::impl_task_meta;
 use pinnacle_core::models::{ReadmeData, SoftwareRequirement, SystemInfo, TaskResult};
+use pinnacle_core::remediation;
 use pinnacle_core::run_log;
 use pinnacle_core::software_matching;
 use pinnacle_core::ui;
@@ -46,6 +47,233 @@ pub fn package_id_for(requirement: &SoftwareRequirement) -> String {
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '.')
         .collect()
+}
+
+/// Top-level `Program Files` folders that are never prohibited software, whatever
+/// a prohibited term happens to match. Matched case-insensitively; an entry ending
+/// in `*` is a prefix.
+const PROTECTED_FOLDERS: &[&str] = &[
+    "windows*",
+    "common files",
+    "microsoft*",
+    "cyberpatriot*",
+    "pinnacle*",
+    "internet explorer",
+    "reference assemblies",
+    "msbuild",
+    "dotnet",
+    "uninstall information",
+    "modifiablewindowsapps",
+];
+
+fn is_protected_folder(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    PROTECTED_FOLDERS.iter().any(|p| match p.strip_suffix('*') {
+        Some(prefix) => lower.starts_with(prefix),
+        None => lower == *p,
+    })
+}
+
+/// The prohibited terms that matched nothing in the uninstall registry, which
+/// are the ones a folder or shortcut hunt is for. A term that did match is
+/// handled by its uninstaller.
+pub fn terms_without_entries(prohibited: &[String], installed_names: &[String]) -> Vec<String> {
+    prohibited
+        .iter()
+        .filter(|term| {
+            !installed_names
+                .iter()
+                .any(|name| software_matching::matches(name, term))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Of `names`, those that name prohibited software and not README-required
+/// software. The shared decision behind folders and shortcuts.
+fn name_candidates(
+    prohibited: &[String],
+    names: &[String],
+    required: &[String],
+    protect_system_folders: bool,
+) -> Vec<String> {
+    names
+        .iter()
+        .filter(|name| {
+            !(protect_system_folders && is_protected_folder(name))
+                && prohibited
+                    .iter()
+                    .any(|term| software_matching::matches(name, term))
+                && !required
+                    .iter()
+                    .any(|req| software_matching::matches(name, req))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Top-level Program Files folder names to delete.
+///
+/// A program copied in by hand, or whose uninstaller was run but left its
+/// folder, has no uninstall entry for the registry pass to find - yet a scorer
+/// that looks for the folder still sees it. System folders and anything the
+/// README requires are never candidates, however well their name matches.
+pub fn folder_candidates(
+    prohibited: &[String],
+    dir_names: &[String],
+    required: &[String],
+) -> Vec<String> {
+    name_candidates(prohibited, dir_names, required, true)
+}
+
+/// Shortcut names (without `.lnk`) that point at prohibited software.
+pub fn shortcut_candidates(
+    prohibited: &[String],
+    shortcut_names: &[String],
+    required: &[String],
+) -> Vec<String> {
+    name_candidates(prohibited, shortcut_names, required, false)
+}
+
+/// Delete a folder or file and prove it is gone.
+async fn remove_path_proved(path: std::path::PathBuf, what: &str) -> Result<(), String> {
+    let target = format!("{what} {}", path.display());
+    let reader = path.clone();
+    remediation::apply(
+        &target,
+        "prohibited software has no leftover folder or shortcut",
+        || {
+            let reader = reader.clone();
+            async move { Some(if reader.exists() { "present" } else { "absent" }.to_string()) }
+        },
+        |state| state == "absent",
+        &format!("delete {}", path.display()),
+        || async move {
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path)
+            } else {
+                std::fs::remove_file(&path)
+            }
+            .map_err(|e| e.to_string())
+        },
+    )
+    .await
+}
+
+/// Immediate subdirectories of `root`, as (name, path).
+fn subdirectories(root: &std::path::Path) -> Vec<(String, std::path::PathBuf)> {
+    std::fs::read_dir(root)
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .map(|e| (e.file_name().to_string_lossy().into_owned(), e.path()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Every `.lnk` under `dir`, descending into subfolders when `recurse`.
+fn collect_shortcuts(dir: &std::path::Path, recurse: bool, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if recurse {
+                collect_shortcuts(&path, true, out);
+            }
+        } else if path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("lnk"))
+        {
+            out.push(path);
+        }
+    }
+}
+
+/// The folders where programs are installed by hand.
+fn program_roots() -> Vec<std::path::PathBuf> {
+    [
+        ("ProgramFiles", r"C:\Program Files"),
+        ("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ]
+    .iter()
+    .map(|(var, default)| {
+        std::path::PathBuf::from(std::env::var(var).unwrap_or_else(|_| (*default).to_string()))
+    })
+    .collect()
+}
+
+/// Where a shortcut to installed software would sit; the flag is "recurse".
+fn shortcut_locations() -> Vec<(std::path::PathBuf, bool)> {
+    let mut places = vec![(std::path::PathBuf::from(r"C:\Users\Public\Desktop"), false)];
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into());
+    places.push((
+        std::path::PathBuf::from(program_data).join(r"Microsoft\Windows\Start Menu\Programs"),
+        true,
+    ));
+    for (_, user) in subdirectories(std::path::Path::new(r"C:\Users")) {
+        places.push((user.join("Desktop"), false));
+        places.push((
+            user.join(r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs"),
+            true,
+        ));
+    }
+    places
+}
+
+/// Delete leftover folders and shortcuts for prohibited terms that have no
+/// uninstall entry. Returns the failures; successes are in the remediation ledger.
+async fn remove_leftovers(
+    terms: &[String],
+    required: &[String],
+    details: &mut Vec<String>,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    if terms.is_empty() {
+        return failures;
+    }
+    let mut removed: Vec<String> = Vec::new();
+
+    for root in program_roots() {
+        let dirs = subdirectories(&root);
+        let names: Vec<String> = dirs.iter().map(|(n, _)| n.clone()).collect();
+        let hits = folder_candidates(terms, &names, required);
+        for (name, path) in dirs.into_iter().filter(|(n, _)| hits.contains(n)) {
+            match remove_path_proved(path, "folder").await {
+                Ok(()) => removed.push(name),
+                Err(e) => failures.push(format!("folder {name}: {e}")),
+            }
+        }
+    }
+
+    for (dir, recurse) in shortcut_locations() {
+        let mut links = Vec::new();
+        collect_shortcuts(&dir, recurse, &mut links);
+        for link in links {
+            let stem = link
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if shortcut_candidates(terms, std::slice::from_ref(&stem), required).is_empty() {
+                continue;
+            }
+            match remove_path_proved(link, "shortcut").await {
+                Ok(()) => removed.push(format!("{stem}.lnk")),
+                Err(e) => failures.push(format!("shortcut {stem}: {e}")),
+            }
+        }
+    }
+
+    if !removed.is_empty() {
+        details.push(format!(
+            "Removed leftover folders and shortcuts: {}",
+            removed.join(", ")
+        ));
+    }
+    failures
 }
 
 pub struct SoftwareManagementTask {
@@ -538,6 +766,25 @@ impl Task for SoftwareManagementTask {
                 ));
             }
         }
+        // Folder-only and shortcut-only installs have no uninstall entry, so the
+        // pass above never saw them. Only terms that matched nothing are hunted.
+        {
+            let installed_names: Vec<String> = installed.iter().map(|i| i.name.clone()).collect();
+            let terms = terms_without_entries(&self.prohibited_software, &installed_names);
+            let required: Vec<String> = self
+                .required_software
+                .iter()
+                .map(|r| r.name.clone())
+                .collect();
+            let failures = remove_leftovers(&terms, &required, &mut details).await;
+            for failure in &failures {
+                ui::markup_line(&format!(
+                    "[red]✗ Could not remove leftover {}[/]",
+                    ui::escape(failure)
+                ));
+            }
+            removal_failures.extend(failures);
+        }
         // Install required software through Chocolatey, bootstrapping it if
         // absent. The port used to print "manual install may be needed" and
         // stop there, so a README's required software was never installed.
@@ -909,5 +1156,100 @@ mod tests {
         assert!(!task.prohibited_software.iter().any(|p| p == "Python"));
         assert!(task.prohibited_software.iter().any(|p| p == "CCleaner"));
         assert!(task.prohibited_software.iter().any(|p| p == "Jellyfin"));
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn the_new_default_prohibitions_are_listed() {
+        for name in ["BitTorrent", "uTorrent", "Burp Suite", "Nmap", "Wireshark"] {
+            assert!(ALWAYS_PROHIBITED.contains(&name), "{name}");
+        }
+    }
+
+    /// The Windows 11 key penalises removing Wireshark, so a README that requires
+    /// it must keep it while Nmap and the rest stay prohibited.
+    #[test]
+    fn a_readme_requiring_wireshark_keeps_it() {
+        let mut task = SoftwareManagementTask::new();
+        task.required_software.clear();
+        task.prohibited_software.clear();
+        task.required_software.push(requirement("Wireshark"));
+        task.apply_default_prohibitions();
+
+        assert!(!task.prohibited_software.iter().any(|p| p == "Wireshark"));
+        assert!(task.prohibited_software.iter().any(|p| p == "Nmap"));
+        assert!(task.prohibited_software.iter().any(|p| p == "uTorrent"));
+    }
+
+    #[test]
+    fn leftover_folders_are_found_by_name() {
+        let prohibited = strings(&["Jellyfin", "Nmap", "Burp Suite"]);
+        let dirs = strings(&[
+            "Jellyfin",
+            "Nmap",
+            "Burp Suite Community Edition",
+            "Mozilla Firefox",
+            "Common Files",
+        ]);
+        assert_eq!(
+            folder_candidates(&prohibited, &dirs, &[]),
+            strings(&["Jellyfin", "Nmap", "Burp Suite Community Edition"])
+        );
+    }
+
+    #[test]
+    fn a_required_wireshark_folder_is_never_a_candidate() {
+        let prohibited = strings(&["Wireshark", "Nmap"]);
+        let dirs = strings(&["Wireshark", "Nmap"]);
+        let required = strings(&["Wireshark"]);
+        assert_eq!(
+            folder_candidates(&prohibited, &dirs, &required),
+            strings(&["Nmap"])
+        );
+    }
+
+    /// A broad term must not reach into Windows' own folders.
+    #[test]
+    fn system_folders_are_never_candidates() {
+        let prohibited = strings(&["Windows", "Microsoft", "Python", "Defender", "Common"]);
+        let dirs = strings(&[
+            "Windows",
+            "Windows Defender",
+            "Windows NT",
+            "WindowsApps",
+            "Common Files",
+            "Microsoft Office",
+            "Microsoft.NET",
+            "CyberPatriot",
+            "Python311",
+        ]);
+        assert_eq!(
+            folder_candidates(&prohibited, &dirs, &[]),
+            strings(&["Python311"])
+        );
+    }
+
+    #[test]
+    fn shortcuts_follow_the_same_rules_without_the_folder_deny_list() {
+        let prohibited = strings(&["Wireshark", "Nmap"]);
+        let names = strings(&["Nmap - Zenmap GUI", "Wireshark", "Notepad"]);
+        let required = strings(&["Wireshark"]);
+        assert_eq!(
+            shortcut_candidates(&prohibited, &names, &required),
+            strings(&["Nmap - Zenmap GUI"])
+        );
+    }
+
+    #[test]
+    fn only_terms_with_no_uninstall_entry_are_hunted_for_leftovers() {
+        let prohibited = strings(&["Nmap", "Jellyfin"]);
+        let installed = strings(&["Nmap 7.94", "Notepad++ (64-bit x64)"]);
+        assert_eq!(
+            terms_without_entries(&prohibited, &installed),
+            strings(&["Jellyfin"])
+        );
     }
 }
