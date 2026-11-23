@@ -668,7 +668,6 @@ fn penalty_01_vsftpd_is_never_masked_or_purged() {
 /// **Penalty 1, other spellings.** The key's own word is "VSFTP"; a README that
 /// says "VSFTP" or "FTP" must protect the service as well.
 #[test]
-#[ignore = "BUG: \"VSFTP\" (the key's own spelling) is not in SERVICE_NAME_MAP, so a README calling it critical does not protect vsftpd.service"]
 fn penalty_01_every_readme_spelling_of_vsftpd_protects_it() {
     for spelling in ["vsftpd", "FTP", "VSFTP", "VSFTPD"] {
         let data = ReadmeData {

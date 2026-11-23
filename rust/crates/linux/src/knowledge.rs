@@ -983,6 +983,10 @@ pub const SERVICE_NAME_MAP: &[(&str, &str)] = &[
     ("Printing", "cups.service"),
     ("FTP", "vsftpd.service"),
     ("vsftpd", "vsftpd.service"),
+    // The Mint 21 Training Round 2 key calls it "VSFTP". Without this a README
+    // naming that service as critical would not protect it, and it would be
+    // masked: a -5 penalty.
+    ("VSFTP", "vsftpd.service"),
     ("Telnet", "telnet.socket"),
     ("NFS", "nfs-server.service"),
     ("DNS", "bind9.service"),
@@ -1024,6 +1028,7 @@ pub const PACKAGE_IDS: &[(&str, &str)] = &[
     ("PostgreSQL", "postgresql"),
     ("Samba", "samba"),
     ("vsftpd", "vsftpd"),
+    ("VSFTP", "vsftpd"),
     ("Python", "python3"),
     ("Python3", "python3"),
     ("X2Go", "x2goserver"),

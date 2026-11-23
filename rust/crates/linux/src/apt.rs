@@ -172,7 +172,7 @@ pub async fn purge(package: &str, why: &str) -> Result<(), String> {
 pub async fn upgradable() -> Vec<(String, String, String)> {
     let (_code, out, _e) = command::execute_for_exit_code_with_env(
         "apt-get",
-        Some("--just-print upgrade"),
+        Some("--just-print --with-new-pkgs upgrade"),
         NONINTERACTIVE,
         PACKAGE_TIMEOUT,
     )
@@ -218,7 +218,12 @@ pub fn parse_simulated_upgrade(output: &str) -> Vec<(String, String, String)> {
 /// give better attribution but costs a full dependency resolution per package,
 /// and apt is far better than this tool at ordering the work.
 pub async fn upgrade_all() -> Result<(), String> {
-    let (ok, _o, e) = apt("upgrade").await;
+    // `--with-new-pkgs`: a plain `upgrade` holds back any package whose new
+    // version needs a dependency that is not installed yet, so that package is
+    // silently left out of date. This installs the new dependencies, but unlike
+    // `full-upgrade` it never removes a package, so it cannot take required
+    // software with it.
+    let (ok, _o, e) = apt("--with-new-pkgs upgrade").await;
     if ok {
         Ok(())
     } else {
