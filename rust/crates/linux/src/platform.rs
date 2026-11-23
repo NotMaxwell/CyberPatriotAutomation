@@ -166,6 +166,17 @@ const TASKS: &[TaskSpec] = &[
         build: with_readme!(SoftwareUpdateTask),
     },
     TaskSpec {
+        flag: "--backdoors",
+        short: "",
+        help: "Kill and remove unpackaged network listeners (nc, rogue scripts)",
+        label: "Backdoor Listeners",
+        detail: "kills listeners, deletes their scripts, disables cron",
+        needs_readme: false,
+        // Sequential: it kills processes and edits cron files other tasks read.
+        concurrency: Sequential,
+        build: with_readme!(BackdoorListenersTask),
+    },
+    TaskSpec {
         flag: "--software-management",
         short: "",
         help: "Purge prohibited packages, install required ones",
