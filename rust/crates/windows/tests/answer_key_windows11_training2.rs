@@ -17,20 +17,16 @@
 //!
 //! Windows tests compile and run on Linux, so nothing here is Windows-only.
 //!
-//! ## What can and cannot be reached from here
+//! ## What is a real decision test and what is a task-row pin
 //!
-//! The Windows crate keeps its task modules private (`mod password_policy;`
-//! and so on in `tasks/mod.rs`), so the pure decision functions
-//! (`lockout_threshold_compliant`, `allowed_shares`, `harden_httpd_conf`,
-//! `folder_candidates`, `compare_versions`, the media patterns) are not
-//! callable from an integration test. Their in-module unit tests cover them.
-//! This file tests everything that *is* public - the `knowledge` tables, the
-//! password standards, `readme_services`, `software_matching`, the choco parser
-//! and the platform's task table - and each item whose deciding function is
-//! private is pinned at the closest public point (its task row) and listed in
-//! [`PRIVATE_DECISION`] with the function that actually decides it. Making
-//! those modules `pub` (as `crates/linux/src/tasks/mod.rs` does) is all it
-//! takes to turn the pins into real decision tests.
+//! The task modules are `pub`, so the deciding functions are called directly:
+//! `lockout_threshold_compliant`, `harden_httpd_conf`, `folder_candidates`,
+//! `shortcut_candidates`, `location_shift`, the version and choco helpers, the
+//! media task's `is_prohibited_file`, plus the `knowledge` tables and
+//! `readme_services`. The exceptions, pinned at the task row and listed in
+//! [`PRIVATE_DECISION`], are the decisions that live inside `execute()` or in
+//! async methods that also change the machine (the authorised-account diff, the
+//! Guest and password-expiry steps, SMB signing and firewall profiles).
 
 use pinnacle_core::Task;
 use pinnacle_core::models::{
@@ -41,7 +37,11 @@ use pinnacle_core::software_matching::{matches, resolve_package_id};
 use pinnacle_windows::Windows;
 use pinnacle_windows::knowledge::{ALWAYS_PROHIBITED, PACKAGE_IDS, REGISTRY_SETTINGS};
 use pinnacle_windows::readme_services;
-use pinnacle_windows::tasks::parse_choco_outdated;
+use pinnacle_windows::tasks::prohibited_media::{FoundFile, ProhibitedMediaTask};
+use pinnacle_windows::tasks::software_update::InstalledApp;
+use pinnacle_windows::tasks::{
+    parse_choco_outdated, password_policy, security_hardening, software_management, software_update,
+};
 
 // =============================================================================
 // The synthetic README and its helpers
@@ -115,6 +115,52 @@ fn registry_value(path: &str, name: &str) -> Option<&'static str> {
 const POLICIES_SYSTEM: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 const WINRM: &str = r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM";
 const TERMINAL_SERVER: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+fn app(name: &str, version: &str) -> InstalledApp {
+    InstalledApp {
+        name: name.to_string(),
+        version: version.to_string(),
+        publisher: String::new(),
+    }
+}
+
+/// The prohibited terms in force for this README: the defaults minus anything
+/// it requires (so Wireshark is not among them).
+fn prohibited_terms() -> Vec<String> {
+    software_update::prohibited_terms(Some(&readme()))
+}
+
+fn required_terms() -> Vec<String> {
+    readme()
+        .required_software
+        .iter()
+        .map(|r| r.name.clone())
+        .collect()
+}
+
+fn task_with_readme() -> ProhibitedMediaTask {
+    let mut task = ProhibitedMediaTask::new();
+    task.set_readme_data(readme());
+    task
+}
+
+fn found(directory: &str, name: &str) -> FoundFile {
+    FoundFile {
+        full_name: std::path::PathBuf::from(format!(r"{directory}\{name}")),
+        name: name.to_string(),
+        extension: std::path::Path::new(name)
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default(),
+        length: 1 << 20,
+        last_write_time: None,
+        directory_name: Some(directory.to_string()),
+    }
+}
 
 fn prohibited_by_default(display_name: &str) -> bool {
     ALWAYS_PROHIBITED
@@ -291,8 +337,9 @@ fn item_17_remote_desktop_is_denied_when_the_readme_does_not_need_it() {
 
 /// **18) Notepad++ has been updated.** The installed app is named
 /// `Notepad++ (64-bit x64)`; it must resolve to the installer package (so the
-/// upgrade runs the vendor installer and keeps the default location), and a
-/// `choco outdated` line for that id must be read as an update.
+/// upgrade runs the vendor installer and keeps the default location), a
+/// `choco outdated` line for that id is an update, and an old installed version
+/// is read as older than the latest.
 #[test]
 fn item_18_notepad_plus_plus_is_updated_by_its_installer_package() {
     assert_eq!(
@@ -302,10 +349,21 @@ fn item_18_notepad_plus_plus_is_updated_by_its_installer_package() {
     let updates = parse_choco_outdated("notepadplusplus.install|8.5.0|8.7.1|false\n");
     assert_eq!(updates.len(), 1);
     assert_eq!(updates[0].id, "notepadplusplus.install");
-    assert!(!task_row("--software-updates").needs_readme);
+    assert!(software_update::is_older("8.5", "8.7.1"));
+    assert!(!software_update::is_older("8.7.1", "8.7.1"));
+    // An app Chocolatey did not install is still offered for update.
+    let installed = vec![app("Notepad++ (64-bit x64)", "8.5")];
+    let found = software_update::unmanaged_candidates(
+        &installed,
+        &[],
+        &software_update::prohibited_terms(Some(&readme())),
+    );
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, "notepadplusplus.install");
 }
 
-/// **19) Google Chrome has been updated.** As item 18, with `googlechrome`.
+/// **19) Google Chrome has been updated.** As item 18, with `googlechrome`; the
+/// key reinstalls Chrome, so an app Chocolatey did not install must be offered.
 #[test]
 fn item_19_chrome_is_updated_by_its_installer_package() {
     assert_eq!(
@@ -314,75 +372,130 @@ fn item_19_chrome_is_updated_by_its_installer_package() {
     );
     let updates = parse_choco_outdated("googlechrome|120.0.1|126.0.2|false\n");
     assert_eq!(updates[0].id, "googlechrome");
+    assert!(software_update::is_older(
+        "120.0.6099.109",
+        "126.0.6478.127"
+    ));
+    assert_eq!(
+        software_update::parse_choco_search("googlechrome|126.0.6478.127\n", "googlechrome")
+            .as_deref(),
+        Some("126.0.6478.127")
+    );
+    let found = software_update::unmanaged_candidates(
+        &[app("Google Chrome", "120.0.6099.109")],
+        &[],
+        &software_update::prohibited_terms(Some(&readme())),
+    );
+    assert_eq!(found[0].id, "googlechrome");
 }
 
 /// **20) Removed shellshock exploit script.** `shellshock-exploit.py` in a
-/// user's Downloads. The file patterns (`exploit` is one) and the media task's
-/// file scan are private to `tasks/prohibited_media.rs`; pinned at the task row.
+/// user's Downloads: the `exploit` file pattern flags it. An unrelated file
+/// beside it is left alone.
 #[test]
-fn item_20_shellshock_script_is_handled_by_the_media_scan() {
-    let row = task_row("--media-scan");
-    assert!(!row.label.is_empty());
-    assert!(!build("--media-scan").name().is_empty());
+fn item_20_shellshock_script_is_flagged_by_the_media_scan() {
+    let task = task_with_readme();
+    assert!(task.is_prohibited_file(&found(
+        r"C:\Users\ealderson\Downloads",
+        "shellshock-exploit.py"
+    )));
+    assert!(!task.is_prohibited_file(&found(r"C:\Users\ealderson\Downloads", "notes.txt")));
 }
 
 /// **21) Remove Jellyfin Media Player.** A folder in `C:\Program Files` with
-/// nothing in the uninstall registry. Jellyfin is prohibited by default, the
-/// installed name and the bare folder name both match the term, and the
-/// folder-deleting decision (`folder_candidates`) is private.
+/// nothing in the uninstall registry: `folder_candidates` selects it, and never
+/// a system folder.
 #[test]
 fn item_21_jellyfin_is_prohibited_by_name_and_by_folder() {
     assert!(prohibited_by_default("Jellyfin Media Player"));
-    assert!(
-        prohibited_by_default("Jellyfin"),
-        "the Program Files folder name"
+    let dirs = strings(&["Jellyfin", "Common Files", "Windows Defender", "7-Zip"]);
+    assert_eq!(
+        software_management::folder_candidates(&prohibited_terms(), &dirs, &required_terms()),
+        ["Jellyfin"]
     );
-    assert!(!required_by_readme("Jellyfin"));
+    // The registry pass misses it, so the folder hunt is for exactly this term.
+    assert_eq!(
+        software_management::terms_without_entries(
+            &strings(&["Jellyfin"]),
+            &strings(&["Google Chrome", "7-Zip 24.08 (x64)"])
+        ),
+        ["Jellyfin"]
+    );
 }
 
-/// **22) Remove Burp Suite Community Edition.** A desktop shortcut, no
-/// registry entry; the shortcut name must match the prohibited term.
+/// **22) Remove Burp Suite Community Edition.** A desktop shortcut and no
+/// registry entry: `shortcut_candidates` selects the shortcut.
 #[test]
 fn item_22_burp_suite_is_prohibited_by_name_and_by_shortcut() {
     assert!(prohibited_by_default("Burp Suite Community Edition"));
-    assert!(!required_by_readme("Burp Suite Community Edition"));
+    let shortcuts = strings(&["Burp Suite Community Edition", "Google Chrome", "Notepad++"]);
+    assert_eq!(
+        software_management::shortcut_candidates(
+            &prohibited_terms(),
+            &shortcuts,
+            &required_terms()
+        ),
+        ["Burp Suite Community Edition"]
+    );
 }
 
 /// **23) Remove Python3.** A desktop shortcut named `Python 313 (64-bit)`.
 #[test]
 fn item_23_python_is_prohibited_by_name_and_by_shortcut() {
     assert!(prohibited_by_default("Python 3.13.0 (64-bit)"));
-    assert!(prohibited_by_default("Python 313 (64-bit)"));
-    assert!(!required_by_readme("Python 313 (64-bit)"));
+    let shortcuts = strings(&["Python 313 (64-bit)", "Google Chrome"]);
+    assert_eq!(
+        software_management::shortcut_candidates(
+            &prohibited_terms(),
+            &shortcuts,
+            &required_terms()
+        ),
+        ["Python 313 (64-bit)"]
+    );
 }
 
 /// **24) Remove Nmap.** A folder in `C:\Program Files (x86)`.
 #[test]
 fn item_24_nmap_is_prohibited_by_name_and_by_folder() {
-    assert!(prohibited_by_default("Nmap"));
     assert!(prohibited_by_default("Nmap 7.94"));
-    assert!(!required_by_readme("Nmap"));
+    let dirs = strings(&["Nmap", "Microsoft", "Notepad++"]);
+    assert_eq!(
+        software_management::folder_candidates(&prohibited_terms(), &dirs, &required_terms()),
+        ["Nmap"]
+    );
 }
 
-/// **25) Disable Apache server signature.** `ServerSignature Off` in
-/// `C:\Apache24\conf\httpd.conf`. The rewrite (`harden_httpd_conf`) is private
-/// to `tasks/security_hardening.rs`; pinned at the task row.
+/// **25) Disable Apache server signature.** `ServerSignature On` on line 61 of
+/// `C:\Apache24\conf\httpd.conf` becomes `Off`; `ServerTokens` is added, a
+/// commented line is left alone, and a second pass changes nothing.
 #[test]
-fn item_25_apache_signature_is_handled_by_security_hardening() {
-    let row = task_row("--security-hardening");
-    assert!(!row.label.is_empty());
-    assert!(!build("--security-hardening").name().is_empty());
+fn item_25_apache_server_signature_is_turned_off() {
+    let conf = "Listen 80\r\n# ServerSignature On\r\nServerSignature On\r\n";
+    let fixed = security_hardening::harden_httpd_conf(conf);
+    assert!(fixed.contains("\r\nServerSignature Off\r\n"), "{fixed:?}");
+    assert!(!fixed.contains("\r\nServerSignature On"));
+    assert!(fixed.contains("# ServerSignature On"), "comments are kept");
+    assert!(fixed.contains("ServerTokens Prod"));
+    assert_eq!(security_hardening::harden_httpd_conf(&fixed), fixed);
 }
 
 // =============================================================================
 // Penalties - things the tool must NOT do
 // =============================================================================
 
-/// **Penalty 1) Account lockout threshold less than 5 is deprecated.** The
-/// tool's standard threshold is inside the scored 5-50 range. (The 1-4 rule
-/// itself, `lockout_threshold_compliant`, is private; its unit tests pin it.)
+/// **Penalty 1) Account lockout threshold less than 5 is deprecated.** 1-4 is
+/// the penalty and 0 is lockout off; neither counts as compliant, so the tool
+/// resets them, and the value it sets is within the scored 5-50 range.
 #[test]
-fn penalty_01_the_lockout_threshold_the_tool_sets_is_within_five_to_fifty() {
+fn penalty_01_a_lockout_threshold_below_five_is_not_left_in_place() {
+    for threshold in 0..=4 {
+        assert!(
+            !password_policy::lockout_threshold_compliant(threshold),
+            "{threshold}"
+        );
+    }
+    assert!(password_policy::lockout_threshold_compliant(5));
+    assert!(!password_policy::lockout_threshold_compliant(60));
     assert!((5..=50).contains(&PasswordPolicyStandards::LOCKOUT_THRESHOLD));
 }
 
@@ -407,6 +520,49 @@ fn penalty_02_to_05_required_software_resolves_to_installer_packages() {
             "{display} is required by the synthetic README"
         );
     }
+}
+
+/// **Penalties 2-5, the other half.** Upgrading must not move the program:
+/// `location_shift` flags an upgrade whose recorded install location changed
+/// (the penalty), and not one that stayed put.
+#[test]
+fn penalty_02_to_05_an_upgrade_that_moves_the_install_is_flagged() {
+    let pair = |name: &str, location: &str| vec![(name.to_string(), location.to_string())];
+    for (before, after, id) in [
+        (
+            pair("7-Zip 24.08 (x64)", r"C:\Program Files\7-Zip\"),
+            pair("7-Zip 25.01 (x64)", r"C:\ProgramData\chocolatey\lib\7zip"),
+            "7zip.install",
+        ),
+        (
+            pair(
+                "Google Chrome",
+                r"C:\Program Files\Google\Chrome\Application",
+            ),
+            pair(
+                "Google Chrome",
+                r"C:\Users\student\AppData\Local\Google\Chrome",
+            ),
+            "googlechrome",
+        ),
+    ] {
+        assert!(
+            software_update::location_shift(&before, &after, id).is_some(),
+            "{id}"
+        );
+    }
+    let before = pair("Wireshark 4.0.3 x64", r"C:\Program Files\Wireshark");
+    let after = pair("Wireshark 4.2.5 x64", r"C:\Program Files\Wireshark\");
+    assert_eq!(
+        software_update::location_shift(&before, &after, "wireshark"),
+        None
+    );
+    let before = pair("Notepad++ (64-bit x64)", r"C:\Program Files\Notepad++");
+    let after = pair("Notepad++ (64-bit x64)", r"C:\Program Files\Notepad++");
+    assert_eq!(
+        software_update::location_shift(&before, &after, "notepadplusplus.install"),
+        None
+    );
 }
 
 /// **Penalty 5, the override.** Wireshark is on the always-prohibited list, so
@@ -478,36 +634,22 @@ const NOT_AUTOMATED: &[(u32, &str)] = &[
     (2, "forensics: decrypt a one-time-pad ciphertext"),
 ];
 
-/// Items (and penalties) whose deciding function is private to the crate, so
-/// the test above pins the closest public point instead. Each entry names the
-/// function that decides. Remove an entry when its module is made public and
-/// the test is upgraded to call it.
+/// Items whose deciding logic is still not a callable pure function: the
+/// authorised-account diff is spread over async methods that also delete
+/// accounts, and the SMB-signing and firewall-profile lists are locals inside
+/// `execute()`. Those are pinned at the task row.
 const PRIVATE_DECISION: &[(&str, &str)] = &[
     ("3", "account_permissions.rs: Guest check inside execute()"),
     (
         "4-8",
-        "user_management.rs: the authorised-set diff inside execute()",
+        "user_management.rs: the authorised-set diff inside async methods",
     ),
     (
         "9",
         "account_permissions.rs: password-expiry loop inside execute()",
     ),
-    ("13", "group_policy.rs: SMB signing constants"),
-    ("16", "firewall.rs: profile list"),
-    (
-        "20",
-        "prohibited_media.rs: HACKING_TOOL_PATTERNS / is_prohibited_file",
-    ),
-    (
-        "21, 22, 23, 24",
-        "software_management.rs: folder_candidates, shortcut_candidates",
-    ),
-    ("25", "security_hardening.rs: harden_httpd_conf"),
-    (
-        "penalty 1",
-        "password_policy.rs: lockout_threshold_compliant",
-    ),
-    ("penalty 2-5", "software_update.rs: location_shift"),
+    ("13", "group_policy.rs: SMB signing list inside execute()"),
+    ("16", "firewall.rs: profile list inside execute()"),
 ];
 
 #[test]

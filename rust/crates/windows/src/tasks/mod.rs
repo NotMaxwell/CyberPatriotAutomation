@@ -2,23 +2,23 @@
 // PinnacleCyPat - Security task implementations
 // =============================================================================
 
-mod base;
+pub mod base;
 
-mod account_permissions;
-mod audit_policy;
-mod dns_settings_audit;
-mod firewall;
-mod group_policy;
-mod hosts_file_audit;
-mod password_policy;
-mod prohibited_media;
-mod security_hardening;
-mod service_management;
-mod shared_folders_audit;
-mod software_management;
-mod software_update;
-mod suspicious_scheduled_tasks_audit;
-mod user_management;
+pub mod account_permissions;
+pub mod audit_policy;
+pub mod dns_settings_audit;
+pub mod firewall;
+pub mod group_policy;
+pub mod hosts_file_audit;
+pub mod password_policy;
+pub mod prohibited_media;
+pub mod security_hardening;
+pub mod service_management;
+pub mod shared_folders_audit;
+pub mod software_management;
+pub mod software_update;
+pub mod suspicious_scheduled_tasks_audit;
+pub mod user_management;
 
 pub use base::{is_group_member, local_group_members, parse_csv_line, parse_local_group_members};
 

@@ -42,7 +42,7 @@ const BACKUP_SUFFIX: &str = ".pinnacle.bak";
 /// appended. Commented lines are left alone - they are documentation, and
 /// uncommenting one could re-enable something the admin disabled on purpose.
 /// The file's own line ending is kept so a CRLF config does not end up mixed.
-fn harden_httpd_conf(text: &str) -> String {
+pub fn harden_httpd_conf(text: &str) -> String {
     let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut seen = [false; APACHE_DIRECTIVES.len()];
     let mut out = String::with_capacity(text.len() + 64);

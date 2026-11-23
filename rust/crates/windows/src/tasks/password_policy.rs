@@ -15,7 +15,7 @@ const MIN_SCORED_LOCKOUT_THRESHOLD: i32 = 5;
 
 /// Is this lockout threshold acceptable? 0 (disabled) and 1-4 (penalised) are
 /// not; anything above the standard is too lax.
-fn lockout_threshold_compliant(threshold: i32) -> bool {
+pub fn lockout_threshold_compliant(threshold: i32) -> bool {
     (MIN_SCORED_LOCKOUT_THRESHOLD..=PasswordPolicyStandards::LOCKOUT_THRESHOLD).contains(&threshold)
 }
 

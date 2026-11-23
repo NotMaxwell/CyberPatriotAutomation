@@ -101,13 +101,13 @@ const SKIP_DIRECTORIES: &[&str] = &[
     r"AppData\Local\Packages",
 ];
 
-struct FoundFile {
-    full_name: PathBuf,
-    name: String,
-    extension: String,
-    length: u64,
-    last_write_time: Option<SystemTime>,
-    directory_name: Option<String>,
+pub struct FoundFile {
+    pub full_name: PathBuf,
+    pub name: String,
+    pub extension: String,
+    pub length: u64,
+    pub last_write_time: Option<SystemTime>,
+    pub directory_name: Option<String>,
 }
 
 pub struct ProhibitedMediaTask {
@@ -170,7 +170,7 @@ impl ProhibitedMediaTask {
         }
     }
 
-    fn is_prohibited_file(&self, file: &FoundFile) -> bool {
+    pub fn is_prohibited_file(&self, file: &FoundFile) -> bool {
         let file_name = file.name.to_lowercase();
         let extension = file.extension.to_lowercase();
 

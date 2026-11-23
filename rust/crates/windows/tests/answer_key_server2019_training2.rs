@@ -18,18 +18,15 @@
 //!
 //! Windows tests compile and run on Linux, so nothing here is Windows-only.
 //!
-//! ## What can and cannot be reached from here
+//! ## What is a real decision test and what is a task-row pin
 //!
-//! The Windows crate keeps its task modules private, so the pure decision
-//! functions this key exercises (`allowed_shares` and `unauthorized` for the
-//! `greybeard` and `C` shares, `lockout_threshold_compliant`, the service
-//! tables, the file patterns, `location_shift`) cannot be called from an
-//! integration test; their in-module unit tests cover them. This file tests
-//! everything public - the `knowledge` tables, the password standards,
-//! `readme_services`, `software_matching` and the platform's task table - and
-//! pins each other item at its task row, listed in [`PRIVATE_DECISION`] with the
-//! function that decides. Making those modules `pub` is all it takes to turn
-//! the pins into real decision tests.
+//! The task modules are `pub`, so the deciding functions are called directly:
+//! `unauthorized`/`allowed_shares` for the `greybeard` and `C` shares,
+//! `lockout_threshold_compliant`, the service-disable list (SMTP, FTP, and
+//! `TermService` when the README protects it), the audit subcategory table, the
+//! media task's `is_prohibited_file` and `location_shift`. The exceptions,
+//! pinned at the task row and listed in [`PRIVATE_DECISION`], are decisions that
+//! live inside `execute()` or in async methods that also change the machine.
 
 use pinnacle_core::Task;
 use pinnacle_core::models::{
@@ -42,6 +39,11 @@ use pinnacle_windows::knowledge::{
     ALWAYS_PROHIBITED, PACKAGE_IDS, REGISTRY_SETTINGS, REMOTE_DESKTOP_VALUES, SERVICE_NAME_MAP,
 };
 use pinnacle_windows::readme_services;
+use pinnacle_windows::tasks::prohibited_media::{FoundFile, ProhibitedMediaTask};
+use pinnacle_windows::tasks::service_management::ServiceManagementTask;
+use pinnacle_windows::tasks::{
+    audit_policy, password_policy, shared_folders_audit, software_update,
+};
 
 // =============================================================================
 // The synthetic README and its helpers
@@ -98,6 +100,24 @@ fn registry_value(path: &str, name: &str) -> Option<&'static str> {
 const LSA: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Lsa";
 const WINDOWS_UPDATE_AU: &str = r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU";
 const TERMINAL_SERVER: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+fn found(directory: &str, name: &str) -> FoundFile {
+    FoundFile {
+        full_name: std::path::PathBuf::from(format!(r"{directory}\\{name}")),
+        name: name.to_string(),
+        extension: std::path::Path::new(name)
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default(),
+        length: 1 << 20,
+        last_write_time: None,
+        directory_name: Some(directory.to_string()),
+    }
+}
 
 fn prohibited_by_default(display_name: &str) -> bool {
     ALWAYS_PROHIBITED
@@ -206,13 +226,16 @@ fn item_12_anonymous_enumeration_is_refused() {
     assert_eq!(registry_value(LSA, "restrictanonymous"), Some("1"));
 }
 
-/// **13) Audit Security State Change [Success].** Advanced audit policy,
-/// Policy Change / System subcategories; the subcategory list is private to the
-/// Audit Policy task, pinned at its row.
+/// **13) Audit Security State Change [Success].** Advanced audit policy, Policy
+/// Change / System: the subcategory is in the task's table, and the task
+/// is registered.
 #[test]
-fn item_13_audit_policy_task_is_registered() {
-    let row = task_row("--audit-policy");
-    assert!(!row.detail.is_empty());
+fn item_13_security_state_change_is_an_audited_subcategory() {
+    let (_, subs) = audit_policy::AUDIT_CATEGORIES
+        .iter()
+        .find(|(category, _)| *category == "System")
+        .expect("the System category");
+    assert!(subs.contains(&"Security State Change"));
     assert!(!build("--audit-policy").name().is_empty());
 }
 
@@ -234,39 +257,67 @@ fn item_15_windows_update_is_enabled() {
     assert_eq!(registry_value(WINDOWS_UPDATE_AU, "AUOptions"), Some("4"));
 }
 
-/// **16) File share greybeard disabled.** A share outside the allowed set
-/// (`ADMIN$`, `C$`, `IPC$`; plus `NETLOGON`/`SYSVOL` on a domain controller).
-/// The decision (`unauthorized`) is private to `shared_folders_audit.rs`;
-/// pinned at the task row.
+/// **16) File share greybeard disabled.** Not one of `ADMIN$`, `C$`, `IPC$`,
+/// so `unauthorized` selects it - on a domain controller too.
 #[test]
-fn item_16_greybeard_share_is_handled_by_the_shared_folders_audit() {
-    let row = task_row("--shared-folders");
-    assert!(!row.label.is_empty());
-    assert!(!build("--shared-folders").name().is_empty());
+fn item_16_greybeard_share_is_unauthorised() {
+    let found = strings(&["ADMIN$", "C$", "IPC$", "greybeard"]);
+    assert_eq!(
+        shared_folders_audit::unauthorized(&found, false),
+        ["greybeard"]
+    );
+    assert_eq!(
+        shared_folders_audit::unauthorized(&found, true),
+        ["greybeard"]
+    );
+    assert!(!shared_folders_audit::allowed_shares(false).contains(&"greybeard"));
 }
 
-/// **17) File share disabled for C drive.** The share named `C` (not the
-/// administrative `C$`). Same decision, same pin as item 16.
+/// **17) File share disabled for C drive.** The share named `C`, not the
+/// administrative `C$`: the first is unauthorised, the second kept.
 #[test]
-fn item_17_c_share_is_handled_by_the_shared_folders_audit() {
-    assert!(!build("--shared-folders").description().is_empty());
+fn item_17_c_share_is_unauthorised_but_c_dollar_is_kept() {
+    let found = strings(&["ADMIN$", "C$", "IPC$", "C"]);
+    assert_eq!(shared_folders_audit::unauthorized(&found, false), ["C"]);
+    // A domain controller's own shares are not touched.
+    let dc = strings(&["NETLOGON", "SYSVOL", "greybeard"]);
+    assert_eq!(shared_folders_audit::unauthorized(&dc, true), ["greybeard"]);
+    assert_eq!(
+        shared_folders_audit::unauthorized(&dc, false),
+        ["NETLOGON", "SYSVOL", "greybeard"]
+    );
 }
 
 /// **18) Simple Mail Transfer Protocol (SMTP) service has been stopped and
-/// disabled.** `Smtpsvc` is in Service Management's disable list (a private
-/// table); the README does not protect it. Pinned at the task row.
+/// disabled.** `Smtpsvc` is in the disable table, and this README does not
+/// protect it, so the run disables it.
 #[test]
-fn item_18_smtp_is_handled_by_service_management() {
+fn item_18_smtp_is_disabled() {
+    assert!(
+        disabled_services()
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("Smtpsvc"))
+    );
     assert!(!readme_services::is_critical(Some(&readme()), "Smtpsvc"));
-    assert!(!build("--service-management").name().is_empty());
+}
+
+fn disabled_services() -> Vec<String> {
+    let mut task = ServiceManagementTask::new();
+    task.set_readme_data(readme());
+    task.services_to_disable()
 }
 
 /// **19) FTP service has been stopped and disabled.** Microsoft FTP Service is
-/// `ftpsvc`; the README does not call FTP critical, so it is not protected.
+/// `ftpsvc`, in the disable table; the README does not call FTP critical.
 #[test]
-fn item_19_ftp_is_not_protected_by_this_readme() {
+fn item_19_ftp_is_disabled() {
     assert_eq!(readme_services::resolve("FTP"), "ftpsvc");
     assert!(!readme_services::is_critical(Some(&readme()), "ftpsvc"));
+    assert!(
+        disabled_services()
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("ftpsvc"))
+    );
 }
 
 /// **20) Firefox has been updated.** `Mozilla Firefox (x64 en-US)` must resolve
@@ -298,14 +349,16 @@ fn item_22_wireshark_is_prohibited_and_not_spared() {
 }
 
 /// **23) Removed Brutus password cracker archive.**
-/// `C:\Users\Public\Public Downloads\brutus-aet2-darknet.zip`. The file patterns
-/// (`brutus`, `darknet`) are private to `tasks/prohibited_media.rs`; pinned at
-/// the media-scan row, and the name carries nothing this README requires.
+/// `C:\Users\Public\Public Downloads\brutus-aet2-darknet.zip` matches the
+/// `brutus`/`darknet` patterns, and is flagged even though this README
+/// requires Firefox; Firefox's own installer is not.
 #[test]
-fn item_23_brutus_archive_is_handled_by_the_media_scan() {
-    assert!(!task_row("--media-scan").label.is_empty());
-    assert!(!build("--media-scan").name().is_empty());
-    assert!(!required_by_readme("brutus-aet2-darknet.zip"));
+fn item_23_brutus_archive_is_flagged_by_the_media_scan() {
+    let mut task = ProhibitedMediaTask::new();
+    task.set_readme_data(readme());
+    let dir = r"C:\Users\Public\Public Downloads";
+    assert!(task.is_prohibited_file(&found(dir, "brutus-aet2-darknet.zip")));
+    assert!(!task.is_prohibited_file(&found(dir, "Firefox Setup 126.0.exe")));
 }
 
 // =============================================================================
@@ -313,9 +366,17 @@ fn item_23_brutus_archive_is_handled_by_the_media_scan() {
 // =============================================================================
 
 /// **Penalty 1) Account lockout policy less than 5 is deprecated: -4 pts.**
-/// The tool's threshold is within the scored 5-50 range.
+/// 1-4 (and 0) are not compliant, so the tool resets them; the value it sets is
+/// within the scored 5-50 range (the key's own 10 is reset to it, still scored).
 #[test]
-fn penalty_01_the_lockout_threshold_the_tool_sets_is_within_five_to_fifty() {
+fn penalty_01_a_lockout_threshold_below_five_is_not_left_in_place() {
+    for threshold in 0..=4 {
+        assert!(
+            !password_policy::lockout_threshold_compliant(threshold),
+            "{threshold}"
+        );
+    }
+    assert!(password_policy::lockout_threshold_compliant(5));
     assert!((5..=50).contains(&PasswordPolicyStandards::LOCKOUT_THRESHOLD));
 }
 
@@ -343,6 +404,14 @@ fn penalty_02_remote_desktop_is_protected_when_the_readme_requires_it() {
     }
     assert!(readme_services::is_remote_desktop_required(Some(&readme())));
     assert_eq!(readme_services::resolve("Remote Desktop"), "TermService");
+    // The service disable table lists TermService, but the README protects it.
+    use pinnacle_windows::tasks::service_management::SERVICES_TO_DISABLE;
+    assert!(SERVICES_TO_DISABLE.iter().any(|(s, _)| *s == "TermService"));
+    assert!(
+        !disabled_services()
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case("TermService"))
+    );
     // The default the README is overriding exists, so the protection matters.
     assert_eq!(
         registry_value(TERMINAL_SERVER, "fDenyTSConnections"),
@@ -366,6 +435,29 @@ fn penalty_03_firefox_stays_installed_at_its_default_location() {
     assert!(!resolved.contains("portable"));
     assert!(required_by_readme("Mozilla Firefox (x64 en-US)"));
     assert!(!prohibited_by_default("Firefox"));
+    // An upgrade that leaves it where it was is not flagged; one that moves it is.
+    let pair = |location: &str| {
+        vec![(
+            "Mozilla Firefox (x64 en-US)".to_string(),
+            location.to_string(),
+        )]
+    };
+    assert_eq!(
+        software_update::location_shift(
+            &pair(r"C:\Program Files\Mozilla Firefox"),
+            &pair(r"C:\Program Files\Mozilla Firefox"),
+            "firefox"
+        ),
+        None
+    );
+    assert!(
+        software_update::location_shift(
+            &pair(r"C:\Program Files\Mozilla Firefox"),
+            &pair(r"C:\ProgramData\firefox"),
+            "firefox"
+        )
+        .is_some()
+    );
 }
 
 // =============================================================================
@@ -421,31 +513,19 @@ const NOT_AUTOMATED: &[(u32, &str)] = &[
     (2, "forensics: SHA256 of jarlsberg.png"),
 ];
 
-/// Items whose deciding function is private to the crate; each is pinned at the
-/// closest public point. Remove an entry when its module is made public and
-/// the test is upgraded to call the function.
+/// Items whose deciding logic is not a callable pure function (it is inside
+/// `execute()` or async methods that also change the machine); each is pinned
+/// at the task row.
 const PRIVATE_DECISION: &[(&str, &str)] = &[
     (
         "3, 4, 5",
-        "user_management.rs: the authorised-set diff inside execute()",
-    ),
-    ("6", "account_permissions.rs: passwordless-account check"),
-    ("13", "audit_policy.rs: subcategory table"),
-    ("14", "firewall.rs: profile list"),
-    (
-        "16, 17",
-        "shared_folders_audit.rs: allowed_shares, unauthorized",
-    ),
-    ("18", "service_management.rs: SERVICES_TO_DISABLE (Smtpsvc)"),
-    (
-        "23",
-        "prohibited_media.rs: HACKING_TOOL_PATTERNS / is_prohibited_file",
+        "user_management.rs: the authorised-set diff inside async methods",
     ),
     (
-        "penalty 1",
-        "password_policy.rs: lockout_threshold_compliant",
+        "6",
+        "account_permissions.rs: passwordless-account check inside execute()",
     ),
-    ("penalty 3", "software_update.rs: location_shift"),
+    ("14", "firewall.rs: profile list inside execute()"),
 ];
 
 #[test]

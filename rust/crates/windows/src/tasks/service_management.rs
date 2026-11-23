@@ -11,7 +11,7 @@ use pinnacle_core::ui;
 use std::collections::HashSet;
 
 /// Services that should generally be DISABLED for security: (service, description).
-const SERVICES_TO_DISABLE: &[(&str, &str)] = &[
+pub const SERVICES_TO_DISABLE: &[(&str, &str)] = &[
     ("TermService", "Remote Desktop Services"),
     ("SessionEnv", "Remote Desktop Configuration"),
     (
@@ -76,7 +76,7 @@ const SERVICES_TO_DISABLE: &[(&str, &str)] = &[
 ];
 
 /// Services that should generally REMAIN ENABLED for system functionality.
-const CRITICAL_SERVICES: &[(&str, &str)] = &[
+pub const CRITICAL_SERVICES: &[(&str, &str)] = &[
     ("wuauserv", "Windows Update"),
     ("WinDefend", "Windows Defender Antivirus Service"),
     ("SecurityHealthService", "Windows Security Service"),
@@ -179,6 +179,12 @@ impl ServiceManagementTask {
             }
             ui::write_line();
         }
+    }
+
+    /// The services this run would disable, in table order: the disable table
+    /// plus the README's prohibited services, minus every protected service.
+    pub fn services_to_disable(&self) -> Vec<String> {
+        self.build_service_lists().0.iter().cloned().collect()
     }
 
     fn build_service_lists(&self) -> (ServiceSet, ServiceSet, ServiceSet) {

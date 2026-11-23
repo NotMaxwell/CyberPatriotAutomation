@@ -9,7 +9,7 @@ use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::ui;
 
 /// Audit categories with their subcategories.
-const AUDIT_CATEGORIES: &[(&str, &[&str])] = &[
+pub const AUDIT_CATEGORIES: &[(&str, &[&str])] = &[
     (
         "Account Logon",
         &[

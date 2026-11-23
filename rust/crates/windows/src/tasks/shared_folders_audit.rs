@@ -15,7 +15,7 @@ const ALLOWED: &[&str] = &["ADMIN$", "C$", "IPC$"];
 const DOMAIN_CONTROLLER_SHARES: &[&str] = &["NETLOGON", "SYSVOL"];
 
 /// The shares that belong on this machine.
-fn allowed_shares(is_dc: bool) -> Vec<&'static str> {
+pub fn allowed_shares(is_dc: bool) -> Vec<&'static str> {
     let mut allowed = ALLOWED.to_vec();
     if is_dc {
         allowed.extend_from_slice(DOMAIN_CONTROLLER_SHARES);
@@ -162,7 +162,7 @@ async fn remove_share_core(share: &str) -> Result<(), String> {
     }
 }
 
-fn unauthorized(found: &[String], is_dc: bool) -> Vec<String> {
+pub fn unauthorized(found: &[String], is_dc: bool) -> Vec<String> {
     let allowed = allowed_shares(is_dc);
     found
         .iter()
