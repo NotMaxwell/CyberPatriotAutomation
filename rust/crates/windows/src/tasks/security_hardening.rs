@@ -23,6 +23,215 @@ use pinnacle_core::ui;
 const POLICIES_SYSTEM_KEY: &str = r"HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
 const TERMINAL_SERVER_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server";
 
+/// Directives that stop Apache announcing its version on every response and
+/// error page. The scenario scores both.
+const APACHE_DIRECTIVES: &[(&str, &str)] = &[("ServerSignature", "Off"), ("ServerTokens", "Prod")];
+
+/// Where Apache keeps `httpd.conf` on the usual Windows layouts; wildcard
+/// parents are expanded by [`apache_conf_candidates`].
+const APACHE_CONF_DIRS: &[&str] = &[r"C:\Apache24\conf", r"C:\xampp\apache\conf"];
+const APACHE_PARENT_DIRS: &[&str] = &[r"C:\Program Files", r"C:\Program Files (x86)"];
+
+/// The suffix `.pinnacle.bak` keeps the original beside the file we change.
+const BACKUP_SUFFIX: &str = ".pinnacle.bak";
+
+/// Rewrite `ServerSignature` and `ServerTokens` to the hardened values.
+///
+/// Active (uncommented) lines are replaced in place, case-insensitively, so the
+/// directive keeps its position in the file; a directive that is absent is
+/// appended. Commented lines are left alone - they are documentation, and
+/// uncommenting one could re-enable something the admin disabled on purpose.
+/// The file's own line ending is kept so a CRLF config does not end up mixed.
+fn harden_httpd_conf(text: &str) -> String {
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut seen = [false; APACHE_DIRECTIVES.len()];
+    let mut out = String::with_capacity(text.len() + 64);
+
+    for line in text.split_inclusive('\n') {
+        let body = line.trim_end_matches(['\r', '\n']);
+        let ending = &line[body.len()..];
+        let first = body.split_whitespace().next().unwrap_or("");
+        let hit = (!first.starts_with('#'))
+            .then(|| {
+                APACHE_DIRECTIVES
+                    .iter()
+                    .position(|(name, _)| name.eq_ignore_ascii_case(first))
+            })
+            .flatten();
+        match hit {
+            Some(i) => {
+                seen[i] = true;
+                let (name, value) = APACHE_DIRECTIVES[i];
+                let wanted = format!("{name} {value}");
+                // Leave an already-correct line byte-for-byte as it was.
+                let already = body.split_whitespace().eq(wanted.split_whitespace());
+                out.push_str(if already { body } else { &wanted });
+                out.push_str(ending);
+            }
+            None => out.push_str(line),
+        }
+    }
+
+    for (i, (name, value)) in APACHE_DIRECTIVES.iter().enumerate() {
+        if !seen[i] {
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push_str(eol);
+            }
+            out.push_str(&format!("{name} {value}{eol}"));
+        }
+    }
+    out
+}
+
+/// Where the config lives, given a service's `ImagePath`
+/// (`"C:\Apache24\bin\httpd.exe" -k runservice` -> `C:\Apache24\conf\httpd.conf`).
+fn conf_from_image_path(image_path: &str) -> Option<String> {
+    let trimmed = image_path.trim();
+    let exe = match trimmed.strip_prefix('"') {
+        Some(rest) => rest.split('"').next()?,
+        None => {
+            let end = trimmed.to_ascii_lowercase().find(".exe")? + ".exe".len();
+            &trimmed[..end]
+        }
+    };
+    let sep = |c: char| c == '\\' || c == '/';
+    let bin_dir = &exe[..exe.rfind(sep)?];
+    let (root, last) = bin_dir.rsplit_once(sep)?;
+    last.eq_ignore_ascii_case("bin")
+        .then(|| format!("{root}\\conf\\httpd.conf"))
+}
+
+/// Every `httpd.conf` that exists on this machine, without duplicates.
+async fn apache_conf_candidates() -> Vec<std::path::PathBuf> {
+    let mut found: Vec<std::path::PathBuf> = Vec::new();
+    let mut consider = |path: std::path::PathBuf| {
+        if path.is_file()
+            && !found.iter().any(|p| {
+                p.to_string_lossy()
+                    .eq_ignore_ascii_case(&path.to_string_lossy())
+            })
+        {
+            found.push(path);
+        }
+    };
+
+    for dir in APACHE_CONF_DIRS {
+        consider(std::path::Path::new(dir).join("httpd.conf"));
+    }
+    for parent in APACHE_PARENT_DIRS {
+        let Ok(entries) = std::fs::read_dir(parent) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .starts_with("apache")
+            {
+                consider(entry.path().join("conf").join("httpd.conf"));
+            }
+        }
+    }
+    for name in apache_service_names().await {
+        let key = format!(r"HKLM\SYSTEM\CurrentControlSet\Services\{name}");
+        if let Some(conf) = registry_ops::get_string(&key, "ImagePath")
+            .await
+            .and_then(|image| conf_from_image_path(&image))
+        {
+            consider(std::path::PathBuf::from(conf));
+        }
+    }
+    found
+}
+
+/// Services whose name starts with `Apache` (`Apache2.4`, `ApacheHTTPServer`).
+async fn apache_service_names() -> Vec<String> {
+    service_ops::enumerate_states()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, _)| name)
+        .filter(|name| name.to_ascii_lowercase().starts_with("apache"))
+        .collect()
+}
+
+/// Summarise a config for the ledger: hardened or not.
+fn httpd_state(text: &str) -> String {
+    if harden_httpd_conf(text) == text {
+        "ServerSignature Off, ServerTokens Prod".to_string()
+    } else {
+        "version banner not hidden".to_string()
+    }
+}
+
+/// Harden one `httpd.conf`: back it up, write it, prove it by reading it back.
+async fn harden_one_httpd_conf(path: &std::path::Path) -> Result<bool, String> {
+    let display = path.display().to_string();
+    let original = std::fs::read_to_string(path).map_err(|e| format!("{display}: {e}"))?;
+    if harden_httpd_conf(&original) == original {
+        return Ok(false);
+    }
+
+    pinnacle_core::remediation::apply(
+        &format!("Apache config {display}"),
+        "ServerSignature Off and ServerTokens Prod, so responses do not reveal the version",
+        || async { std::fs::read_to_string(path).ok().map(|t| httpd_state(&t)) },
+        |state| state.starts_with("ServerSignature Off"),
+        "rewrote ServerSignature and ServerTokens",
+        || async {
+            let backup = format!("{display}{BACKUP_SUFFIX}");
+            // Only the first backup: a second run must not overwrite the
+            // original with our own output.
+            if !std::path::Path::new(&backup).exists() {
+                std::fs::copy(path, &backup).map_err(|e| format!("backup to {backup}: {e}"))?;
+            }
+            std::fs::write(path, harden_httpd_conf(&original))
+                .map_err(|e| format!("{display}: {e}"))
+        },
+    )
+    .await?;
+    Ok(!pinnacle_core::run_log::dry_run())
+}
+
+/// Hide the Apache version in every `httpd.conf` found, restarting the service
+/// only if it was running, since a stopped server should stay stopped.
+async fn harden_apache(fixes: &mut Vec<String>, issues: &mut Vec<String>) {
+    let confs = apache_conf_candidates().await;
+    if confs.is_empty() {
+        return;
+    }
+    ui::markup_line("[cyan]Hardening Apache (ServerSignature / ServerTokens)...[/]");
+
+    let mut changed = false;
+    for conf in &confs {
+        match harden_one_httpd_conf(conf).await {
+            Ok(true) => {
+                changed = true;
+                fixes.push(format!("Hid the Apache version in {}", conf.display()));
+            }
+            Ok(false) => {}
+            Err(e) => issues.push(format!("Could not harden {}: {e}", conf.display())),
+        }
+    }
+    if !changed {
+        return;
+    }
+
+    for service in apache_service_names().await {
+        if service_ops::state(&service).await != service_ops::ServiceState::Running {
+            continue;
+        }
+        match service_ops::stop(&service).await {
+            Ok(()) => match service_ops::start(&service).await {
+                Ok(()) => fixes.push(format!("Restarted {service} to load the new config")),
+                Err(e) => issues.push(format!("{service} stopped but did not restart: {e}")),
+            },
+            Err(e) => issues.push(format!("Could not restart {service}: {e}")),
+        }
+    }
+}
+
 /// Registry settings to apply: (path, name, type, value, description).
 pub struct SecurityHardeningTask {
     name: String,
@@ -346,6 +555,10 @@ impl Task for SecurityHardeningTask {
         ui::rule("[bold yellow]Step 4: Disable Startup Programs[/]");
         Self::disable_suspicious_startup(&mut fixes, &mut issues).await;
 
+        ui::write_line();
+        ui::rule("[bold yellow]Step 5: Harden Apache[/]");
+        harden_apache(&mut fixes, &mut issues).await;
+
         if !issues.is_empty() {
             result.message = format!(
                 "Applied {} security settings. {} issues encountered.",
@@ -392,5 +605,84 @@ impl Task for SecurityHardeningTask {
         }
 
         all_good
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_directives_are_appended() {
+        let out = harden_httpd_conf("Listen 80\n");
+        assert_eq!(out, "Listen 80\nServerSignature Off\nServerTokens Prod\n");
+    }
+
+    #[test]
+    fn active_directives_are_replaced_in_place_ignoring_case() {
+        let out = harden_httpd_conf("serversignature On\nListen 80\nSERVERTOKENS Full\n");
+        assert_eq!(out, "ServerSignature Off\nListen 80\nServerTokens Prod\n");
+    }
+
+    #[test]
+    fn commented_directives_are_left_alone_and_real_ones_appended() {
+        let text = "#ServerSignature On\n  # ServerTokens Full\n";
+        let out = harden_httpd_conf(text);
+        assert!(out.starts_with(text));
+        assert!(out.ends_with("ServerSignature Off\nServerTokens Prod\n"));
+    }
+
+    #[test]
+    fn hardening_is_idempotent_and_keeps_a_correct_file_byte_for_byte() {
+        let once = harden_httpd_conf("Listen 80\nServerTokens Full\n");
+        assert_eq!(harden_httpd_conf(&once), once);
+        let tidy = "ServerSignature   Off\r\nServerTokens Prod\r\n";
+        assert_eq!(harden_httpd_conf(tidy), tidy);
+    }
+
+    #[test]
+    fn crlf_files_stay_crlf() {
+        let out = harden_httpd_conf("Listen 80\r\nServerSignature On\r\n");
+        assert_eq!(
+            out,
+            "Listen 80\r\nServerSignature Off\r\nServerTokens Prod\r\n"
+        );
+        assert!(!out.replace("\r\n", "").contains('\n'));
+    }
+
+    #[test]
+    fn a_missing_final_newline_does_not_glue_directives_on() {
+        let out = harden_httpd_conf("Listen 80");
+        assert_eq!(out, "Listen 80\nServerSignature Off\nServerTokens Prod\n");
+    }
+
+    #[test]
+    fn an_empty_file_gets_both_directives() {
+        assert_eq!(
+            harden_httpd_conf(""),
+            "ServerSignature Off\nServerTokens Prod\n"
+        );
+    }
+
+    #[test]
+    fn the_config_is_found_from_a_quoted_service_image_path() {
+        assert_eq!(
+            conf_from_image_path(r#""C:\Apache24\bin\httpd.exe" -k runservice"#).as_deref(),
+            Some(r"C:\Apache24\conf\httpd.conf")
+        );
+    }
+
+    #[test]
+    fn the_config_is_found_from_an_unquoted_service_image_path() {
+        assert_eq!(
+            conf_from_image_path(r"C:\xampp\apache\bin\httpd.exe -k runservice").as_deref(),
+            Some(r"C:\xampp\apache\conf\httpd.conf")
+        );
+    }
+
+    #[test]
+    fn a_non_apache_layout_yields_no_config_path() {
+        assert_eq!(conf_from_image_path(r"C:\Tools\svc.exe"), None);
+        assert_eq!(conf_from_image_path(""), None);
     }
 }

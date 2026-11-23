@@ -8,6 +8,17 @@ use pinnacle_core::impl_task_meta;
 use pinnacle_core::models::{PasswordPolicyInfo, PasswordPolicyStandards, SystemInfo, TaskResult};
 use pinnacle_core::ui;
 
+/// The lowest threshold the scoring engine accepts. CyberPatriot penalises a
+/// threshold of 1-4 (stricter than the standard, yet counted as a mistake), and
+/// 0 means lockout is off, so only 5 up to the standard is compliant.
+const MIN_SCORED_LOCKOUT_THRESHOLD: i32 = 5;
+
+/// Is this lockout threshold acceptable? 0 (disabled) and 1-4 (penalised) are
+/// not; anything above the standard is too lax.
+fn lockout_threshold_compliant(threshold: i32) -> bool {
+    (MIN_SCORED_LOCKOUT_THRESHOLD..=PasswordPolicyStandards::LOCKOUT_THRESHOLD).contains(&threshold)
+}
+
 pub struct PasswordPolicyTask {
     name: String,
     description: String,
@@ -142,8 +153,7 @@ impl PasswordPolicyTask {
                 current.lockout_threshold.to_string()
             }),
             &PasswordPolicyStandards::LOCKOUT_THRESHOLD.to_string(),
-            current.lockout_threshold > 0
-                && current.lockout_threshold <= PasswordPolicyStandards::LOCKOUT_THRESHOLD,
+            lockout_threshold_compliant(current.lockout_threshold),
         );
         add_comparison_row(
             &mut table,
@@ -279,9 +289,7 @@ impl PasswordPolicyTask {
             return (fixes, issues);
         }
 
-        if current.lockout_threshold == 0
-            || current.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD
-        {
+        if !lockout_threshold_compliant(current.lockout_threshold) {
             ui::markup_line(&format!(
                 "[yellow]Setting account lockout threshold to {}...[/]",
                 PasswordPolicyStandards::LOCKOUT_THRESHOLD
@@ -523,9 +531,7 @@ impl Task for PasswordPolicyTask {
             ui::markup_line("[red]✗ Password complexity not enabled[/]");
             all_good = false;
         }
-        if verified.lockout_threshold == 0
-            || verified.lockout_threshold > PasswordPolicyStandards::LOCKOUT_THRESHOLD
-        {
+        if !lockout_threshold_compliant(verified.lockout_threshold) {
             ui::markup_line("[red]✗ Account lockout threshold not set correctly[/]");
             all_good = false;
         }
@@ -534,5 +540,41 @@ impl Task for PasswordPolicyTask {
             ui::markup_line("[green]✓ All password policy settings verified[/]");
         }
         all_good
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn disabled_lockout_is_not_compliant() {
+        assert!(!lockout_threshold_compliant(0));
+    }
+
+    #[test]
+    fn threshold_one_to_four_is_a_penalty() {
+        for t in 1..=4 {
+            assert!(!lockout_threshold_compliant(t), "{t} is penalised");
+        }
+    }
+
+    #[test]
+    fn the_standard_threshold_is_compliant() {
+        assert!(lockout_threshold_compliant(5));
+        assert!(lockout_threshold_compliant(
+            PasswordPolicyStandards::LOCKOUT_THRESHOLD
+        ));
+    }
+
+    #[test]
+    fn a_threshold_above_the_standard_is_not_compliant() {
+        assert!(!lockout_threshold_compliant(10));
+        assert!(!lockout_threshold_compliant(60));
+    }
+
+    #[test]
+    fn the_standard_is_within_the_scored_range() {
+        assert!((5..=50).contains(&PasswordPolicyStandards::LOCKOUT_THRESHOLD));
     }
 }

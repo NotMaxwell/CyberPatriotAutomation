@@ -333,6 +333,35 @@ pub const REGISTRY_SETTINGS: &[(&str, &str, &str, &str, &str)] = &[
         "0",
         "Disable remote shell",
     ),
+    // WinRM: no cleartext, no Basic auth, on either side of the connection
+    (
+        r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service",
+        "AllowUnencryptedTraffic",
+        "REG_DWORD",
+        "0",
+        "Disallow unencrypted WinRM traffic (service)",
+    ),
+    (
+        r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM\Service",
+        "AllowBasic",
+        "REG_DWORD",
+        "0",
+        "Disallow Basic authentication (service)",
+    ),
+    (
+        r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client",
+        "AllowUnencryptedTraffic",
+        "REG_DWORD",
+        "0",
+        "Disallow unencrypted WinRM traffic (client)",
+    ),
+    (
+        r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WinRM\Client",
+        "AllowBasic",
+        "REG_DWORD",
+        "0",
+        "Disallow Basic authentication (client)",
+    ),
 ];
 
 /// Windows optional features worth removing from a competition image.
