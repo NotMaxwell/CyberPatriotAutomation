@@ -10,6 +10,63 @@ pinnacle-cypat.exe --version
 **Bump the version in `Cargo.toml` with every behavioural change and add an
 entry here.** Patch for fixes, minor for new behaviour or tasks.
 
+## 1.24.0
+
+The gaps exposed by the four CP18 Training Round 2 answer keys (Ubuntu 22,
+Mint 21, Windows 11, Server 2019), each pinned by an answer-key test. Full
+detail in `docs/ARCHITECTURE.md` §4.16–4.17.
+
+### Added
+
+- **Linux: Backdoor Listeners task (`--backdoors`).** Finds listening backdoors
+  (raw listeners such as `nc`, scripts run by an interpreter, and binaries no
+  package owns), kills them, deletes their files where safe, comments out the
+  cron lines that start them, and masks non-package units. Package ownership is
+  three-state, so an unreadable dpkg database limits the task to raw listeners,
+  and nothing in a system binary directory is ever deleted.
+- **Linux User Management applies README group requirements.** It creates
+  missing groups and adds the named members, additively. Before this, groups
+  were parsed but never acted on, which cost the CP19 Exhibition Round 8 points.
+- **Linux User Management finds people hidden below uid 1000:** a login shell,
+  a home under `/home/`, and not a system account.
+- **Linux Prohibited Media deletes hacking-tool archives and scripts** from a
+  curated name list, including under `/usr/games` and `/usr/local`.
+- **Linux Mint:** Software Updates turns on Update Manager's automatic updates.
+- **Apache banner hardening on both platforms:** `ServerSignature Off` and
+  `ServerTokens Prod`.
+- **Windows:** WinRM Service and Client refuse unencrypted traffic and basic
+  auth. Leftover Program Files folders and shortcuts of prohibited software are
+  removed. Apps Chocolatey did not install are now updated, with a warning if
+  their install location moves. BitTorrent, uTorrent, Burp Suite, Nmap and
+  Wireshark are prohibited unless the README requires them.
+
+### Fixed
+
+- **Linux `sysctl.conf` and `sshd_config` overrode the hardening.**
+  `/etc/sysctl.conf` is read after the `sysctl.d` drop-in, and sshd keeps the
+  first value it sees. Contrary lines in the main files and other drop-ins are
+  now rewritten. The SSH drop-in is now `00-pinnacle.conf`, and settings load
+  with `sysctl --system`.
+- **Linux PAM:** `nullok` is stripped, and `minlen` and `remember` are set on
+  the PAM lines themselves, after `pam-auth-update`, which would undo them.
+- **Linux:** a blank root password is locked. The minimum password age is 2 days
+  (was 7; the key requires 1–3).
+- **Linux Prohibited Media no longer deletes from a critical service's data
+  directory** (vsftpd, Samba, Apache, nginx). Mint penalised removing files from
+  the public FTP directory.
+- **Windows lockout threshold 1–4 was treated as compliant.** It is a penalty
+  on both Windows keys; it is now raised to 5.
+- **Windows Shared Folders Audit kept `NETLOGON`/`SYSVOL` off a domain
+  controller's allowed list.** They are now allowed on a DC.
+- **README parser dropped "may" from a member list after a colon,** and read
+  "to it" as a member.
+- **A README calling the FTP service "VSFTP" did not protect it** (the Mint key's
+  own spelling), so it would have been masked: a −5 penalty.
+- **Linux Software Updates left packages out of date when their new version
+  needed a new dependency.** `apt-get upgrade` holds those back. It now runs
+  `upgrade --with-new-pkgs`, which installs the dependencies but, unlike
+  `full-upgrade`, never removes a package.
+
 ## 1.23.0
 
 Graphical front ends on both platforms, and the terminal menu removed.

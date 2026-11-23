@@ -31,6 +31,8 @@ is the short version — start there if you only want to run the thing.
   - [4.13 DNS Settings Audit](#413-dns-settings-audit)
   - [4.14 Suspicious Scheduled Tasks Audit](#414-suspicious-scheduled-tasks-audit)
   - [4.15 Group Policy](#415-group-policy)
+  - [4.16 Backdoor Listeners (Linux)](#416-backdoor-listeners-linux)
+  - [4.17 Changes for the CP18 Training Round 2 keys](#417-changes-for-the-cp18-training-round-2-keys)
 - [5. Utilities](#5-utilities)
   - [5.2 ReadmeParser](#52-readmeparser)
   - [5.8 knowledge — the tables](#58-knowledge--the-tables)
@@ -186,7 +188,7 @@ rust/
     │   └── tests/
     ├── linux/                     pinnacle-linux
     │   └── src/
-    │       ├── platform.rs        the fifteen Linux tasks, one row each
+    │       ├── platform.rs        the sixteen Linux tasks, one row each
     │       ├── file_ops.rs        proved writes to /etc - see §3.2
     │       ├── systemd_ops.rs     proved systemctl operations
     │       ├── user_ops.rs        /etc/passwd, shadow, group; useradd, chage
@@ -248,7 +250,7 @@ selected by one `cfg` at the top of `main.rs` (and of the GUI's `main.rs`).
 
 ## 3.2 Linux
 
-The Linux platform ships **fifteen tasks**, built on the same contract as the
+The Linux platform ships **sixteen tasks**, built on the same contract as the
 Windows ones: read the state, skip if it is already right, write, read it back
 as proof.
 
@@ -260,15 +262,16 @@ is no row for it — and a test asserts that.
 
 | Flag | Task | Mechanism |
 |---|---|---|
-| `--password-policy`, `-p` | Password Policy | `pwquality.conf`, `faillock.conf`; `pam_faillock` and `pam_pwhistory` as `pam-auth-update` profiles (`pam_ops`) |
-| `--account-permissions`, `-a` | Account Permissions | `/etc/shadow`, `chage`, sudoers `NOPASSWD` (`sudo_ops`), uid-0 and display-manager audit |
-| `--user-management`, `-u` | User Management | `useradd`, `userdel`, `gpasswd` |
+| `--password-policy`, `-p` | Password Policy | `pwquality.conf`, `faillock.conf`; `pam_faillock` and `pam_pwhistory` as `pam-auth-update` profiles (`pam_ops`); then `nullok` stripped and `minlen`/`remember` set on the `common-password` lines |
+| `--account-permissions`, `-a` | Account Permissions | `/etc/shadow`, `chage`, sudoers `NOPASSWD` (`sudo_ops`), uid-0 and display-manager audit; locks root if its password is blank |
+| `--user-management`, `-u` | User Management | `useradd`, `userdel`, `groupadd`, `gpasswd`; README group requirements; people hidden below uid 1000 |
 | `--service-management`, `-s` | Service Management | `systemctl` mask/enable |
 | `--audit-policy`, `-t` | Audit Policy | `auditd`, `rsyslog`, `rules.d` |
 | `--firewall`, `-f` | Firewall | `ufw` |
-| `--security-hardening`, `-H` | Security Hardening | `sysctl.d`, `sshd_config.d`, `login.defs`, `modprobe.d`, banners |
-| `--media-scan`, `-m` | Prohibited Media | filesystem scan of `/home`, `/root` |
-| `--software-updates` | Software Updates | `apt upgrade`, `unattended-upgrades` |
+| `--security-hardening`, `-H` | Security Hardening | `sysctl.d`, `sshd_config.d/00-pinnacle.conf`, `login.defs`, `modprobe.d`, banners; contrary lines in `sysctl.conf`, `sshd_config` and other drop-ins rewritten; Apache `security.conf` |
+| `--media-scan`, `-m` | Prohibited Media | filesystem scan of `/home`, `/root`, `/srv`, `/opt`, `/tmp`; hacking-tool names also under `/usr/games` and `/usr/local`; critical services' data report-only |
+| `--software-updates` | Software Updates | `apt upgrade`, `unattended-upgrades`; `mintupdate-automation upgrade enable` on Linux Mint |
+| `--backdoors` | Backdoor Listeners | `ss -Htlnup`, `/proc/<pid>`, `dpkg -S`; kill, delete, cron and unit clean-up (§4.16) |
 | `--software-management` | Software Management | `apt purge` / `apt install` |
 | `--hosts-file` | Hosts File Audit | `/etc/hosts` |
 | `--dns-settings` | DNS Settings Audit | `resolv.conf`, `resolvectl` |
@@ -291,7 +294,7 @@ in the same shape, and the parser already recognised `ubuntu`, `debian`,
 
 | Table | Linux | Windows |
 |---|--:|--:|
-| Hardening settings | 72 | 42 |
+| Hardening settings | 72 | 46 |
 | Prohibited services | 58 | 55 |
 | Audit rules | 34 | 9 categories |
 | Kernel modules blocked | 14 | n/a |
@@ -782,7 +785,7 @@ connections not logged. `netsh advfirewall` is the fallback.
 
 **Why.** The long tail of individually-scored registry settings.
 
-**41 registry values**, applied under a progress bar:
+**46 registry values**, applied under a progress bar:
 
 | Area | Values |
 |---|---|
@@ -1163,6 +1166,123 @@ Two details worth carrying over:
 > Not just that it exists. These checks previously only asserted that `reg query`
 > exited 0, which is true whenever the value is *present* — so a setting left at
 > the wrong value verified as correct.
+
+---
+
+### 4.16 Backdoor Listeners (Linux)
+
+`rust/crates/linux/src/tasks/backdoor_listeners.rs` · `--backdoors` · Linux only
+
+Finds processes listening on a network port that are backdoors, and removes
+them. Added for the CP18 Training Round 2 keys: Ubuntu 22 planted
+`nc.traditional -l -p 1337` started from `/etc/crontab` (5 pts), and Mint 21
+planted `/usr/share/zod/kneelB4zod.py` listening on 1337 (6 pts).
+
+**Detection.** `ss -Htlnup` gives each listener's pid. `/proc/<pid>/exe`,
+`cmdline`, `cwd` and `cgroup` give the program, its script and its unit. A
+listener is a backdoor when:
+
+- **(a)** the program is a raw listener: `nc`, `nc.traditional`, `nc.openbsd`,
+  `ncat`, `netcat`, `socat`;
+- **(b)** the program is an interpreter (`python*`, `perl`, `ruby`, `php*`,
+  `node`, `bash`, `sh`, `dash`) running a script file that no package owns; or
+- **(c)** the program itself is not owned by any package, outside
+  `/opt/CyberPatriot`, `/snap` and `/usr/local/lib/node_modules`.
+
+The port number is never a reason. `sshd`, the scoring engine and any unit the
+README marks critical (or that is on the never-disable list) are exempt before
+classification.
+
+**Package ownership is three-state:** owned, not owned, or unknown. `dpkg -S`
+answers "not owned" only with exit 1 and "no path found matching pattern". Every
+other failure is unknown. The scan first probes `dpkg -S /usr/bin/dpkg`. If that
+fails, the package database can't be trusted, so only rule (a) applies, nothing
+is deleted, and the run says so. A failed lookup must never read as "not owned",
+or a broken dpkg would make every service look like a backdoor.
+
+**Actions (real run only, each through `remediation::apply`):**
+
+1. Kill the process (TERM, then KILL after 3 s), proving `/proc/<pid>` is gone.
+2. Delete the script or binary only when it is *not owned* and outside the
+   system binary directories (`/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`,
+   `/usr/lib`, `/lib`, `/usr/libexec`). A package-owned `nc.traditional` is left
+   for Software Management to purge.
+3. Comment out cron lines that start it (prefix `# disabled by pinnacle: `).
+4. Stop, disable and mask its systemd unit, only if the unit file is under
+   `/etc/systemd/system/` and not owned by a package.
+
+The task reminds the competitor to answer forensics questions first. Mint's
+Forensics Question 1 asked for the backdoor's directory.
+
+**Verify** re-scans and passes only when no backdoor remains.
+
+---
+
+### 4.17 Changes for the CP18 Training Round 2 keys
+
+Version 1.24.0 closed the gaps the four CP18 Training Round 2 answer keys
+exposed (Ubuntu 22, Mint 21, Windows 11, Server 2019; the list is in
+`docs/TASK_ANALYSIS.md`). Each change is pinned by an answer-key test in
+`crates/*/tests/answer_key_*_training2.rs`.
+
+**Linux**
+
+- *Password Policy:* after the last `pam-auth-update`, `nullok` is stripped from
+  the `pam_unix` lines, and `minlen` goes on the `pam_pwquality` and `pam_unix`
+  lines and `remember` on `pam_unix`. `pam-auth-update` regenerates the files
+  without them, so the order matters. Checkers read the PAM line, not only
+  `pwquality.conf`.
+- *Account Permissions:* root is locked when its password is blank. Minimum
+  password age is 2 days (`PASS_MIN_DAYS` and `chage -m`). The key requires 1–3.
+- *User Management:* README group requirements are applied. A missing group is
+  created and the named members are added, without removing anyone else. Admin
+  groups stay with the admin logic. An account with uid 1–999, a login shell and
+  a home under `/home/` that isn't a system account is treated as a person, so an
+  unauthorised user hidden below uid 1000 is removed.
+- *Security Hardening:* `/etc/sysctl.conf` is read after `sysctl.d` (and
+  `99-sysctl.conf` sorts after `99-pinnacle.conf`), so contrary active lines there
+  and in other `sysctl.d` files are rewritten, and settings load with
+  `sysctl --system`. sshd keeps the *first* value it reads, so the drop-in is now
+  `00-pinnacle.conf` (the legacy `99-` file is removed). Contrary global lines in
+  `sshd_config` and other drop-ins are rewritten, `Match` blocks are left alone
+  and reported, and `sshd -t` failure rolls everything back. Apache gets
+  `ServerSignature Off` and `ServerTokens Prod`.
+- *Prohibited Media:* a curated list of hacking-tool names, matched on word
+  boundaries, finds archives, scripts and executables, also under `/usr/games`
+  and `/usr/local`. Package-owned files and README-required software are skipped.
+  Data directories of README-critical vsftpd, Samba, Apache and nginx are
+  report-only. Mint penalised deleting files from the public FTP directory.
+- *Software Updates:* on Linux Mint, Update Manager's automatic updates are turned
+  on with `mintupdate-automation upgrade enable`, the same command its Preferences
+  switch runs. That sets the flag file
+  `/var/lib/linuxmint/mintupdate-automatic-upgrades-enabled` and the
+  `mintupdate-automation-upgrade.timer`.
+- *Tables:* `aisleriot`, `doona` and `xprobe` are always prohibited. README
+  "X2Go" maps to `x2goserver`.
+
+**Windows**
+
+- *Password Policy:* a lockout threshold of 1–4 is non-compliant and is raised to
+  5. Both Windows keys penalise thresholds under 5.
+- *Security Hardening:* WinRM Service and Client policies refuse unencrypted
+  traffic and basic authentication (`AllowUnencryptedTraffic=0`, `AllowBasic=0`).
+  `httpd.conf` is found (`C:\Apache24`, XAMPP, Program Files, or an Apache
+  service's `ImagePath`) and given `ServerSignature Off` and `ServerTokens Prod`.
+  A backup is made first, and the service restarts only if it was running.
+- *Shared Folders Audit:* on a domain controller (`ProductType` `LanmanNt`),
+  `NETLOGON` and `SYSVOL` are allowed.
+- *Software Management:* BitTorrent, uTorrent, Burp Suite, Nmap and Wireshark are
+  prohibited by default, and a README that requires one keeps it. Windows 11
+  requires Wireshark; Server 2019 scores its removal. When a prohibited program
+  has no uninstall entry, matching top-level Program Files folders and desktop or
+  Start Menu shortcuts are removed. A deny-list protects Windows, Microsoft and
+  CyberPatriot folders.
+- *Software Updates:* apps Chocolatey did not install (Chrome, Notepad++,
+  Firefox) are version-checked with `choco search` and upgraded in place. The
+  install location is read before and after, and a move is reported in red,
+  because "not installed at the default location" is a penalty.
+- *Prohibited Media:* `brutus`, `pyrdp` and `darknet` patterns. Files matching
+  README-required software are never flagged by a pattern.
 
 ---
 
@@ -1947,7 +2067,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 510 tests
+cargo test --workspace                  # 726 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat

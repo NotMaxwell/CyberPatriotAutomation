@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/Rust-2024-000000)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-510-brightgreen)]()
+[![Tests](https://img.shields.io/badge/Tests-726-brightgreen)]()
 [![Platforms](https://img.shields.io/badge/Platforms-Windows%20%7C%20Linux-informational)]()
 
 **Author:** Maxwell McCormick · **Copyright:** © 2026 Maxwell McCormick
@@ -149,37 +149,38 @@ so `--help` and a run log read the same way on either.
 
 | Task | Flag | What it does |
 |---|---|---|
-| Password Policy | `-p` | 14-char minimum, 60-day age, 24 history, 5-attempt lockout, complexity on |
+| Password Policy | `-p` | 14-char minimum, 60-day age, 24 history, 5-attempt lockout (a threshold of 1–4 is raised to 5), complexity on, no reversible encryption |
 | Account Permissions | `-a` | Disables Guest, turns off "password never expires", reports surplus admins |
 | User Management | `-u` | Deletes unauthorised accounts, fixes admin membership, resets passwords, creates required users and groups |
 | Service Management | `-s` | Disables 60+ insecure services, protects 20 critical ones, kills SMB1 and Telnet |
 | Audit Policy | `-t` | All 9 audit categories to success+failure, 20 security registry values, PowerShell logging, event log sizing |
 | Firewall | `-f` | Enables all profiles, blocks 26 ports, disables risky rules, turns on logging |
-| Security Hardening | `-H` | 41 registry values — UAC, AutoRun, RDP, Defender, LSA, memory, browser |
+| Security Hardening | `-H` | 46 registry values — UAC, AutoRun, RDP, Defender, LSA, WinRM, memory, browser; Apache `ServerSignature Off` / `ServerTokens Prod` when `httpd.conf` is found |
 | Local Security Policy | `-g` | SMB signing, anonymous enumeration, logon banners, RDP encryption |
 | Prohibited Media | `-m` | Finds and permanently deletes media, games and hacking tools under `C:\Users` |
-| Software Management | `--software-management` | Removes prohibited software, installs required software, runs a Defender scan |
-| Software Updates | `--software-updates` | Updates installed applications via Chocolatey |
-| Shared Folders Audit | `--shared-folders` | Removes shares beyond `ADMIN$`, `C$`, `IPC$` |
+| Software Management | `--software-management` | Removes prohibited software (including leftover Program Files folders and shortcuts), installs required software, runs a Defender scan |
+| Software Updates | `--software-updates` | Updates installed applications via Chocolatey, including ones Chocolatey did not install; warns if an app moves from its install location |
+| Shared Folders Audit | `--shared-folders` | Removes shares beyond `ADMIN$`, `C$`, `IPC$` (plus `NETLOGON` and `SYSVOL` on a domain controller) |
 | Hosts File Audit | `--hosts-file` | Removes unauthorised `hosts` entries |
 | DNS Settings Audit | `--dns-settings` | Reports public resolvers (report only — never changes DNS) |
 | Scheduled Tasks Audit | `--scheduled-tasks` | Disables tasks matching suspicious keywords |
 
-### Linux — fifteen tasks
+### Linux — sixteen tasks
 
 | Task | Flag | What it does |
 |---|---|---|
-| Password Policy | `-p` | `pam_pwquality` complexity (installed if missing), `PASS_MIN_LEN`; `faillock` lockout and `pwhistory` password history via `pam-auth-update`, rolled back if the order is unsafe; reports PAM lines that skip the password check |
-| Account Permissions | `-a` | Locks passwordless accounts, applies ageing, removes sudo `NOPASSWD` (keeping the rule), turns off LightDM guest sessions; reports duplicate uid 0, service accounts with shells and display-manager auto-login |
-| User Management | `-u` | Deletes unauthorised accounts (keeping home directories), fixes `sudo` membership, creates required users |
+| Password Policy | `-p` | `pam_pwquality` complexity (installed if missing), `PASS_MIN_LEN`; `faillock` lockout and `pwhistory` password history via `pam-auth-update`, rolled back if the order is unsafe; strips `nullok`; puts `minlen` and `remember` on the PAM lines; reports PAM lines that skip the password check |
+| Account Permissions | `-a` | Locks passwordless accounts (root included), applies ageing, removes sudo `NOPASSWD` (keeping the rule), turns off LightDM guest sessions; reports duplicate uid 0, service accounts with shells and display-manager auto-login |
+| User Management | `-u` | Deletes unauthorised accounts (keeping home directories), including people hidden below uid 1000; fixes `sudo` membership; creates required users and groups and adds the README's group members |
 | Service Management | `-s` | Masks 58 insecure units, protects the README's critical ones and the scoring engine |
 | Audit Policy | `-t` | Installs and enables `auditd` and `rsyslog`, writes 34 audit rules and tunes retention |
 | Firewall | `-f` | Enables `ufw` with default-deny inbound, opening only what the README needs |
-| Security Hardening | `-H` | 72 settings across `sysctl.d`, `sshd_config.d` and `login.defs`, 14 kernel modules blocked, login banners |
-| Prohibited Media | `-m` | Finds media under `/home` and `/root`; deletes only if the README prohibits it |
+| Security Hardening | `-H` | 72 settings across `sysctl.d`, `sshd_config.d` and `login.defs`, overriding contrary values in `sysctl.conf` and `sshd_config`; 14 kernel modules blocked, login banners, Apache banner hardening |
+| Prohibited Media | `-m` | Finds media under `/home`, `/root` and other user-writable roots, deleting only if the README prohibits it; deletes hacking-tool archives and scripts; never deletes from a critical service's data directory |
 | File Permissions Audit | `--file-permissions` | Corrects 16 scored file modes; reports world-writable, unowned, setuid and `.rhosts` findings |
 | Shared Folders Audit | `--shared-folders` | Reports Samba shares and NFS exports, grading their options |
-| Software Updates | `--software-updates` | `apt upgrade`, then enables `unattended-upgrades` |
+| Software Updates | `--software-updates` | `apt upgrade`, then enables `unattended-upgrades` (and Update Manager's automatic updates on Linux Mint) |
+| Backdoor Listeners | `--backdoors` | Kills listening backdoors (netcat, scripts and binaries no package owns), deletes their files where safe, disables the cron lines and units that start them |
 | Software Management | `--software-management` | Purges prohibited packages, installs required ones |
 | Hosts File Audit | `--hosts-file` | Removes unauthorised `/etc/hosts` entries |
 | DNS Settings Audit | `--dns-settings` | Reports the resolvers in use, via `resolv.conf` and `resolvectl` |
@@ -192,7 +193,7 @@ more likely to break the image than help it. Group Policy has no Linux
 equivalent, so there is no such task there.
 
 The tables are CIS Ubuntu 22.04 derived and now match the Windows ones in size:
-72 hardening settings against Windows' 42, 58 prohibited services against 55.
+72 hardening settings against Windows' 46, 58 prohibited services against 55.
 
 **Full detail on every one — why it exists, what it changes, how, and what it
 refuses to touch — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).**
@@ -333,6 +334,7 @@ exists on both, the spelling matches:
 | `--dns-settings` | | ✓ | ✓ |
 | `--scheduled-tasks` | | ✓ | ✓ |
 | `--file-permissions` | | — | ✓ |
+| `--backdoors` | | — | ✓ |
 | `--group-policy` | `-g` | ✓ | — no equivalent |
 | `--shared-folders` | | ✓ | ✓ |
 
@@ -404,7 +406,7 @@ split is two crates rather than `#[cfg]` branches in one.
 ## Building
 
 ```bash
-./scripts/check.sh      # fmt, clippy, 510 tests, and the Windows type-check
+./scripts/check.sh      # fmt, clippy, 726 tests, and the Windows type-check
 ./scripts/publish.sh    # -> publish-win-x64/pinnacle-cypat.exe
                         # -> publish-linux-x64/pinnacle-cypat
 ```
@@ -477,7 +479,7 @@ PinnacleCyPat/
 │       │   ├── native/            Win32 APIs (Windows only)
 │       │   ├── knowledge.rs       The tables: registry, packages, services
 │       │   └── *_ops.rs           Proved writes
-│       ├── linux/                 pinnacle-linux — the fifteen Linux tasks
+│       ├── linux/                 pinnacle-linux — the sixteen Linux tasks
 │       │   ├── file_ops.rs        Proved writes to /etc
 │       │   ├── systemd_ops.rs     Proved systemctl operations
 │       │   ├── user_ops.rs        /etc/passwd, shadow, group
@@ -521,7 +523,7 @@ The rules that matter:
 - **The README drives decisions.** Nothing is deleted or disabled on a guess.
 
 ```bash
-./scripts/check.sh            # fmt, clippy, 510 tests, Windows type-check
+./scripts/check.sh            # fmt, clippy, 726 tests, Windows type-check
 cd rust && cargo test --workspace
 ```
 

@@ -57,7 +57,7 @@ rust/
     │   ├── {account,policy,registry,service}_ops.rs   proved writes
     │   ├── knowledge.rs · chocolatey.rs · readme_services.rs
     │   └── tasks/
-    ├── linux/         pinnacle-linux    — fifteen tasks
+    ├── linux/         pinnacle-linux    — sixteen tasks
     │   ├── platform.rs                  the task table
     │   ├── file_ops.rs                  proved writes to /etc (what registry_ops is)
     │   ├── systemd_ops.rs               proved systemctl (what service_ops is)
@@ -363,6 +363,15 @@ Write SSH and sysctl settings to the **drop-in** files (`sshd_config.d/`,
 `sshd_config` and sshd obeys the first definition it sees, so editing the main
 file is overridden by any drop-in already present — the run looks applied and
 changes nothing.
+
+The drop-in alone is not enough either, because the two files have opposite
+precedence. sshd keeps the *first* value, so the drop-in is
+`sshd_config.d/00-pinnacle.conf`, sorting ahead of other drop-ins. sysctl keeps
+the *last*, and `/etc/sysctl.conf` is read after every `sysctl.d` file. Security
+Hardening therefore also rewrites any *contrary* active line for a key it manages
+in the main file and in other drop-ins (sshd lines inside `Match` blocks are left
+alone and reported). It never adds new keys there. A checker that greps the main
+file has to see the hardened value too.
 
 Two orderings are load-bearing and both end a round if reversed:
 

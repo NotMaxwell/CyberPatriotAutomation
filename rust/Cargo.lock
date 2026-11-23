@@ -2010,7 +2010,7 @@ checksum = "c938015719552d665fd0553b90d96cd7ff58e83e4c061ca99e6bb78865a72752"
 
 [[package]]
 name = "pinnacle-core"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2030,7 +2030,7 @@ dependencies = [
 
 [[package]]
 name = "pinnacle-cypat"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "async-trait",
  "indicatif",
@@ -2045,7 +2045,7 @@ dependencies = [
 
 [[package]]
 name = "pinnacle-cypat-gui"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "async-trait",
  "eframe",
@@ -2059,7 +2059,7 @@ dependencies = [
 
 [[package]]
 name = "pinnacle-linux"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "async-trait",
  "pinnacle-core",
@@ -2069,7 +2069,7 @@ dependencies = [
 
 [[package]]
 name = "pinnacle-windows"
-version = "1.23.0"
+version = "1.24.0"
 dependencies = [
  "async-trait",
  "chrono",

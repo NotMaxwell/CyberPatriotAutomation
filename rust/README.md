@@ -24,14 +24,14 @@ several are the kind of mistake that is easy to reintroduce.
 ## Build & test
 
 ```bash
-./scripts/check.sh         # fmt, clippy, 510 tests, and the Windows type-check
+./scripts/check.sh         # fmt, clippy, 726 tests, and the Windows type-check
 ```
 
 Or by hand:
 
 ```bash
 cd rust
-cargo test --workspace     # 510 tests
+cargo test --workspace     # 726 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
@@ -360,7 +360,7 @@ name an operating system; each platform crate implements
 |---|---|
 | `crates/core` | `platform.rs` (the seam), `task.rs`, `readme_parser.rs`, `html.rs`, `remediation.rs`, `run_log.rs`, `app_config.rs`, `command.rs`, `ui.rs`, `software_matching.rs`, `engine.rs` (run pipeline as an event stream), `session.rs` (shared GUI/web state), `files.rs` (file-browser listing), `models/`, the README corpus |
 | `crates/windows` | `native/` (Win32), `{account,policy,registry,service}_ops.rs`, `knowledge.rs`, `chocolatey.rs`, `tasks/` — fifteen tasks |
-| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — fifteen tasks |
+| `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, `tasks/` — sixteen tasks |
 | `crates/gui` | `app.rs`, `screens/`, `theme.rs` — the Windows desktop GUI (`pinnacle-cypat-gui`) |
 | `crates/cli` | `main.rs` (flags, bare-launch front end), `web/` (the Linux web UI) |
 
