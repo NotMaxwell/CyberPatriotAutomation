@@ -92,6 +92,95 @@
 
 ---
 
+## Gaps from the CP18 Training Round 2 answer keys
+
+Four answer keys added to `ReferenceMaterial/` on 2026-11-23: Ubuntu 22
+(`CP18_Ubuntu22_Training2_Answer_Key.pdf`), Mint 21
+(`CP18_Mint21_Training2_Answer_Key.pdf`), Windows 11 (`windowsAnswereKey.pdf`)
+and Server 2019 (`windowsServer.pdf`). The two Windows PDFs are scanned images.
+Each item below is a scored item or penalty that the tool misses or gets wrong
+today. Items the tool already handles are not listed. Their READMEs were not
+supplied, so README-driven items are tested against synthetic README data.
+
+### Linux: accounts and groups
+- [ ] **Apply README group requirements.** `linux/tasks/user_management.rs`
+  parses `group_requirements` but never acts on them: no group is created and
+  no member is added. Scored on Ubuntu 22 T2 (mariya → pioneers, 5 pts), Mint 21
+  T2 (create spider, 3 pts; add may/peni/stan/miguel, 4 pts) and the CP19
+  Exhibition Round (candace → firesidegirls, 8 pts, whose existing test only
+  checks the parser).
+- [ ] **Hidden users with uid < 1000.** Mint 21 T2 plants an unauthorised user
+  below uid 1000. `Account::is_human` excludes it, so it is never considered for
+  removal.
+- [ ] **Lock root when its password is blank** (`passwd -l root`). Mint 21 T2,
+  4 pts. Account Permissions locks only passwordless *human* accounts.
+- [ ] **Minimum password age 1–3 days.** The key says `PASS_MIN_DAYS` must be 1–3
+  inclusive (Ubuntu 22 T2, 3 pts). The tool writes 7.
+
+### Linux: PAM
+- [ ] **Remove `nullok` from `common-auth`.** Ubuntu 22 T2 (3 pts), Mint 21 T2
+  (4 pts). Must run after the task's own `pam-auth-update` calls, which restore it.
+- [ ] **`minlen` on the PAM line itself.** Ubuntu's key appends `minlen=10` to the
+  `pam_pwquality` line, Mint's to the `pam_unix` line. The tool sets it only in
+  `pwquality.conf`.
+- [ ] **`remember=` on `pam_unix`.** Mint 21 T2 (3 pts) scores `remember=3` on the
+  `pam_unix` line. The tool enforces history only through `pam_pwhistory`.
+
+### Linux: system hardening
+- [ ] **Contrary values in `/etc/sysctl.conf`.** Both keys plant
+  `net.ipv4.ip_forward=1` / `tcp_syncookies=0` in `/etc/sysctl.conf`. That file
+  is read after `sysctl.d` (`sysctl --system`, and `99-sysctl.conf` sorts after
+  `99-pinnacle.conf`), so the drop-in loses at boot. Ubuntu 22 T2 items 11–12
+  (8 pts), Mint 21 T2 items 15–16 (8 pts).
+- [ ] **Contrary values in `sshd_config`.** Ubuntu 22 T2 sets
+  `PermitRootLogin yes` in the main file (5 pts). Rewrite contrary active lines
+  in the main file and in earlier drop-ins, since sshd takes the first value.
+- [ ] **Packages.** Purge `aisleriot` (Ubuntu 22 T2, 4 pts), `doona` and `xprobe`
+  (Mint 21 T2, 3 pts each). Map README "X2Go" to `x2goserver` (Ubuntu 22 T2,
+  5 pts).
+- [ ] **Mint: Update Manager applies updates automatically** (Mint 21 T2, 3 pts).
+- [ ] **Apache: `ServerSignature Off`, `ServerTokens Prod`** when Apache is
+  installed (the same item is scored on Windows 11 T2).
+
+### Linux: backdoors and prohibited files
+- [ ] **Backdoor listeners.** Ubuntu 22 T2: `nc.traditional` listening on 1337,
+  launched from `/etc/crontab` (5 pts). Mint 21 T2: `/usr/share/zod/kneelB4zod.py`
+  listening on 1337 (6 pts). Nothing detects a listening process today.
+- [ ] **Hacking-tool archives outside `/home`.** Mint 21 T2:
+  `/usr/games/pyrdp-master.zip` (4 pts). The Linux media scan has no
+  hacking-tool patterns at all.
+- [ ] **Don't delete a critical service's data.** Mint 21 T2 penalty (−5): "Important
+  files removed from public FTP directories". `/srv` is a media search root, and
+  vsftpd is critical on that image.
+
+### Windows
+- [ ] **WinRM service refuses unencrypted traffic** (`AllowUnencryptedTraffic = 0`).
+  Windows 11 T2.
+- [ ] **Lockout threshold below 5 is a penalty** (Windows 11 T2, Server 2019 T2,
+  −4). `password_policy.rs` treats 1–4 as compliant and leaves them.
+- [ ] **Apache `ServerSignature Off`** in `C:\Apache24\conf\httpd.conf` (Windows 11 T2).
+- [ ] **Prohibited software:** BitTorrent (Server 2019 T2), Burp Suite and Nmap
+  (Windows 11 T2), Wireshark (Server 2019 T2; *required* on Windows 11 T2, so the
+  README must win).
+- [ ] **Folder-only installs.** Jellyfin in `C:\Program Files\Jellyfin` and Nmap in
+  `C:\Program Files (x86)\Nmap` are removed by deleting the folder. Burp Suite and
+  Python by deleting a desktop shortcut. Removal through uninstall registry entries
+  alone misses them.
+- [ ] **Update apps Chocolatey did not install.** Chrome, Notepad++ (Windows 11 T2)
+  and Firefox (Server 2019 T2). `choco outdated` lists only choco-managed packages.
+  Penalty if the app ends up outside its default location.
+- [ ] **Hacking-tool files:** `brutus-aet2-darknet.zip` in Public Downloads (Server
+  2019 T2) matches no pattern. README-required software (Wireshark) must be exempt
+  from the file patterns.
+- [ ] **Domain controller shares.** The share audit would remove `NETLOGON` and
+  `SYSVOL` on a Server image that is a DC.
+
+### Tests
+- [ ] Encode each of the four keys as an answer-key test file, one test per
+  scored item, like `crates/linux/tests/answer_key.rs`.
+
+---
+
 ## Tasks Identified from Checklists (Not Yet Implemented)
 
 These tasks were identified from the Windows Checklist and waffleWindowsScript but may need manual intervention or future implementation:
