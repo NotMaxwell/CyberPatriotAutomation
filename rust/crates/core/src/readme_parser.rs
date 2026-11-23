@@ -732,6 +732,16 @@ pub fn extract_group_members(members_text: &str) -> Vec<String> {
     );
     let text = leading.replace(&text, "");
 
+    // "... users to it: may, peni, stan" - once a colon introduces the list,
+    // everything after it is names, and a name may be an ordinary word. "may"
+    // is a real account in CP18 Mint 21 Training 2 but is also in
+    // `is_common_word`, which exists to reject prose; applying it inside an
+    // explicit list dropped her from the group.
+    let (text, is_explicit_list) = match text.split_once(':') {
+        Some((_, list)) => (list.to_string(), true),
+        None => (text.into_owned(), false),
+    };
+
     let splitter = re(r"[,\s]+");
     splitter
         .split(&text)
@@ -739,9 +749,29 @@ pub fn extract_group_members(members_text: &str) -> Vec<String> {
         .filter(|m| {
             !m.is_empty()
                 && !MEMBERSHIP_WORDS.iter().any(|w| w.eq_ignore_ascii_case(m))
-                && is_valid_username(m)
+                && (is_valid_username(m) || (is_explicit_list && is_listed_name(m)))
         })
         .collect()
+}
+
+/// A single word that is an ordinary English word but sits in an explicit list
+/// of names. Same structural checks as [`is_valid_username`], minus the
+/// prose-word rejection that the list's own punctuation has already answered.
+fn is_listed_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(char::is_whitespace)
+        && name.chars().count() <= 20
+        && !name.contains(INVALID_USERNAME_CHARS)
+        && name.chars().any(|c| c.is_alphabetic())
+        && !is_list_connective(name)
+}
+
+/// Connectives that must never be taken as a name even inside a list.
+fn is_list_connective(word: &str) -> bool {
+    matches!(
+        word.to_lowercase().as_str(),
+        "and" | "the" | "it" | "or" | "all" | "also" | "following" | "to" | "group"
+    )
 }
 
 fn parse_users_to_create(content: &str, data: &mut ReadmeData) {
