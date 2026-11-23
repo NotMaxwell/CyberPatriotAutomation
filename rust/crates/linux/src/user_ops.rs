@@ -53,6 +53,29 @@ impl Account {
                 .any(|s| s.eq_ignore_ascii_case(&self.name))
     }
 
+    /// A person hiding below the human uid range.
+    ///
+    /// Mint 21 Training 2 plants `liv:x:999:999::/home/liv:/bin/bash`: uid 999 is
+    /// under [`FIRST_HUMAN_UID`], so [`Account::is_human`] says "package account",
+    /// yet the account has a real shell and a home under `/home/`, which no
+    /// package account has. All three must hold, and the name must not be a
+    /// known system account, so `daemon`, `www-data`, `nobody` and `syslog`
+    /// (nologin shells, homes in `/var` or `/nonexistent`) are never selected.
+    pub fn is_hidden_human(&self) -> bool {
+        (1..FIRST_HUMAN_UID).contains(&self.uid)
+            && self.can_log_in()
+            && self.home.starts_with("/home/")
+            && !SYSTEM_ACCOUNTS
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(&self.name))
+    }
+
+    /// A person the README's authorised list has to account for: a normal human
+    /// account or one hiding below uid 1000.
+    pub fn is_person(&self) -> bool {
+        self.is_human() || self.is_hidden_human()
+    }
+
     /// Can this account log in at all?
     ///
     /// A shell of `nologin` or `false` is how a service account is kept out. An
@@ -123,6 +146,22 @@ pub async fn human_accounts() -> Vec<Account> {
         .into_iter()
         .filter(|a| a.is_human())
         .collect()
+}
+
+/// Is this a name safe to hand to `groupadd`, `gpasswd` or `useradd`?
+///
+/// The names come out of README prose. Anything outside the portable set
+/// (letters, digits, `_`, `-`, `.`, not starting with `-` or a digit-only
+/// string) is prose that was mistaken for a name, and it must never become an
+/// argument on a command line.
+pub fn is_valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && !name.starts_with('-')
+        && !name.chars().all(|c| c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
 }
 
 /// Does this account exist?
@@ -293,6 +332,46 @@ async fn chpasswd(name: &str, password: &str) -> Result<(), String> {
     } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
+}
+
+/// Does this group exist in `/etc/group`?
+pub async fn group_exists(group: &str) -> bool {
+    let text = tokio::fs::read_to_string("/etc/group")
+        .await
+        .unwrap_or_default();
+    parse_group(&text).iter().any(|(g, _, _)| g == group)
+}
+
+/// Create a group, and prove it by reading `/etc/group` back.
+pub async fn create_group(name: &str, why: &str) -> Result<(), String> {
+    if !is_valid_name(name) {
+        return Err(format!("{name:?} is not a valid group name"));
+    }
+    remediation::apply(
+        &format!("group {name}"),
+        &format!("exists ({why})"),
+        || async {
+            Some(
+                if group_exists(name).await {
+                    "present"
+                } else {
+                    "absent"
+                }
+                .to_string(),
+            )
+        },
+        |state| state == "present",
+        &format!("groupadd {name}"),
+        || async {
+            let (ok, _o, e) = command::execute("groupadd", Some(name)).await;
+            if ok {
+                Ok(())
+            } else {
+                Err(e.unwrap_or_else(|| format!("groupadd {name} failed")))
+            }
+        },
+    )
+    .await
 }
 
 /// Add an account to a group, and prove it.
@@ -544,6 +623,47 @@ mallory:x:1002:1002::/home/mallory:/bin/bash
         for shell in ["/bin/bash", "/usr/bin/zsh", "/bin/sh", "/usr/bin/fish"] {
             assert!(!is_nologin_shell(shell), "{shell:?} is a real shell");
         }
+    }
+
+    /// Mint 21 Training 2 hides `liv` at uid 999 with a login shell and a home
+    /// under /home. Real package accounts must never be selected.
+    #[test]
+    fn a_login_account_below_uid_1000_with_a_home_is_a_hidden_human() {
+        let text = format!(
+            "{PASSWD}syslog:x:104:110::/home/syslog:/usr/sbin/nologin\n\
+             liv:x:999:999::/home/liv:/bin/bash\n\
+             postgres:x:120:125:PostgreSQL:/var/lib/postgresql:/bin/bash\n"
+        );
+        let accounts = parse_passwd(&text);
+        let hidden: Vec<&str> = accounts
+            .iter()
+            .filter(|a| a.is_hidden_human())
+            .map(|a| a.name.as_str())
+            .collect();
+        assert_eq!(hidden, ["liv"]);
+        for never in ["root", "daemon", "www-data", "nobody", "syslog", "postgres"] {
+            let a = accounts.iter().find(|a| a.name == never).unwrap();
+            assert!(!a.is_hidden_human(), "{never} must not be selected");
+        }
+        let liv = accounts.iter().find(|a| a.name == "liv").unwrap();
+        assert!(liv.is_person());
+        assert!(!liv.is_human(), "is_human is unchanged for other tasks");
+    }
+
+    #[test]
+    fn names_are_validated_before_they_reach_a_command() {
+        for good in ["spider", "may", "a_b-c.d", "user1"] {
+            assert!(is_valid_name(good), "{good}");
+        }
+        for bad in ["", "-rf", "a b", "x;y", "$(id)", "12345", "a/b", "it's"] {
+            assert!(!is_valid_name(bad), "{bad:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn an_invalid_group_name_is_refused_before_any_command_runs() {
+        let err = create_group("bad name; rm", "test").await.unwrap_err();
+        assert!(err.contains("not a valid group name"), "{err}");
     }
 
     #[test]

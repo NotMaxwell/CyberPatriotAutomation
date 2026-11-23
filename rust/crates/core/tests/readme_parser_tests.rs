@@ -423,3 +423,39 @@ fn extract_group_members_keeps_only_the_names() {
         );
     }
 }
+
+/// CP18 Mint 21 Training 2: the group is named in quotes and the sentence says
+/// "add the following users to it", so no second group name follows. Quoted
+/// names and the trailing pronoun must not leak into the group or its members.
+#[tokio::test]
+async fn group_is_created_from_the_quoted_add_the_following_users_to_it_phrasing() {
+    let data = parse_html(
+        "<html><body><h1>Linux Mint 21</h1><p>Create a group called \"spider\" and add the \
+         following users to it: may, peni, stan, miguel</p></body></html>",
+    )
+    .await;
+
+    let group = data
+        .group_requirements
+        .iter()
+        .find(|g| g.group_name == "spider")
+        .expect("spider group");
+    assert_eq!(group.members, ["may", "peni", "stan", "miguel"]);
+}
+
+/// The user-first phrasing, with quoted names, as in CP18 Ubuntu 22 Training 2.
+#[tokio::test]
+async fn group_member_is_parsed_from_the_add_the_user_to_the_group_phrasing() {
+    let data = parse_html(
+        "<html><body><h1>Ubuntu 22</h1><p>Please add the user \"mariya\" to the \"pioneers\" \
+         group.</p></body></html>",
+    )
+    .await;
+
+    let group = data
+        .group_requirements
+        .iter()
+        .find(|g| g.group_name == "pioneers")
+        .expect("pioneers group");
+    assert_eq!(group.members, ["mariya"]);
+}

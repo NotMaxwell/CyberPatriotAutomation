@@ -221,6 +221,58 @@ pub fn authorised_from(readme: &ReadmeData) -> Authorised {
     }
 }
 
+/// One step of applying a README group requirement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupAction {
+    /// Create the group; it is not in `/etc/group`.
+    Create(String),
+    /// Add the member to the group (additively).
+    AddMember { group: String, user: String },
+}
+
+/// What has to happen for the README's group requirements to hold.
+///
+/// Pure: `existing_groups` is the group names on the machine, and `users` the
+/// accounts that exist *or will exist by then* (created earlier in the run).
+/// Admin groups are skipped, since the admin logic owns them. Names that
+/// would not be safe command-line arguments are skipped, and members are only
+/// added when the account exists. Additive only: nothing is ever removed.
+pub fn group_actions(
+    readme: &ReadmeData,
+    existing_groups: &[String],
+    users: &HashSet<String>,
+) -> Vec<GroupAction> {
+    let mut actions = Vec::new();
+    for requirement in &readme.group_requirements {
+        let group = requirement.group_name.trim();
+        if !user_ops::is_valid_name(group)
+            || ADMIN_GROUPS.iter().any(|a| a.eq_ignore_ascii_case(group))
+        {
+            continue;
+        }
+        let members: Vec<&String> = requirement
+            .members
+            .iter()
+            .filter(|m| user_ops::is_valid_name(m) && users.contains(&m.to_lowercase()))
+            .collect();
+        let exists = existing_groups.iter().any(|g| g == group);
+        if !exists && !members.is_empty() {
+            actions.push(GroupAction::Create(group.to_string()));
+        }
+        // The group is only worth creating if someone can go in it; a requirement
+        // with no existing members creates nothing.
+        if exists || !members.is_empty() {
+            for user in members {
+                actions.push(GroupAction::AddMember {
+                    group: group.to_string(),
+                    user: user.clone(),
+                });
+            }
+        }
+    }
+    actions
+}
+
 /// Accounts on the machine that the README does not authorise.
 ///
 /// System accounts are excluded twice over - by uid and by name - because
@@ -228,7 +280,9 @@ pub fn authorised_from(readme: &ReadmeData) -> Authorised {
 pub fn unauthorised(present: &[user_ops::Account], authorised: &HashSet<String>) -> Vec<String> {
     present
         .iter()
-        .filter(|a| a.is_human())
+        // Includes accounts hiding below uid 1000 with a login shell and a home
+        // under /home (Mint 21 Training 2's `liv`); see `is_hidden_human`.
+        .filter(|a| a.is_person())
         .filter(|a| !authorised.contains(&a.name.to_lowercase()))
         .filter(|a| {
             !SYSTEM_ACCOUNTS
@@ -298,12 +352,39 @@ impl Task for UserManagementTask {
             .filter(|name| present.iter().any(|a| a.name.eq_ignore_ascii_case(name)))
             .collect();
 
+        // Users that exist now or will once the missing ones are created.
+        let mut known_users: HashSet<String> =
+            present.iter().map(|a| a.name.to_lowercase()).collect();
+        known_users.extend(missing.iter().map(|u| u.to_lowercase()));
+        let group_text = tokio::fs::read_to_string("/etc/group")
+            .await
+            .unwrap_or_default();
+        let existing_groups: Vec<String> = user_ops::parse_group(&group_text)
+            .into_iter()
+            .map(|(g, _, _)| g)
+            .collect();
+        let group_plan = group_actions(&readme, &existing_groups, &known_users);
+
         result.items_attempted =
-            (surplus.len() + missing.len() + plan.admins.len() + weak.len()) as i32;
+            (surplus.len() + missing.len() + plan.admins.len() + weak.len() + group_plan.len())
+                as i32;
 
         if self.dry_run {
             for user in &missing {
                 ui::markup_line(&format!("[cyan]Would create: {}[/]", ui::escape(user)));
+            }
+            for action in &group_plan {
+                match action {
+                    GroupAction::Create(group) => ui::markup_line(&format!(
+                        "[cyan]Would create group: {}[/]",
+                        ui::escape(group)
+                    )),
+                    GroupAction::AddMember { group, user } => ui::markup_line(&format!(
+                        "[cyan]Would add {} to group {}[/]",
+                        ui::escape(user),
+                        ui::escape(group)
+                    )),
+                }
             }
             for user in &surplus {
                 ui::markup_line(&format!(
@@ -319,10 +400,12 @@ impl Task for UserManagementTask {
                 ));
             }
             result.message = format!(
-                "DRY RUN: would create {}, remove {} and reset {} passwords.",
+                "DRY RUN: would create {}, remove {} and reset {} passwords, and apply {} \
+                 group changes.",
                 missing.len(),
                 surplus.len(),
-                weak.len()
+                weak.len(),
+                group_plan.len()
             );
             return result;
         }
@@ -344,6 +427,45 @@ impl Task for UserManagementTask {
                     }
                 }
                 Err(e) => failures.push(format!("{user}: {e}")),
+            }
+        }
+
+        // The README's own groups, after the accounts exist and before anyone
+        // is removed. Additive: a member the README did not name is never taken
+        // out of a group.
+        for action in &group_plan {
+            let outcome = match action {
+                GroupAction::Create(group) => {
+                    user_ops::create_group(group, "the README asks for this group").await
+                }
+                GroupAction::AddMember { group, user } => {
+                    // A group whose creation failed cannot take members.
+                    if user_ops::group_exists(group).await {
+                        user_ops::add_to_group(user, group, "the README names them in this group")
+                            .await
+                    } else {
+                        Err(format!("group {group} does not exist"))
+                    }
+                }
+            };
+            match outcome {
+                Ok(()) => {
+                    result.items_succeeded += 1;
+                    let line = match action {
+                        GroupAction::Create(group) => {
+                            format!("✓ Created group: {}", ui::escape(group))
+                        }
+                        GroupAction::AddMember { group, user } => {
+                            format!(
+                                "✓ Added {} to group {}",
+                                ui::escape(user),
+                                ui::escape(group)
+                            )
+                        }
+                    };
+                    ui::markup_line(&format!("[green]{line}[/]"));
+                }
+                Err(e) => failures.push(format!("{action:?}: {e}")),
             }
         }
 
@@ -420,10 +542,12 @@ impl Task for UserManagementTask {
 
         result.success = failures.is_empty();
         result.message = format!(
-            "Created {}, removed {}, reset {} passwords, corrected administrative rights.",
+            "Created {}, removed {}, reset {} passwords, applied {} group changes, corrected \
+             administrative rights.",
             missing.len(),
             surplus.len(),
-            weak.len()
+            weak.len(),
+            group_plan.len()
         );
         if !failures.is_empty() {
             result.error_details = Some(failures.join("; "));
@@ -552,6 +676,97 @@ mod tests {
         ];
         let authorised: HashSet<String> = ["alice".to_string()].into_iter().collect();
         assert_eq!(unauthorised(&present, &authorised), ["mallory"]);
+    }
+
+    /// Mint 21 Training 2: a person hiding at uid 999 is unauthorised unless the
+    /// README names them, and daemons are still never touched.
+    #[test]
+    fn a_hidden_human_is_unauthorised_but_daemons_are_not() {
+        let mut liv = account("liv", 999);
+        liv.home = "/home/liv".to_string();
+        let mut syslog = account("syslog", 104);
+        syslog.shell = "/usr/sbin/nologin".to_string();
+        syslog.home = "/home/syslog".to_string();
+        let mut daemon = account("daemon", 1);
+        daemon.shell = "/usr/sbin/nologin".to_string();
+        daemon.home = "/usr/sbin".to_string();
+        let present = vec![liv, syslog, daemon, account("www-data", 33)];
+        let authorised: HashSet<String> = ["alice".to_string()].into_iter().collect();
+        assert_eq!(unauthorised(&present, &authorised), ["liv"]);
+
+        let named: HashSet<String> = ["liv".to_string()].into_iter().collect();
+        assert!(unauthorised(&present, &named).is_empty());
+    }
+
+    fn requirement(group: &str, members: &[&str]) -> GroupRequirement {
+        GroupRequirement {
+            group_name: group.to_string(),
+            members: members.iter().map(|m| m.to_string()).collect(),
+        }
+    }
+
+    fn set(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// CP18 Mint 21 Training 2: create "spider" and add four people.
+    #[test]
+    fn a_missing_group_is_created_then_its_members_are_added() {
+        let readme = ReadmeData {
+            group_requirements: vec![requirement("spider", &["may", "peni", "ghost"])],
+            ..Default::default()
+        };
+        let actions = group_actions(
+            &readme,
+            &["sudo".to_string()],
+            &set(&["may", "peni", "stan"]),
+        );
+        assert_eq!(
+            actions,
+            [
+                GroupAction::Create("spider".to_string()),
+                GroupAction::AddMember {
+                    group: "spider".to_string(),
+                    user: "may".to_string()
+                },
+                GroupAction::AddMember {
+                    group: "spider".to_string(),
+                    user: "peni".to_string()
+                },
+            ],
+            "ghost does not exist and is not added"
+        );
+    }
+
+    /// CP19 candace -> firesidegirls (8 pts): the group exists, so only the add.
+    #[test]
+    fn an_existing_group_only_gets_its_members() {
+        let readme = ReadmeData {
+            group_requirements: vec![requirement("firesidegirls", &["candace"])],
+            ..Default::default()
+        };
+        let actions = group_actions(&readme, &["firesidegirls".to_string()], &set(&["candace"]));
+        assert_eq!(
+            actions,
+            [GroupAction::AddMember {
+                group: "firesidegirls".to_string(),
+                user: "candace".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn admin_groups_and_unsafe_names_are_left_alone() {
+        let readme = ReadmeData {
+            group_requirements: vec![
+                requirement("sudo", &["erin"]),
+                requirement("Admin", &["erin"]),
+                requirement("bad name; reboot", &["erin"]),
+                requirement("ok", &["x;y"]),
+            ],
+            ..Default::default()
+        };
+        assert!(group_actions(&readme, &[], &set(&["erin", "x;y"])).is_empty());
     }
 
     #[test]
