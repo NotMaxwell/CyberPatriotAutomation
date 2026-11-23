@@ -1,4 +1,5 @@
-//! Audits shared folders to ensure only ADMIN$, C$, IPC$ exist.
+//! Audits shared folders to ensure only ADMIN$, C$, IPC$ exist (plus NETLOGON
+//! and SYSVOL on a domain controller, where removing them breaks logon).
 
 use async_trait::async_trait;
 use pinnacle_core::Task;
@@ -8,6 +9,30 @@ use pinnacle_core::models::{SystemInfo, TaskResult};
 use pinnacle_core::ui;
 
 const ALLOWED: &[&str] = &["ADMIN$", "C$", "IPC$"];
+
+/// The shares a domain controller publishes for logon scripts and group policy.
+/// Removing them breaks every domain client, and the scenario penalises it.
+const DOMAIN_CONTROLLER_SHARES: &[&str] = &["NETLOGON", "SYSVOL"];
+
+/// The shares that belong on this machine.
+fn allowed_shares(is_dc: bool) -> Vec<&'static str> {
+    let mut allowed = ALLOWED.to_vec();
+    if is_dc {
+        allowed.extend_from_slice(DOMAIN_CONTROLLER_SHARES);
+    }
+    allowed
+}
+
+/// Is this a domain controller? `ProductType` is `LanmanNt` only on one.
+/// Unreadable counts as "not", which leaves the stricter list in force.
+async fn is_domain_controller() -> bool {
+    crate::registry_ops::get_string(
+        r"HKLM\SYSTEM\CurrentControlSet\Control\ProductOptions",
+        "ProductType",
+    )
+    .await
+    .is_some_and(|t| t.trim().eq_ignore_ascii_case("LanmanNt"))
+}
 
 pub struct SharedFoldersAuditTask {
     name: String,
@@ -137,10 +162,11 @@ async fn remove_share_core(share: &str) -> Result<(), String> {
     }
 }
 
-fn unauthorized(found: &[String]) -> Vec<String> {
+fn unauthorized(found: &[String], is_dc: bool) -> Vec<String> {
+    let allowed = allowed_shares(is_dc);
     found
         .iter()
-        .filter(|s| !ALLOWED.iter().any(|a| a.eq_ignore_ascii_case(s)))
+        .filter(|s| !allowed.iter().any(|a| a.eq_ignore_ascii_case(s)))
         .cloned()
         .collect()
 }
@@ -172,11 +198,15 @@ impl Task for SharedFoldersAuditTask {
                 ..Default::default()
             };
         };
-        let unauthorized = unauthorized(&found);
+        let is_dc = is_domain_controller().await;
+        let unauthorized = unauthorized(&found, is_dc);
 
         let mut details: Vec<String> = Vec::new();
         details.push(format!("Shares found: {}", found.join(", ")));
-        details.push(format!("Allowed shares: {}", ALLOWED.join(", ")));
+        details.push(format!(
+            "Allowed shares: {}",
+            allowed_shares(is_dc).join(", ")
+        ));
         if !unauthorized.is_empty() {
             details.push(format!("Unauthorized shares: {}", unauthorized.join(", ")));
         } else {
@@ -242,7 +272,7 @@ impl Task for SharedFoldersAuditTask {
     async fn verify(&mut self) -> bool {
         // A read failure is not proof the machine is clean.
         match read_shares().await {
-            Some(found) => unauthorized(&found).is_empty(),
+            Some(found) => unauthorized(&found, is_domain_controller().await).is_empty(),
             None => false,
         }
     }
@@ -275,6 +305,30 @@ The command completed successfully.
     #[test]
     fn only_non_default_shares_are_unauthorized() {
         let shares = parse_shares(NET_SHARE_OUTPUT);
-        assert_eq!(unauthorized(&shares), vec!["Docs"]);
+        assert_eq!(unauthorized(&shares, false), vec!["Docs"]);
+    }
+
+    #[test]
+    fn a_member_server_allows_only_the_defaults() {
+        assert_eq!(allowed_shares(false), vec!["ADMIN$", "C$", "IPC$"]);
+    }
+
+    #[test]
+    fn a_domain_controller_also_allows_netlogon_and_sysvol() {
+        let allowed = allowed_shares(true);
+        assert!(allowed.contains(&"NETLOGON") && allowed.contains(&"SYSVOL"));
+        assert!(allowed.contains(&"C$"));
+    }
+
+    #[test]
+    fn netlogon_and_sysvol_are_unauthorized_off_a_domain_controller() {
+        let found: Vec<String> = ["C$", "NETLOGON", "sysvol", "Docs"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            unauthorized(&found, false),
+            vec!["NETLOGON", "sysvol", "Docs"]
+        );
+        assert_eq!(unauthorized(&found, true), vec!["Docs"]);
     }
 }
