@@ -32,7 +32,7 @@ use pinnacle_core::{command, impl_task_meta, remediation, run_log, ui};
 
 use crate::{file_ops, readme_services, systemd_ops};
 use async_trait::async_trait;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::time::Duration;
 
@@ -255,12 +255,61 @@ pub fn is_exempt(p: &ProcessFacts, readme: Option<&ReadmeData>) -> bool {
     readme_services::is_protected(readme, &format!("{}.service", p.comm))
 }
 
+/// Whether a package owns a path. Three states, so that "could not ask" can
+/// never read as "not owned": a broken dpkg that made everything look unowned
+/// would have this task kill and delete the image's own services.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ownership {
+    Owned,
+    NotOwned,
+    Unknown,
+}
+
+/// Directories holding the system's own binaries. A process running from one is
+/// killed and reported, but its file is never deleted: even a correct "no
+/// package owns this" there is not worth an image that cannot boot.
+const SYSTEM_BINARY_DIRS: &[&str] = &[
+    "/usr/bin",
+    "/usr/sbin",
+    "/bin",
+    "/sbin",
+    "/usr/lib",
+    "/lib",
+    "/usr/libexec",
+];
+
+/// May this unowned binary be deleted?
+pub fn binary_deletable(path: &str) -> bool {
+    !SYSTEM_BINARY_DIRS
+        .iter()
+        .any(|d| path.starts_with(&format!("{d}/")))
+}
+
+/// Interpret one `dpkg -S` run. Only exit status 1 with "no path found
+/// matching pattern" is a real "not owned"; a spawn failure, another exit code
+/// or any other message means dpkg could not answer.
+pub fn ownership_from_dpkg(exit: Option<i32>, stderr: &str) -> Ownership {
+    match exit {
+        Some(0) => Ownership::Owned,
+        Some(1) if stderr.contains("no path found matching pattern") => Ownership::NotOwned,
+        _ => Ownership::Unknown,
+    }
+}
+
+/// Combine one query with the once-per-scan probe: when the probe failed, the
+/// package database cannot be trusted and every answer is Unknown.
+pub fn effective_ownership(probe_ok: bool, answer: Ownership) -> Ownership {
+    if probe_ok { answer } else { Ownership::Unknown }
+}
+
 /// Decide whether a listening process is a backdoor. `owned` answers "does a
 /// package own this path", from a lookup done beforehand so this stays pure.
+/// Unknown ownership is treated like Owned by rules (b) and (c) and for every
+/// deletion.
 pub fn classify(
     p: &ProcessFacts,
     readme: Option<&ReadmeData>,
-    owned: impl Fn(&str) -> bool,
+    owned: impl Fn(&str) -> Ownership,
 ) -> Option<Verdict> {
     if is_exempt(p, readme) {
         return None;
@@ -269,15 +318,16 @@ pub fn classify(
 
     if RAW_LISTENERS.contains(&exe_name) {
         let exe_owned = owned(&p.exe);
+        let deletable = exe_owned == Ownership::NotOwned && binary_deletable(&p.exe);
         return Some(Verdict {
             kind: Kind::RawListener,
             reason: format!("{exe_name} is a raw network listener"),
-            delete: if exe_owned {
-                vec![]
-            } else {
+            delete: if deletable {
                 vec![p.exe.clone()]
+            } else {
+                vec![]
             },
-            left_for_purge: exe_owned.then(|| p.exe.clone()),
+            left_for_purge: (exe_owned == Ownership::Owned).then(|| p.exe.clone()),
             cron_paths: vec![],
         });
     }
@@ -285,7 +335,7 @@ pub fn classify(
     if is_interpreter(exe_name)
         && let Some(script) = script_path(&p.args, p.cwd.as_deref())
     {
-        if owned(&script) {
+        if owned(&script) != Ownership::NotOwned {
             return None;
         }
         return Some(Verdict {
@@ -298,15 +348,21 @@ pub fn classify(
     }
 
     if !p.exe.is_empty()
-        && !owned(&p.exe)
+        && owned(&p.exe) == Ownership::NotOwned
         && !ALLOWED_UNOWNED_DIRS.iter().any(|d| p.exe.starts_with(d))
     {
+        let deletable = binary_deletable(&p.exe);
+        let paths = if deletable {
+            vec![p.exe.clone()]
+        } else {
+            vec![]
+        };
         return Some(Verdict {
             kind: Kind::UnownedBinary,
             reason: format!("{} is listening and no package owns it", p.exe),
-            delete: vec![p.exe.clone()],
+            delete: paths.clone(),
             left_for_purge: None,
-            cron_paths: vec![p.exe.clone()],
+            cron_paths: paths,
         });
     }
     None
@@ -371,18 +427,31 @@ pub fn dpkg_candidates(path: &str) -> Vec<String> {
 // Reading the machine
 // ---------------------------------------------------------------------------
 
-async fn dpkg_owns(path: &str) -> bool {
+async fn dpkg_ownership(path: &str) -> Ownership {
     if path.contains('"') {
-        // Cannot be quoted for the command; treat as owned so it is not deleted.
-        return true;
+        // Cannot be quoted for the command, so it cannot be asked.
+        return Ownership::Unknown;
     }
+    let mut answer = Ownership::NotOwned;
     for candidate in dpkg_candidates(path) {
-        let (ok, _o, _e) = command::execute("dpkg", Some(&format!("-S \"{candidate}\""))).await;
-        if ok {
-            return true;
+        let (exit, _o, err) = command::execute_for_exit_code(
+            "dpkg",
+            Some(&format!("-S \"{candidate}\"")),
+            Duration::from_secs(30),
+        )
+        .await;
+        match ownership_from_dpkg(exit, err.as_deref().unwrap_or("")) {
+            Ownership::Owned => return Ownership::Owned,
+            Ownership::Unknown => answer = Ownership::Unknown,
+            Ownership::NotOwned => {}
         }
     }
-    false
+    answer
+}
+
+/// Can dpkg answer at all? Asked about a file that is certainly owned.
+async fn dpkg_probe() -> bool {
+    dpkg_ownership("/usr/bin/dpkg").await == Ownership::Owned
 }
 
 async fn gather(listener: &Listener) -> ProcessFacts {
@@ -422,8 +491,16 @@ async fn gather(listener: &Listener) -> ProcessFacts {
     }
 }
 
+/// The outcome of one scan.
+struct Scan {
+    backdoors: Vec<(ProcessFacts, Verdict, Vec<u16>)>,
+    /// False when dpkg could not be read, so only raw listeners were judged.
+    package_db_readable: bool,
+}
+
 /// Every listening process judged a backdoor, with its facts and ports.
-async fn find_backdoors(readme: Option<&ReadmeData>) -> Vec<(ProcessFacts, Verdict, Vec<u16>)> {
+async fn find_backdoors(readme: Option<&ReadmeData>) -> Scan {
+    let probe_ok = dpkg_probe().await;
     let (_ok, out, _e) = command::execute("ss", Some("-Htlnup")).await;
     let mut ports: HashMap<u32, (Listener, BTreeSet<u16>)> = HashMap::new();
     for l in parse_ss(&out) {
@@ -440,20 +517,24 @@ async fn find_backdoors(readme: Option<&ReadmeData>) -> Vec<(ProcessFacts, Verdi
             continue;
         }
         let facts = gather(&listener).await;
-        let mut owned: HashSet<String> = HashSet::new();
+        let mut owned: HashMap<String, Ownership> = HashMap::new();
         let mut paths = vec![facts.exe.clone()];
         paths.extend(script_path(&facts.args, facts.cwd.as_deref()));
         for path in paths.into_iter().filter(|p| !p.is_empty()) {
-            if dpkg_owns(&path).await {
-                owned.insert(path);
-            }
+            let answer = dpkg_ownership(&path).await;
+            owned.insert(path, effective_ownership(probe_ok, answer));
         }
-        if let Some(verdict) = classify(&facts, readme, |p| owned.contains(p)) {
+        if let Some(verdict) = classify(&facts, readme, |p| {
+            owned.get(p).copied().unwrap_or(Ownership::Unknown)
+        }) {
             found.push((facts, verdict, set.into_iter().collect()));
         }
     }
     found.sort_by_key(|(f, _, _)| f.pid);
-    found
+    Scan {
+        backdoors: found,
+        package_db_readable: probe_ok,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -586,7 +667,7 @@ async fn disable_cron_lines(verdict: &Verdict) -> Result<usize, String> {
 /// A unit file under /etc/systemd/system that no package owns.
 async fn local_unit(unit: &str) -> bool {
     let path = format!("/etc/systemd/system/{unit}");
-    Path::new(&path).is_file() && !dpkg_owns(&path).await
+    Path::new(&path).is_file() && dpkg_ownership(&path).await == Ownership::NotOwned
 }
 
 #[async_trait]
@@ -607,7 +688,21 @@ impl Task for BackdoorListenersTask {
             success: true,
             ..Default::default()
         };
-        let backdoors = find_backdoors(self.readme_data.as_ref()).await;
+        let scan = find_backdoors(self.readme_data.as_ref()).await;
+        let backdoors = scan.backdoors;
+        if !scan.package_db_readable {
+            ui::markup_line(
+                "[yellow]⚠ The package database could not be read, so file ownership is \
+                 unknown. Only raw listeners (nc, socat ...) are judged, and nothing is \
+                 deleted.[/]",
+            );
+            remediation::record_finding(
+                "package database",
+                "dpkg can say which package owns a file",
+                false,
+                "dpkg -S /usr/bin/dpkg did not succeed; scripts and binaries were not judged",
+            );
+        }
         result.items_attempted = backdoors.len() as i32;
 
         if backdoors.is_empty() {
@@ -720,7 +815,10 @@ impl Task for BackdoorListenersTask {
         if self.dry_run {
             return true;
         }
-        find_backdoors(self.readme_data.as_ref()).await.is_empty()
+        find_backdoors(self.readme_data.as_ref())
+            .await
+            .backdoors
+            .is_empty()
     }
 }
 
@@ -751,8 +849,22 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
         items.iter().map(|s| s.to_string()).collect()
     }
 
-    fn nothing_owned(_: &str) -> bool {
-        false
+    fn nothing_owned(_: &str) -> Ownership {
+        Ownership::NotOwned
+    }
+
+    fn all_owned(_: &str) -> Ownership {
+        Ownership::Owned
+    }
+
+    fn only(owned_path: &'static str) -> impl Fn(&str) -> Ownership {
+        move |path| {
+            if path == owned_path {
+                Ownership::Owned
+            } else {
+                Ownership::NotOwned
+            }
+        }
     }
 
     #[test]
@@ -792,7 +904,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
             "/usr/bin/nc.traditional",
             &["nc.traditional", "-l", "-p", "1337"],
         );
-        let v = classify(&p, None, |path| path == "/usr/bin/nc.traditional").unwrap();
+        let v = classify(&p, None, only("/usr/bin/nc.traditional")).unwrap();
         assert_eq!(v.kind, Kind::RawListener);
         assert!(
             v.delete.is_empty(),
@@ -815,7 +927,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
             "/usr/bin/python3.10",
             &["python3", "/usr/share/zod/kneelB4zod.py"],
         );
-        let v = classify(&p, None, |path| path == "/usr/bin/python3.10").unwrap();
+        let v = classify(&p, None, only("/usr/bin/python3.10")).unwrap();
         assert_eq!(v.kind, Kind::UnownedScript);
         assert_eq!(v.delete, ["/usr/share/zod/kneelB4zod.py"]);
     }
@@ -827,7 +939,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
             "/usr/bin/python3.10",
             &["python3", "/usr/bin/unattended-upgrade-shutdown"],
         );
-        assert!(classify(&p, None, |_| true).is_none());
+        assert!(classify(&p, None, all_owned).is_none());
     }
 
     #[test]
@@ -867,7 +979,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
     #[test]
     fn a_package_owned_service_is_not_a_backdoor() {
         let p = facts("cupsd", "/usr/sbin/cupsd", &["/usr/sbin/cupsd"]);
-        assert!(classify(&p, None, |_| true).is_none());
+        assert!(classify(&p, None, all_owned).is_none());
     }
 
     #[test]
@@ -895,7 +1007,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
         // The classifier does not even see the port: a packaged service on the
         // backdoor's own port is not selected.
         let p = facts("nginx", "/usr/sbin/nginx", &["nginx"]);
-        assert!(classify(&p, None, |_| true).is_none());
+        assert!(classify(&p, None, all_owned).is_none());
     }
 
     #[test]
@@ -919,7 +1031,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
                 &["nc.traditional", "-l", "-p", "1337"],
             ),
             None,
-            |_| true,
+            all_owned,
         )
         .unwrap();
         assert!(cron_line_matches(
@@ -948,7 +1060,7 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
             "/usr/bin/python3",
             &["python3", "/usr/share/zod/kneelB4zod.py"],
         );
-        let v = classify(&p, None, |path| path == "/usr/bin/python3").unwrap();
+        let v = classify(&p, None, only("/usr/bin/python3")).unwrap();
         assert!(cron_line_matches(
             "@reboot root python3 /usr/share/zod/kneelB4zod.py &",
             &v
@@ -974,5 +1086,103 @@ tcp   LISTEN 0 5     0.0.0.0:80     0.0.0.0:*   users:((\"a\",pid=1,fd=3),(\"b\"
             ["/usr/bin/dash", "/bin/dash"]
         );
         assert_eq!(dpkg_candidates("/opt/x"), ["/opt/x"]);
+    }
+
+    #[test]
+    fn only_a_clean_no_path_found_answer_is_not_owned() {
+        assert_eq!(ownership_from_dpkg(Some(0), ""), Ownership::Owned);
+        assert_eq!(
+            ownership_from_dpkg(Some(1), "dpkg-query: no path found matching pattern /x"),
+            Ownership::NotOwned
+        );
+        assert_eq!(
+            ownership_from_dpkg(Some(1), "database corrupt"),
+            Ownership::Unknown
+        );
+        assert_eq!(ownership_from_dpkg(Some(2), ""), Ownership::Unknown);
+        assert_eq!(ownership_from_dpkg(None, ""), Ownership::Unknown);
+    }
+
+    #[test]
+    fn a_failed_probe_leaves_only_raw_listener_verdicts_and_no_deletions() {
+        let unknown = |_: &str| effective_ownership(false, Ownership::NotOwned);
+        let nc = facts("nc", "/tmp/nc", &["nc", "-l"]);
+        let v = classify(&nc, None, unknown).unwrap();
+        assert_eq!(v.kind, Kind::RawListener);
+        assert!(v.delete.is_empty());
+
+        let py = facts(
+            "python3",
+            "/usr/bin/python3",
+            &["python3", "/usr/share/zod/z.py"],
+        );
+        assert!(classify(&py, None, unknown).is_none());
+        let svc = facts("cupsd", "/usr/sbin/cupsd", &["cupsd"]);
+        assert!(classify(&svc, None, unknown).is_none());
+        let tmp = facts("x", "/tmp/x", &["/tmp/x"]);
+        assert!(classify(&tmp, None, unknown).is_none());
+    }
+
+    #[test]
+    fn an_unknown_answer_does_not_flag_a_script_or_binary() {
+        let unknown = |_: &str| Ownership::Unknown;
+        let py = facts("python3", "/usr/bin/python3", &["python3", "/opt/x/y.py"]);
+        assert!(classify(&py, None, unknown).is_none());
+        let bin = facts("x", "/var/tmp/x", &["/var/tmp/x"]);
+        assert!(classify(&bin, None, unknown).is_none());
+    }
+
+    #[test]
+    fn an_unowned_system_binary_is_killed_but_never_deleted() {
+        let p = facts("foo", "/usr/sbin/foo", &["/usr/sbin/foo"]);
+        let v = classify(&p, None, nothing_owned).unwrap();
+        assert_eq!(v.kind, Kind::UnownedBinary);
+        assert!(v.delete.is_empty());
+        assert!(v.cron_paths.is_empty());
+    }
+
+    #[test]
+    fn only_binaries_outside_system_directories_are_deletable() {
+        for p in [
+            "/usr/bin/x",
+            "/usr/sbin/x",
+            "/bin/x",
+            "/sbin/x",
+            "/usr/lib/x/y",
+            "/lib/x",
+            "/usr/libexec/x",
+        ] {
+            assert!(!binary_deletable(p), "{p}");
+        }
+        for p in [
+            "/tmp/x",
+            "/var/tmp/x",
+            "/dev/shm/x",
+            "/home/u/x",
+            "/opt/x",
+            "/usr/share/x",
+            "/usr/local/bin/x",
+        ] {
+            assert!(binary_deletable(p), "{p}");
+        }
+    }
+
+    #[test]
+    fn the_planted_cases_still_classify_and_act_as_before() {
+        let nc = facts(
+            "nc.traditional",
+            "/usr/bin/nc.traditional",
+            &["nc.traditional", "-l", "-p", "1337"],
+        );
+        let v = classify(&nc, None, only("/usr/bin/nc.traditional")).unwrap();
+        assert!(v.delete.is_empty());
+        assert_eq!(v.left_for_purge.as_deref(), Some("/usr/bin/nc.traditional"));
+        let py = facts(
+            "python3",
+            "/usr/bin/python3.10",
+            &["python3", "/usr/share/zod/kneelB4zod.py"],
+        );
+        let v = classify(&py, None, only("/usr/bin/python3.10")).unwrap();
+        assert_eq!(v.delete, ["/usr/share/zod/kneelB4zod.py"]);
     }
 }
