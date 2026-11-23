@@ -385,6 +385,10 @@ pub const PACKAGE_IDS: &[(&str, &str)] = &[
     ("CCleaner", "ccleaner"),
     ("Jellyfin", "jellyfin-media-player"),
     ("Jellyfin Media Player", "jellyfin-media-player"),
+    ("BitTorrent", "bittorrent"),
+    ("uTorrent", "utorrent"),
+    ("Burp Suite", "burp-suite-free-edition"),
+    ("Nmap", "nmap"),
 ];
 
 /// Display names a README might use, mapped to the Windows service name.
@@ -428,7 +432,21 @@ pub const REMOTE_DESKTOP_VALUES: &[&str] = &["fDenyTSConnections", "AllowTSConne
 /// Player and Python 3 as separate items and the README named neither, so they
 /// are prohibited by default and only spared when the README explicitly
 /// requires them.
-pub const ALWAYS_PROHIBITED: &[&str] = &["Python", "CCleaner", "Jellyfin"];
+///
+/// BitTorrent, uTorrent, Burp Suite, Nmap and Wireshark come from the CP18 Windows
+/// 11 and Server 2019 round-2 keys, which score their removal. A README that
+/// requires one of them (the Windows 11 key penalises removing Wireshark) still
+/// wins, through the same override as Python.
+pub const ALWAYS_PROHIBITED: &[&str] = &[
+    "Python",
+    "CCleaner",
+    "Jellyfin",
+    "BitTorrent",
+    "uTorrent",
+    "Burp Suite",
+    "Nmap",
+    "Wireshark",
+];
 
 #[cfg(test)]
 mod tests {

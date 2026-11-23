@@ -58,6 +58,11 @@ const HACKING_TOOL_PATTERNS: &[&str] = &[
     "speedhack",
     "godmode",
     "trainer",
+    // Named in the CP18 round-2 keys: a brute-forcer, an RDP man-in-the-middle
+    // and a scanner that turn up as archives in a user's Downloads folder.
+    "brutus",
+    "pyrdp",
+    "darknet",
 ];
 
 const GAME_PATTERNS: &[&str] = &[
@@ -185,9 +190,15 @@ impl ProhibitedMediaTask {
             return true;
         }
 
-        for pattern in HACKING_TOOL_PATTERNS {
-            if file_name.contains(pattern) {
-                return true;
+        // Software the README requires is not a hacking tool, whatever its file
+        // name contains: the Windows 11 key penalises removing Wireshark, and
+        // "wireshark" is on the pattern list.
+        let required = self.required_names();
+        if !is_required_name(&file.name, &required) {
+            for pattern in HACKING_TOOL_PATTERNS {
+                if file_name.contains(pattern) {
+                    return true;
+                }
             }
         }
 
@@ -213,6 +224,14 @@ impl ProhibitedMediaTask {
         }
 
         false
+    }
+
+    /// Names of the software the README requires.
+    fn required_names(&self) -> Vec<String> {
+        self.readme_data
+            .as_ref()
+            .map(|r| r.required_software.iter().map(|s| s.name.clone()).collect())
+            .unwrap_or_default()
     }
 
     /// Is this the running tool, or a file sitting beside it?
@@ -367,6 +386,13 @@ impl Default for ProhibitedMediaTask {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Does `file_name` name software the README requires?
+fn is_required_name(file_name: &str, required: &[String]) -> bool {
+    required
+        .iter()
+        .any(|r| pinnacle_core::software_matching::matches(file_name, r))
 }
 
 fn to_found_file(path: &Path, metadata: &std::fs::Metadata) -> Option<FoundFile> {
@@ -572,5 +598,55 @@ impl Task for ProhibitedMediaTask {
             ));
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pinnacle_core::models::SoftwareRequirement;
+
+    fn file(name: &str) -> FoundFile {
+        FoundFile {
+            full_name: PathBuf::from(format!(r"C:\Users\student\Downloads\{name}")),
+            name: name.to_string(),
+            extension: Path::new(name)
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default(),
+            length: 1 << 20,
+            last_write_time: None,
+            directory_name: Some(r"C:\Users\student\Downloads".to_string()),
+        }
+    }
+
+    fn task_requiring(names: &[&str]) -> ProhibitedMediaTask {
+        let mut task = ProhibitedMediaTask::new();
+        let mut readme = ReadmeData::default();
+        for n in names {
+            readme.required_software.push(SoftwareRequirement {
+                name: n.to_string(),
+                ..Default::default()
+            });
+        }
+        task.set_readme_data(readme);
+        task
+    }
+
+    #[test]
+    fn the_cp18_tool_names_are_flagged() {
+        let task = ProhibitedMediaTask::new();
+        assert!(task.is_prohibited_file(&file("brutus-aet2-darknet.zip")));
+        assert!(task.is_prohibited_file(&file("pyrdp-master.zip")));
+    }
+
+    #[test]
+    fn a_required_programs_installer_is_not_flagged() {
+        let task = task_requiring(&["Wireshark"]);
+        assert!(!task.is_prohibited_file(&file("Wireshark-4.2.exe")));
+        // Still flagged when the README does not require it.
+        assert!(ProhibitedMediaTask::new().is_prohibited_file(&file("Wireshark-4.2.exe")));
+        // The exemption is for that program, not for every pattern.
+        assert!(task.is_prohibited_file(&file("brutus-aet2-darknet.zip")));
     }
 }
