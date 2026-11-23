@@ -40,7 +40,15 @@ pub struct Setting {
 /// a drop-in overrides the main file, while editing the main file would be
 /// overridden by any drop-in already present. Editing the main file is the
 /// mistake that makes a hardening run look applied and change nothing.
-pub const SSHD_DROPIN: &str = "/etc/ssh/sshd_config.d/99-pinnacle.conf";
+///
+/// Named `00-` because the `Include` reads drop-ins in lexical order and the
+/// first definition wins: `99-` lost to any stock drop-in (Ubuntu cloud images
+/// ship `50-cloud-init.conf` with `PasswordAuthentication yes`).
+pub const SSHD_DROPIN: &str = "/etc/ssh/sshd_config.d/00-pinnacle.conf";
+
+/// The drop-in earlier versions wrote. It sorts last, so it loses to everything;
+/// the Security Hardening task removes it once `SSHD_DROPIN` is in place.
+pub const SSHD_LEGACY_DROPIN: &str = "/etc/ssh/sshd_config.d/99-pinnacle.conf";
 
 /// Kernel parameters, written to a `sysctl.d` drop-in.
 ///
@@ -1018,6 +1026,8 @@ pub const PACKAGE_IDS: &[(&str, &str)] = &[
     ("vsftpd", "vsftpd"),
     ("Python", "python3"),
     ("Python3", "python3"),
+    ("X2Go", "x2goserver"),
+    ("X2GO Server", "x2goserver"),
     // Scripting runtimes a README may require. Perl in particular: the Ubuntu
     // 22.04 Exhibition Round names it as required software and scores -5 for
     // removing it, and an unresolved name is an install this tool cannot make.
@@ -1102,6 +1112,9 @@ pub const ALWAYS_PROHIBITED: &[(&str, &str)] = &[
     ("kismet", "wireless sniffer"),
     ("nmap", "network scanner"),
     ("zenmap", "network scanner"),
+    ("aisleriot", "game (solitaire collection)"),
+    ("doona", "network protocol fuzzer"),
+    ("xprobe", "OS fingerprinting scanner"),
 ];
 
 /// Accounts that must never be removed or locked, whatever the README says.
@@ -1289,6 +1302,24 @@ mod tests {
                 assert_eq!(existing, unit, "{display} maps to two different units");
             }
             seen.push((key, unit));
+        }
+    }
+
+    /// CP18 Training Round 2 plants these, and a README names X2Go as required.
+    #[test]
+    fn the_training_round_two_packages_are_covered() {
+        for package in ["aisleriot", "doona", "xprobe"] {
+            assert!(
+                ALWAYS_PROHIBITED.iter().any(|(p, _)| *p == package),
+                "{package} is not always-prohibited"
+            );
+        }
+        for name in ["X2Go", "x2go", "X2GO SERVER", "X2Go Server"] {
+            assert_eq!(
+                pinnacle_core::software_matching::resolve_package_id(name, PACKAGE_IDS).as_deref(),
+                Some("x2goserver"),
+                "{name}"
+            );
         }
     }
 
