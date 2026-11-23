@@ -3,9 +3,9 @@
 Automates CyberPatriot security-hardening tasks on **Windows and Linux**, driven
 by the round's own README.
 
-This began as a port of a C# implementation, which is now frozen under
-[`../archive/csharp/`](../archive/csharp/). It did not reproduce that
-implementation faithfully: a number of logic bugs found during the port were
+This began as a port of a C# implementation, which has since been removed from
+the repo (it is in git history before commit `39e381d`). The port did not
+reproduce that implementation faithfully: a number of logic bugs found during the port were
 fixed rather than carried over, and those are listed under
 [Fixes made during the port](#fixes-made-during-the-port) — worth reading, since
 several are the kind of mistake that is easy to reintroduce.

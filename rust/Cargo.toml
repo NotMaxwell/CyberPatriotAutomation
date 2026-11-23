@@ -5,16 +5,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # =============================================================================
 #
-# Four crates, split along the line that already existed in the code:
+# Five crates, split along the line that already existed in the code:
 #
-#   pinnacle-core     the OS-agnostic half - README parsing, the remediation
-#                     ledger, the run log, the models, the console. Builds and
-#                     is fully tested on any host.
-#   pinnacle-windows  Win32 bindings, the *_ops wrappers, the hardening tables
-#                     and the Windows tasks.
-#   pinnacle-linux    the same shape for Linux: /etc, systemd, PAM, apt.
-#   pinnacle-cypat    the binary. Selects a platform crate by cfg and knows
-#                     nothing else about either.
+#   pinnacle-core       the OS-agnostic half - README parsing, the remediation
+#                       ledger, the run log, the models, the console, and the
+#                       run engine and session state the front ends share.
+#                       Builds and is fully tested on any host.
+#   pinnacle-windows    Win32 bindings, the *_ops wrappers, the hardening tables
+#                       and the Windows tasks.
+#   pinnacle-linux      the same shape for Linux: /etc, systemd, PAM, apt.
+#   pinnacle-cypat      the binary and the Linux web UI. Selects a platform
+#                       crate by cfg and knows nothing else about either.
+#   pinnacle-cypat-gui  the Windows desktop GUI (eframe/egui). Also builds on
+#                       Linux, for development only.
 #
 # The split is what makes a second operating system additive rather than a set
 # of `#[cfg]` branches threaded through every task. Two implementations kept in

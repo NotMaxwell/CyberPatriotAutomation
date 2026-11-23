@@ -9,10 +9,12 @@ images, driven by the round's own README. It targets **Windows and Linux**: one
 binary, one pipeline, one README parser, with a per-platform task set selected
 at compile time (see **The platform seam** below).
 
-**The tool is the Rust program under `rust/`.** A C# implementation lived
-alongside it until 2026-08-23 and is now frozen under `archive/csharp/`. Do not
-change it, do not mirror changes into it, and do not treat it as a second
-target — it is kept only as the reference the Rust port was written against.
+**The tool is the Rust program under `rust/`, and it is the only
+implementation.** It began as a port of a C# tool, which was frozen under
+`archive/csharp/` on 2026-08-23 and later removed from the tree (commit
+`39e381d`). Comments that say "the C# original" describe that history. If you
+need the old source, read it from git (`git show 39e381d^:archive/csharp/...`);
+never restore it.
 
 **Licensed under Apache 2.0 — see [LICENSE](../LICENSE).** `publish = false`
 in `Cargo.toml` is a choice, not a licence restriction: this is an application,
@@ -381,28 +383,29 @@ Windows silently normalised — all of them return success. Reporting those as
 fixed is the failure mode the run log exists to prevent.
 
 So the utilities above do not expose a bare write. Each mutating call goes
-through `Remediation.ApplyAsync` (`remediation::apply` in Rust), which:
+through `remediation::apply`, which:
 
 1. reads the current state, and returns early if it is already right —
    "already compliant" and "fixed" are different facts,
 2. performs the write,
 3. **reads the state again**, and records that second read as the proof.
 
-The result is one `FixRecord` per change, carrying `Target`, `Intent`, `Before`,
-`Action`, `Outcome` and `Evidence`. `RunLog.AppendLedger` renders them grouped by
-task. Outcomes are `Fixed`, `AlreadyCompliant`, `Failed`, `Unverified` and
-`Skipped`; `Unverified` means the write reported success and the machine
-disagrees, or could not be read back.
+The result is one `FixRecord` per change, carrying `task`, `target`, `intent`,
+`before`, `action`, `outcome` and `evidence`. `run_log::append_ledger` renders
+them grouped by task. Outcomes (`FixOutcome`) are `Fixed`, `AlreadyCompliant`,
+`Failed`, `Unverified` and `Skipped`; `Unverified` means the write reported
+success and the machine disagrees, or could not be read back.
 
-**When you add a remediation, route it through `Remediation` rather than calling
+**When you add a remediation, route it through `remediation` rather than calling
 the API directly.** If the result genuinely cannot be read back — setting a
-password, which Windows will not hand back — use `ApplyUnprovableAsync` and say
-why, rather than claiming a proof that was never taken. Audit-only tasks use
-`RecordFinding` so their conclusions land in the same ledger.
+password, which Windows will not hand back — use `remediation::apply_unprovable`
+and say why, rather than claiming a proof that was never taken. Audit-only tasks
+use `remediation::record_finding` so their conclusions land in the same ledger;
+`remediation::record_skipped` records a deliberate skip.
 
-Two rules for the `readState` callback:
+Two rules for the read-state callback:
 
-- Return `null`/`None` **only** when the state could not be read. "Absent" is a
+- Return `None` **only** when the state could not be read. "Absent" is a
   readable state and must be spelled as one, or a failed read will be recorded
   as a successful removal.
 - Read through the same code path the task's own verify step uses. Two parsers
@@ -421,9 +424,12 @@ pub fn set_readme_data(&mut self, data: ReadmeData) {
 }
 ```
 
-Register the call in `main.rs` too. A task with a `set_readme_data` that nobody
-invokes silently behaves as if no README was given — which is exactly how
-security hardening came to deny Remote Desktop on an image that required it.
+Then build the task with `with_readme!(MyTask)` in its `TaskSpec` row, not
+`plain!(MyTask)`. `with_readme!` is what calls `set_readme_data`; a task built
+with `plain!` silently behaves as if no README was given, which is exactly how
+security hardening once came to deny Remote Desktop on an image that required
+it. Set `needs_readme: true` if the task does nothing useful without one, so the
+front ends disable it when no README is loaded.
 
 Ask the README questions through `readme_services`, never by matching strings:
 `is_remote_desktop_required`, `is_critical`, `resolve`. Two tasks that parse the
@@ -431,17 +437,13 @@ same README differently is a bug class this codebase has already had twice.
 
 ### Progress reporting
 
-Only from code that is *not* already inside one. `main.rs` runs every task
-inside a progress bar; a task that opens a second one draws over it.
-
-```rust
-let bar = ProgressBar::new(items.len() as u64);
-for item in items {
-    // process
-    bar.inc(1);
-}
-bar.finish_and_clear();
-```
+Tasks don't own progress display. The engine emits a `RunEvent::TaskPhase` for
+each read / execute / verify phase, and each front end shows it: the CLI as a
+spinner per task under one `indicatif::MultiProgress`, the GUI and web UI in
+their live monitor. A terminal bar opened inside a task draws over the CLI's
+spinners and is invisible in the GUI and web UI. Report progress as output
+lines (`ui::markup_line`) instead, which reach every front end and the run log.
+Windows Security Hardening still opens its own `ProgressBar`; don't copy it.
 
 ### Error handling
 ```rust
@@ -476,7 +478,7 @@ match registry_ops::set_dword(key, name, value).await {
 - Compute a task's success from the *pre*-remediation state - "found nothing to
   fix" and "fixed everything" are both successes; "failed to fix" is not
 - Return a bare boolean from an operation that can fail for different reasons
-- Modify anything under `archive/` — the C# port is frozen
+- Restore or re-port the removed C# implementation; it is history, not a target
 - Accept a corpus snapshot diff without reading it
 - Disable Windows Update or Windows Defender (unless explicitly required)
 - Make changes without dry-run support

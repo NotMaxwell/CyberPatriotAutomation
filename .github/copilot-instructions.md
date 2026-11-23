@@ -4,9 +4,9 @@
 
 PinnacleCyPat: a security-hardening tool for CyberPatriot competition images,
 targeting **Windows and Linux**. One Rust implementation under `rust/`, built as
-a four-crate Cargo workspace. The retired C# port is frozen under
-`archive/csharp/` and must not be changed, mirrored into, or treated as a second
-target.
+a five-crate Cargo workspace. It began as a port of a C# tool that has since
+been removed from the repo; comments mentioning "the C# original" are history.
+Do not suggest restoring or re-porting it.
 
 **Apache 2.0 (see LICENSE).** Contributions are covered by Section 5 of the
 licence. Do not add code copied from elsewhere without checking its licence, and
@@ -21,7 +21,7 @@ do not suggest publishing to crates.io — the crates are deliberately marked
 | `crates/windows` | Win32 `native/`, `*_ops.rs`, `knowledge.rs`, `chocolatey.rs`, fifteen tasks | Windows only |
 | `crates/linux` | `file_ops.rs`, `systemd_ops.rs`, `user_ops.rs`, `apt.rs`, `knowledge.rs`, fifteen tasks | Linux only |
 | `crates/cli` | `main.rs`, `web/` (Linux web UI) | Names no OS; reads `Host::tasks()` |
-| `crates/gui` | Windows desktop GUI (eframe/egui) | Windows only; reads `Host::tasks()` |
+| `crates/gui` | Windows desktop GUI (eframe/egui) | Ships for Windows (also builds on Linux for development); reads `Host::tasks()` |
 
 **Do not suggest `#[cfg(windows)] / #[cfg(unix)]` arms of the same function**
 where a platform crate would do. Two implementations sitting next to each other

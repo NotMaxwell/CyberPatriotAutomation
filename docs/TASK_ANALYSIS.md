@@ -242,5 +242,5 @@ downloaded. The URL is unique per image and changes every competition, so it is
 read from the shortcut at run time and never hard-coded.
 
 > Note: shortcut resolution is implemented
-> (`app_config::find_readme_file`). The archived C# `AppConfig.FindReadmeFile`
+> (`app_config::find_readme_file`). The retired C# `AppConfig.FindReadmeFile`
 > only checks the literal paths above.

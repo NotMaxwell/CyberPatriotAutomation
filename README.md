@@ -388,17 +388,16 @@ from the command echo.
 
 ## Implementation
 
-One Rust program, `rust/`, built as a four-crate workspace: an OS-agnostic core,
-a crate per platform, and the binary. The README parser, the remediation ledger,
-the run log and the whole run pipeline live in the core and are identical on
-both platforms — adding Linux needed no change to any of them.
+One Rust program, `rust/`, built as a five-crate workspace: an OS-agnostic core,
+a crate per platform, the Windows GUI, and the binary. The README parser, the
+remediation ledger, the run log and the whole run pipeline live in the core and
+are identical on both platforms — adding Linux needed no change to any of them.
 
-A complete C# implementation lived alongside the Rust one until 2026-08-23 and is
-now frozen under [`archive/csharp/`](archive/csharp/) — it still builds and
-passes its 202 tests, but it is not shipped and not kept in step. Keeping two
-implementations at parity meant every change landed twice and drift was silent,
-which is also why the platform split is two crates rather than `#[cfg]` branches
-in one. [The archive README](archive/csharp/README.md) has the full reasoning.
+The tool began as a C# implementation, which ran alongside the Rust port until
+2026-08-23, was then frozen as an archive, and has since been removed from the
+repo (it remains in git history). Keeping two implementations at parity meant
+every change landed twice and drift was silent, which is also why the platform
+split is two crates rather than `#[cfg]` branches in one.
 
 ---
 
@@ -490,7 +489,6 @@ PinnacleCyPat/
 │       └── cli/                   pinnacle-cypat — the binary
 │           ├── main.rs            Flag parsing, bare-launch front end
 │           └── web/               The Linux web UI: server, api, controller, index.html
-├── archive/csharp/                The retired C# port, frozen
 ├── scripts/                       check.sh / check.ps1 / publish.sh
 └── docs/
     ├── ARCHITECTURE.md            Full reference — every task and utility

@@ -12,7 +12,7 @@ is the short version — start there if you only want to run the thing.
 
 - [1. What the tool is](#1-what-the-tool-is)
 - [2. Run pipeline](#2-run-pipeline)
-- [3. The implementation, and the archived one](#3-the-implementation-and-the-archived-one)
+- [3. The implementation, and where it came from](#3-the-implementation-and-where-it-came-from)
 - [3.1 The workspace, and the platform seam](#31-the-workspace-and-the-platform-seam)
 - [3.2 Linux](#32-linux)
 - [4. Tasks](#4-tasks)
@@ -117,24 +117,14 @@ instance.
 
 ---
 
-## 3. The implementation, and the archived one
+## 3. The implementation, and where it came from
 
-The tool is the Rust program under `rust/`. A complete C# implementation lived
-alongside it until 2026-08-23 and is now frozen under
-[`archive/csharp/`](../archive/csharp/), where it still builds and passes its
-202 tests but is not shipped, wired into any script, or kept in step.
-
-| | Rust (the tool) | C# (archived) |
-|---|---|---|
-| Location | `rust/` (a four-crate workspace, §3.1) | `archive/csharp/` |
-| Version | 1.20.0 | 1.8.0, frozen |
-| Framework | Rust 2024 | .NET 10 |
-| Win32 bindings | `windows` crate | CsWin32, from `NativeMethods.txt` |
-| Console UI | hand-rolled `ui` module | Spectre.Console |
-| HTML | `scraper` (html5ever) | regex |
-| Tests | 395 | 202, frozen |
-| Published size | ~2.7 MB | ~42 MB self-contained |
-| Startup | immediate, no runtime | JIT + runtime |
+The tool is the Rust program under `rust/`, a five-crate workspace (§3.1), and
+it is the only implementation. It began as a port of a C# implementation
+(.NET 10, CsWin32, Spectre.Console, regex-based HTML parsing, ~42 MB
+self-contained). The two ran side by side until 2026-08-23, when the C# one was
+frozen under `archive/csharp/`. It was later removed from the tree in commit
+`39e381d`.
 
 **Why one was retired.** Keeping two implementations at parity meant every
 behavioural change landed twice, in two languages, and drift was silent — it
@@ -143,22 +133,23 @@ before the archive: security hardening consulted the README before denying
 Remote Desktop in C# and did not in Rust, so on an image whose scenario required
 RDP the Rust port denied it while service management kept the service running,
 and every connection to it was refused. The same duplication tax applied to the
-knowledge tables, which is why they now live in one module (§5.9).
+knowledge tables, which is why they now live in one module (§5.8).
 
 The Rust port survived because it had already run ahead: an extra task
 (Software Updates), concurrent independent audits, and a scheduled-task audit
 that parses per-task records rather than matching keywords line by line. Those
 divergences are noted against each task below.
 
-The archive is kept as the reference the Rust port was written against. When
-Rust behaviour is unclear, that is what it was mirroring, and its comments
-record why several non-obvious decisions were made.
+Code comments that mention "the C# original" refer to that implementation. When
+Rust behaviour is unclear, that is what it was mirroring. Its source, and its
+comments recording why several non-obvious decisions were made, are still in
+git history: `git show 39e381d^:archive/csharp/<path>`.
 
 ---
 
 ## 3.1 The workspace, and the platform seam
 
-`rust/` is a Cargo workspace of four crates, split along the line that already
+`rust/` is a Cargo workspace of five crates, split along the line that already
 existed in the code:
 
 ```
@@ -1956,7 +1947,7 @@ committing; `check.ps1` is the same on Windows.
 
 ```bash
 cd rust
-cargo test --workspace                  # 395 tests
+cargo test --workspace                  # 510 tests
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 cargo build --release -p pinnacle-cypat

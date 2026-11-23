@@ -1,57 +1,27 @@
-﻿# .gitignore for C# .NET projects
+﻿# .gitignore for PinnacleCyPat. Cargo build output is ignored in rust/.gitignore.
 
-# Publish output. The shipping single-file EXE is committed at the repo root
-# instead, so the staging directories themselves stay out of the repo.
+# Publish output from scripts/publish.sh (publish-win-x64/, publish-linux-x64/).
+# Build output, never committed.
 publish/
 publish-*/
-!/PinnacleCyPat.exe
 
-# Build results
-bin/
-obj/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-*.vs/
-
-# Rider
+# Editors
 .idea/
-*.sln.iml
-
-# Visual Studio Code
 .vscode/
+*.swp
 
 # OS generated files
 .DS_Store
 Thumbs.db
 
-# Test results
-TestResults/
-*.TestResults/
-
 # Logs
 *.log
 
-# NuGet
-*.nupkg
-packages/
-.nuget/
-project.lock.json
-project.fragment.lock.json
-artifacts/
-
 # Others
-*.swp
 *.bak
 *.tmp
 *.old
 *.orig
-
-# Exclude large binaries and installers
-AMD/AMD-Software-Installer/AMD-Software-Adrenalin-Edition-24.12.1-MinimalSetup-241204_web/Bin64/
-MSI/MSI Center/Setup/
-AMD/Chipset_Installer/Chipset.exe
 
 # Claude Code per-machine permission cache; not project content.
 .claude/settings.local.json
