@@ -39,7 +39,7 @@ use async_trait::async_trait;
 /// created *afterwards*; existing accounts keep whatever they were made with,
 /// which on a competition image is `99999` - effectively never.
 const MAX_DAYS: u32 = 90;
-const MIN_DAYS: u32 = 7;
+const MIN_DAYS: u32 = 2;
 const WARN_DAYS: u32 = 14;
 
 pub struct AccountPermissionsTask {
@@ -62,6 +62,13 @@ impl Default for AccountPermissionsTask {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Does root have to be locked? Only when its shadow hash is empty, meaning
+/// anyone can log in as root with no password. A root that has a hash is
+/// presumably how the round is being run, and one already locked needs nothing.
+pub fn root_needs_lock(password_state: Option<&str>) -> bool {
+    password_state == Some("no password")
 }
 
 /// Accounts sharing uid 0 with root.
@@ -485,7 +492,11 @@ impl Task for AccountPermissionsTask {
             }
         }
 
-        result.items_attempted = (passwordless.len() + humans.len() + sudo_entries.len()) as i32;
+        let lock_root = root_needs_lock(user_ops::password_state("root").await.as_deref());
+
+        result.items_attempted =
+            (usize::from(lock_root) + passwordless.len() + humans.len() + sudo_entries.len())
+                as i32;
 
         if self.dry_run {
             for name in &passwordless {
@@ -493,6 +504,9 @@ impl Task for AccountPermissionsTask {
                     "[cyan]Would lock: {} [dim](no password set)[/][/]",
                     ui::escape(name)
                 ));
+            }
+            if lock_root {
+                ui::markup_line("[cyan]Would lock: root [dim](no password set)[/][/]");
             }
             for (path, entries) in &sudo_entries {
                 ui::markup_line(&format!(
@@ -512,6 +526,15 @@ impl Task for AccountPermissionsTask {
         }
 
         let mut failures: Vec<String> = Vec::new();
+        if lock_root {
+            match user_ops::lock("root", "root had no password at all").await {
+                Ok(()) => {
+                    result.items_succeeded += 1;
+                    ui::markup_line("[green]✓ Locked: root [dim](had no password)[/][/]");
+                }
+                Err(e) => failures.push(format!("root: {e}")),
+            }
+        }
         for name in &passwordless {
             // Locked, not given a password. A generated password would let the
             // account keep working with a credential nobody has been told, and
@@ -654,6 +677,20 @@ AutomaticLogin=perry
 
     /// A second uid 0 account is a superuser `sudo` never logs. It is the
     /// highest-value finding this task produces.
+    #[test]
+    fn root_is_locked_only_when_it_has_no_password() {
+        assert!(root_needs_lock(Some("no password")));
+        assert!(!root_needs_lock(Some("set")));
+        assert!(!root_needs_lock(Some("locked")));
+        // An unreadable shadow file is not evidence of anything.
+        assert!(!root_needs_lock(None));
+    }
+
+    #[test]
+    fn password_ageing_minimum_is_inside_the_scored_range() {
+        assert!((1..=3).contains(&MIN_DAYS));
+    }
+
     #[test]
     fn a_second_uid_zero_account_is_found() {
         let accounts = vec![

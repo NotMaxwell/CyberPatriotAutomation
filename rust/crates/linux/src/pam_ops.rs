@@ -296,6 +296,233 @@ pub async fn enable_pwquality() -> Result<(), String> {
     .await
 }
 
+// --- argument edits ----------------------------------------------------------
+//
+// `pam-auth-update` regenerates `common-*` from the profiles, and the stock
+// `unix` profile carries `nullok`, so these edits must run after every call to
+// it. They change arguments on a line and never move one, so the ordering that
+// [`auth_order_is_safe`] checks cannot be disturbed by them.
+
+/// Apply `edit` to every active line that names `module`, leaving comments,
+/// other lines, whitespace and the file's trailing newline exactly as they were.
+fn map_module_lines(text: &str, module: &str, edit: impl Fn(&str) -> String) -> String {
+    text.split_inclusive('\n')
+        .map(|raw| {
+            let (line, end) = match raw.strip_suffix('\n') {
+                Some(l) => (l, "\n"),
+                None => (raw, ""),
+            };
+            if file_ops::is_active(line) && line.split_whitespace().any(|w| w == module) {
+                format!("{}{end}", edit(line))
+            } else {
+                raw.to_string()
+            }
+        })
+        .collect()
+}
+
+/// Split a line into alternating whitespace and non-whitespace pieces.
+fn pieces(line: &str) -> Vec<(bool, &str)> {
+    let mut out = Vec::new();
+    let mut rest = line;
+    while !rest.is_empty() {
+        let is_space = rest.starts_with(char::is_whitespace);
+        let len = rest
+            .find(|c: char| c.is_whitespace() != is_space)
+            .unwrap_or(rest.len());
+        let (piece, tail) = rest.split_at(len);
+        out.push((is_space, piece));
+        rest = tail;
+    }
+    out
+}
+
+/// Rebuild a line, calling `keep` on each word: `Some(w)` keeps (or replaces)
+/// it with the whitespace before it, `None` drops it and that whitespace.
+fn rebuild(line: &str, mut word: impl FnMut(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut space = "";
+    for (is_space, piece) in pieces(line) {
+        if is_space {
+            space = piece;
+        } else if let Some(w) = word(piece) {
+            out.push_str(space);
+            out.push_str(&w);
+            space = "";
+        } else {
+            space = "";
+        }
+    }
+    out
+}
+
+/// Remove `nullok` and `nullok_secure` from every active `pam_unix` line.
+///
+/// `nullok` lets an account with an empty password log in; the stock `unix`
+/// profile puts it back on every `pam-auth-update`.
+pub fn strip_nullok(text: &str) -> String {
+    map_module_lines(text, "pam_unix.so", |line| {
+        rebuild(line, |w| {
+            (w != "nullok" && w != "nullok_secure").then(|| w.to_string())
+        })
+    })
+}
+
+/// Does an active `pam_unix` line still carry `nullok` or `nullok_secure`?
+pub fn has_nullok(text: &str) -> bool {
+    text.lines()
+        .filter(|l| file_ops::is_active(l))
+        .filter(|l| l.split_whitespace().any(|w| w == "pam_unix.so"))
+        .any(|l| {
+            l.split_whitespace()
+                .any(|w| w == "nullok" || w == "nullok_secure")
+        })
+}
+
+/// Make every active line for `module` (e.g. `pam_unix.so`) carry
+/// `key=value`: an existing `key=` is replaced (a repeat is dropped), otherwise
+/// it is appended. Lines for other modules and comments are untouched, and a
+/// module that is not in the file is not added.
+pub fn set_module_arg(text: &str, module: &str, key: &str, value: &str) -> String {
+    let prefix = format!("{key}=");
+    let wanted = format!("{key}={value}");
+    map_module_lines(text, module, |line| {
+        let mut placed = false;
+        let mut out = rebuild(line, |w| {
+            if w.starts_with(&prefix) {
+                if placed {
+                    None
+                } else {
+                    placed = true;
+                    Some(wanted.clone())
+                }
+            } else {
+                Some(w.to_string())
+            }
+        });
+        if !placed {
+            out.push(' ');
+            out.push_str(&wanted);
+        }
+        out
+    })
+}
+
+/// The value of `key=` on each active line for `module` (`None` where absent).
+fn module_arg(text: &str, module: &str, key: &str) -> Vec<Option<String>> {
+    let prefix = format!("{key}=");
+    text.lines()
+        .filter(|l| file_ops::is_active(l))
+        .filter(|l| l.split_whitespace().any(|w| w == module))
+        .map(|l| {
+            l.split_whitespace()
+                .find_map(|w| w.strip_prefix(&prefix))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// `common-password` with the length and history arguments the scored checks
+/// read: `minlen` on `pam_pwquality` and `pam_unix`, `remember` on `pam_unix`.
+pub fn with_password_args(text: &str, minlen: u32, remember: u32) -> String {
+    let text = set_module_arg(text, "pam_pwquality.so", "minlen", &minlen.to_string());
+    let text = set_module_arg(&text, "pam_unix.so", "minlen", &minlen.to_string());
+    set_module_arg(&text, "pam_unix.so", "remember", &remember.to_string())
+}
+
+/// Does every `pam_pwquality`/`pam_unix` line in `common-password` carry the
+/// arguments [`with_password_args`] sets? A module that is absent is not
+/// required to be there.
+pub fn password_args_present(text: &str, minlen: u32, remember: u32) -> bool {
+    let (m, r) = (Some(minlen.to_string()), Some(remember.to_string()));
+    module_arg(text, "pam_pwquality.so", "minlen")
+        .iter()
+        .all(|v| *v == m)
+        && module_arg(text, "pam_unix.so", "minlen")
+            .iter()
+            .all(|v| *v == m)
+        && module_arg(text, "pam_unix.so", "remember")
+            .iter()
+            .all(|v| *v == r)
+}
+
+/// Rewrite `file` through `transform`, proving it with `compliant` over a
+/// re-read. Backed up first and written atomically, like `file_ops::set`.
+async fn edit_file(
+    file: &'static str,
+    intent: &str,
+    action: &str,
+    transform: impl Fn(&str) -> String,
+    compliant: impl Fn(&str) -> bool + Copy,
+) -> Result<(), String> {
+    remediation::apply(
+        file,
+        intent,
+        || async move {
+            let text = tokio::fs::read_to_string(file).await.ok()?;
+            Some(if compliant(&text) {
+                "compliant".to_string()
+            } else {
+                "not compliant".to_string()
+            })
+        },
+        |state| state == "compliant",
+        action,
+        || async {
+            let original = tokio::fs::read_to_string(file)
+                .await
+                .map_err(|e| format!("could not read {file}: {e}"))?;
+            let updated = transform(&original);
+            if updated == original {
+                return Ok(());
+            }
+            file_ops::back_up(file, &original).await?;
+            file_ops::write_atomically(file, &updated).await
+        },
+    )
+    .await
+}
+
+/// Remove `nullok` from `common-auth` and `common-password`. Run it after the
+/// last `pam-auth-update`, which restores it.
+pub async fn remove_nullok() -> Result<(), String> {
+    let mut failures = Vec::new();
+    for file in [COMMON_AUTH, COMMON_PASSWORD] {
+        if !tokio::fs::try_exists(file).await.unwrap_or(false) {
+            continue;
+        }
+        if let Err(e) = edit_file(
+            file,
+            "no pam_unix line allows an empty password (nullok removed)",
+            "strip nullok and nullok_secure from the pam_unix lines",
+            strip_nullok,
+            |t| !has_nullok(t),
+        )
+        .await
+        {
+            failures.push(e);
+        }
+    }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+/// Put `minlen` and `remember` on the `common-password` lines. Run it after the
+/// last `pam-auth-update`, which regenerates the file without them.
+pub async fn ensure_password_args(minlen: u32, remember: u32) -> Result<(), String> {
+    edit_file(
+        COMMON_PASSWORD,
+        &format!("minlen={minlen} on pam_pwquality and pam_unix, remember={remember} on pam_unix"),
+        "add minlen/remember to the password lines",
+        move |t| with_password_args(t, minlen, remember),
+        move |t| password_args_present(t, minlen, remember),
+    )
+    .await
+}
+
 async fn install(
     profiles: &[Profile],
     file: &str,
@@ -481,6 +708,102 @@ password\trequired\tpam_permit.so
             Some(12)
         );
         assert_eq!(history_depth("password requisite pam_deny.so\n"), None);
+    }
+
+    const STOCK_PASSWORD: &str = "\
+# here are the per-package modules
+password\trequisite\t\t\tpam_pwquality.so retry=3
+password\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok try_first_pass yescrypt
+password\trequisite\t\t\tpam_deny.so
+";
+
+    #[test]
+    fn nullok_is_stripped_from_pam_unix_only() {
+        let text = "auth\t[success=1 default=ignore]\tpam_unix.so nullok try_first_pass\nauth\toptional\tpam_foo.so nullok\n# auth pam_unix.so nullok\n";
+        let out = strip_nullok(text);
+        assert_eq!(
+            out,
+            "auth\t[success=1 default=ignore]\tpam_unix.so try_first_pass\nauth\toptional\tpam_foo.so nullok\n# auth pam_unix.so nullok\n"
+        );
+        assert!(has_nullok(text));
+        assert!(!has_nullok(&out));
+    }
+
+    #[test]
+    fn nullok_secure_and_a_trailing_nullok_are_stripped() {
+        let out = strip_nullok(
+            "auth sufficient pam_unix.so nullok_secure\nauth required pam_unix.so try_first_pass nullok",
+        );
+        assert_eq!(
+            out,
+            "auth sufficient pam_unix.so\nauth required pam_unix.so try_first_pass"
+        );
+    }
+
+    #[test]
+    fn stripping_nullok_keeps_the_order_safe() {
+        assert!(has_nullok(AUTH_ENABLED));
+        let out = strip_nullok(AUTH_ENABLED);
+        assert!(auth_order_is_safe(&out));
+        assert!(!has_nullok(&out));
+    }
+
+    #[test]
+    fn set_module_arg_replaces_or_appends() {
+        let out = set_module_arg(STOCK_PASSWORD, "pam_pwquality.so", "minlen", "14");
+        assert!(out.contains("pam_pwquality.so retry=3 minlen=14\n"));
+        let again = set_module_arg(&out, "pam_pwquality.so", "minlen", "16");
+        assert!(again.contains("retry=3 minlen=16\n"));
+        assert!(!again.contains("minlen=14"));
+    }
+
+    #[test]
+    fn set_module_arg_touches_only_active_lines_for_that_module() {
+        let out = set_module_arg(STOCK_PASSWORD, "pam_unix.so", "remember", "5");
+        assert!(out.contains("yescrypt remember=5\n"));
+        assert!(out.contains("# here are the per-package modules\n"));
+        assert!(out.contains("pam_deny.so\n"));
+        let commented = "# password requisite pam_unix.so\n";
+        assert_eq!(
+            set_module_arg(commented, "pam_unix.so", "remember", "5"),
+            commented
+        );
+        // A module that is not there is not invented.
+        let deny = "password requisite pam_deny.so\n";
+        assert_eq!(set_module_arg(deny, "pam_unix.so", "minlen", "14"), deny);
+    }
+
+    #[test]
+    fn set_module_arg_drops_a_repeated_key() {
+        let out = set_module_arg(
+            "password required pam_unix.so minlen=8 minlen=9 sha512\n",
+            "pam_unix.so",
+            "minlen",
+            "14",
+        );
+        assert_eq!(out, "password required pam_unix.so minlen=14 sha512\n");
+    }
+
+    #[test]
+    fn password_args_land_on_both_modules_and_keep_the_order_safe() {
+        let out = with_password_args(PASSWORD_ENABLED, 14, 5);
+        assert!(!password_args_present(PASSWORD_ENABLED, 14, 5));
+        assert!(password_args_present(&out, 14, 5));
+        assert!(out.contains("pam_pwquality.so retry=3 minlen=14"));
+        assert!(out.contains(
+            "pam_unix.so obscure use_authtok try_first_pass yescrypt minlen=14 remember=5"
+        ));
+        assert!(password_order_is_safe(&out));
+        assert_eq!(history_depth(&out), Some(5));
+        assert_eq!(with_password_args(&out, 14, 5), out, "not idempotent");
+    }
+
+    #[test]
+    fn password_args_without_pwquality_still_cover_pam_unix() {
+        let text = "password [success=1 default=ignore] pam_unix.so obscure yescrypt\n";
+        let out = with_password_args(text, 14, 5);
+        assert!(password_args_present(&out, 14, 5));
+        assert!(!out.contains("pam_pwquality"));
     }
 
     #[test]

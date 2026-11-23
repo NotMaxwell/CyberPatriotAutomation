@@ -516,7 +516,7 @@ pub const HARDENING_SETTINGS: &[Setting] = &[
         path: LOGIN_DEFS,
         style: Style::Space,
         key: "PASS_MIN_DAYS",
-        value: "7",
+        value: "2",
         why: "stops a user cycling straight back to the old password",
     },
     Setting {

@@ -243,7 +243,7 @@ impl Task for PasswordPolicyTask {
         let mut result = TaskResult {
             task_name: self.name.clone(),
             success: true,
-            items_attempted: PWQUALITY.len() as i32 + 3,
+            items_attempted: PWQUALITY.len() as i32 + 5,
             ..Default::default()
         };
 
@@ -270,6 +270,14 @@ impl Task for PasswordPolicyTask {
                 "[cyan]Would enable pam_faillock (deny={DENY}, unlock_time={UNLOCK_SECONDS}) \
                  and pam_pwhistory (remember={REMEMBER}) through pam-auth-update, \
                  where they are not already in effect[/]"
+            ));
+            // Read-only in a dry run: the ledger shows what would change.
+            let _ = pam_ops::remove_nullok().await;
+            let _ = pam_ops::ensure_password_args(MIN_LEN, REMEMBER).await;
+            ui::markup_line(&format!(
+                "[cyan]Would remove nullok from the pam_unix lines and put minlen={MIN_LEN} and \
+                 remember={REMEMBER} on the common-password lines, after the last \
+                 pam-auth-update[/]"
             ));
             result.message = "DRY RUN: no password policy was changed.".to_string();
             return result;
@@ -424,6 +432,32 @@ impl Task for PasswordPolicyTask {
             }
         }
 
+        // --- after the last pam-auth-update ----------------------------------
+        //
+        // The stock `unix` profile carries `nullok`, and pam-auth-update
+        // regenerates `common-password` without the arguments below, so both
+        // are applied only now that nothing above will run it again.
+        match pam_ops::remove_nullok().await {
+            Ok(()) => result.items_succeeded += 1,
+            Err(e) => {
+                ui::markup_line(&format!(
+                    "[yellow]⚠ nullok not removed: {}[/]",
+                    ui::escape(&e)
+                ));
+                failures.push(format!("nullok: {e}"));
+            }
+        }
+        match pam_ops::ensure_password_args(MIN_LEN, REMEMBER).await {
+            Ok(()) => result.items_succeeded += 1,
+            Err(e) => {
+                ui::markup_line(&format!(
+                    "[yellow]⚠ minlen/remember not set on the PAM lines: {}[/]",
+                    ui::escape(&e)
+                ));
+                failures.push(format!("PAM minlen/remember: {e}"));
+            }
+        }
+
         if backdoors > 0 {
             failures.push(format!(
                 "{backdoors} PAM file(s) let a login through without a password; see the ledger"
@@ -456,6 +490,9 @@ impl Task for PasswordPolicyTask {
             .await
             .unwrap_or_default();
         if !pam_ops::auth_order_is_safe(&auth)
+            || pam_ops::has_nullok(&auth)
+            || pam_ops::has_nullok(&password)
+            || !pam_ops::password_args_present(&password, MIN_LEN, REMEMBER)
             || pam_ops::history_depth(&password).is_none_or(|r| r < REMEMBER)
         {
             return false;
@@ -555,6 +592,17 @@ auth    requisite                       pam_deny.so
         assert!(!minlen_is_effective(with, Some("8")));
         assert!(!minlen_is_effective(with, None));
         assert!(!minlen_is_effective(with, Some("abc")));
+    }
+
+    /// The PAM-line arguments are pure text edits, so the task's constants can
+    /// be checked against them without touching `/etc/pam.d`.
+    #[test]
+    fn the_pam_arguments_use_the_task_constants() {
+        let stock = "password requisite pam_pwquality.so retry=3\npassword [success=1 default=ignore] pam_unix.so obscure yescrypt\n";
+        let out = pam_ops::with_password_args(stock, MIN_LEN, REMEMBER);
+        assert!(out.contains(&format!("pam_pwquality.so retry=3 minlen={MIN_LEN}")));
+        assert!(out.contains(&format!("minlen={MIN_LEN} remember={REMEMBER}")));
+        assert!(pam_ops::password_args_present(&out, MIN_LEN, REMEMBER));
     }
 
     #[test]
