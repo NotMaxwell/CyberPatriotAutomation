@@ -12,6 +12,7 @@
 
 pub mod account_permissions;
 pub mod audit_policy;
+pub mod backdoor_listeners;
 pub mod dns_settings_audit;
 pub mod file_permissions_audit;
 pub mod firewall;
@@ -28,6 +29,7 @@ pub mod user_management;
 
 pub use account_permissions::AccountPermissionsTask;
 pub use audit_policy::AuditPolicyTask;
+pub use backdoor_listeners::BackdoorListenersTask;
 pub use dns_settings_audit::DnsSettingsAuditTask;
 pub use file_permissions_audit::FilePermissionsAuditTask;
 pub use firewall::FirewallTask;
