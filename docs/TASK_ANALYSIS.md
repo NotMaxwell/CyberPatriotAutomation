@@ -88,6 +88,7 @@
 | `CLAUDE.md` | AI assistant instructions (Claude) |
 | `.github/copilot-instructions.md` | GitHub Copilot instructions |
 | `TASK_ANALYSIS.md` | This file - task roadmap |
+| `STIG_ROADMAP.md` | Planned: DISA STIG traceability and gap-filling |
 | `LICENSE` | Apache License 2.0 |
 
 ---
@@ -229,6 +230,13 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 - [ ] Process analysis with Process Explorer
 - [ ] Network monitoring with TCPView
 - [ ] Registry analysis for persistence mechanisms
+
+### STIG Alignment — see [STIG_ROADMAP.md](STIG_ROADMAP.md)
+- [ ] S1: STIG importer (DISA XCCDF → `docs/stig/<os>.csv`, one status per rule)
+- [ ] S2: STIG IDs on knowledge-table entries and in the remediation ledger, with table tests
+- [ ] S3: `--stig-report` audit-only task
+- [ ] S4: Close gaps — Windows 11, Ubuntu 22.04 STIG on Mint 21, Server 2019/2022, Windows 10
+
 
 ---
 
