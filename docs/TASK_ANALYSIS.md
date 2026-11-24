@@ -219,7 +219,7 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 - [ ] Image steganography detection
 
 ### IIS/Web Server
-- [ ] Disable IIS features (already partially covered in Security Hardening)
+- [ ] Disable IIS features (partial: Service Management disables `W3SVC` and `IISADMIN`; the IIS Windows features themselves are not removed)
 - [ ] Remove web server components if not needed
 
 ### Scheduled Tasks
@@ -229,7 +229,7 @@ These tasks were identified from the Windows Checklist and waffleWindowsScript b
 ### Advanced
 - [ ] Process analysis with Process Explorer
 - [ ] Network monitoring with TCPView
-- [ ] Registry analysis for persistence mechanisms
+- [ ] Registry analysis for persistence mechanisms (partial: Security Hardening logs `Win32_StartupCommand` and checks that the `Run`/`RunOnce` keys exist, but judges no entry)
 
 ### STIG Alignment — see [STIG_ROADMAP.md](STIG_ROADMAP.md)
 - [ ] S1: STIG importer (DISA XCCDF → `docs/stig/<os>.csv`, one status per rule)

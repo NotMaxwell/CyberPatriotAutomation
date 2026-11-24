@@ -2,8 +2,9 @@
 
 Plan for replacing the terminal menu (`--tui`) with a graphical front end.
 
-**Status (1.23.0):** M0 to M6 are done; M7 (release) is in progress. The terminal
-menu is gone. The front ends went further than this plan: a light theme, a
+**Status (1.24.0):** M0 to M6 are done. M7 shipped in 1.23.0 (GUI exe in
+`publish.sh`, version bump, CHANGELOG); the one open item is full runs on real
+images. The terminal menu is gone. The front ends went further than this plan: a light theme, a
 README-locations picker on launch, a workflow gated by the dry run, **every**
 README field editable (the plan had only the lists), and a file browser in both
 front ends. The checkboxes below record what the plan asked for; the code is the
@@ -104,13 +105,13 @@ Only once M3 and M5 cover everything the menu does.
 - [x] `RUN.bat` / `RUN.ps1` launch the GUI.
 - [x] README: replace "The menu" section and the `--tui` lines in Quick start and Flags with a "The GUI" section. Update `docs/ARCHITECTURE.md` and `docs/CLAUDE.md`.
 
-## M7 — Release (about 2–3 days) — in progress
+## M7 — Release — shipped in 1.23.0; image runs outstanding
 
-The lead is doing this: launchers (`RUN.bat`, `RUN.ps1` launch the GUI; `RUN.sh` defaults to `--web`), the version bump, the CHANGELOG and `publish.sh`.
+The lead did this: launchers (`RUN.bat`, `RUN.ps1` launch the GUI; `RUN.sh` defaults to `--web`), the version bump, the CHANGELOG and `publish.sh`.
 
-- [ ] `publish.sh` builds `pinnacle-cypat-gui.exe` next to the CLI exe.
-- [ ] Version bump (minor) and a CHANGELOG entry.
-- [ ] Full runs on Windows 10, Server, and Ubuntu 22.04 images. Keep the run logs in `ReferenceMaterial/`.
+- [x] `publish.sh` builds `pinnacle-cypat-gui.exe` next to the CLI exe.
+- [x] Version bump (minor) and a CHANGELOG entry (1.23.0).
+- [ ] Full runs on Windows 10, Server, and Ubuntu 22.04 images. Keep the run logs in `ReferenceMaterial/`. The only run logs there are still Windows v1.8.0; see item 3 below for Linux.
 
 ---
 
@@ -201,8 +202,15 @@ Windows has `RUN.bat` / `RUN.ps1`. Linux has nothing equivalent. Add a
 
 ### 7. Prohibited Media could delete `/opt/CyberPatriot` files — FIXED in 1.20.1
 
-### 8. Only one Linux answer key
+### 8. Only one Linux answer key — FIXED in 1.24.0
 
-`crates/linux/tests/answer_key.rs` encodes the Ubuntu 22.04 Exhibition Round.
-Add more Ubuntu READMEs to `crates/core/tests/corpus/` as they become available.
+`crates/linux/tests/` now has four: `answer_key.rs` (Ubuntu 22.04 Exhibition
+Round), `answer_key_practice_round.rs` (a practice round's scoring report, no
+README), `answer_key_ubuntu22_training2.rs` and `answer_key_mint21_training2.rs`
+(CP18 Training Round 2). Windows has two in `crates/windows/tests/` (Windows 11
+and Server 2019, Training Round 2).
+
+Still open: only the Exhibition Round README is in `crates/core/tests/corpus/`
+(`06-ubuntu-22-exhibition-round.html`). Add the Training Round 2 READMEs there
+when copies are available.
 The parser is where the past Linux point losses came from (Perl, `firesidegirls`).
